@@ -68,6 +68,10 @@
   where block_on would panic), so the socket is closed before `stop()`
   returns — which is also what the real app needs when the user toggles
   the proxy off and on quickly.
+- FIX (same version, run #16 red): cargo test passed (22 passed) again,
+  but clippy failed with one lint: `let _ = rt.block_on(...)` — block_on
+  returns `()` (unit), so binding it is a `let_unit_value` error. Dropped
+  the `let _ =`. One line.
 
 ## 0.0.3 — Rust models, config, CIDR
 

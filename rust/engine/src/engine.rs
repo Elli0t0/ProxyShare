@@ -399,7 +399,7 @@ fn wait_for_task(task: JoinHandle<()>) {
         return; // Inside a runtime: the task unwinds on its own.
     }
     if let Ok(rt) = runtime() {
-        let _ = rt.block_on(async {
+        rt.block_on(async {
             let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
         });
     }
