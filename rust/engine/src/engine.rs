@@ -115,13 +115,12 @@ fn now_ms() -> u64 {
 }
 
 /// True when the address is private, loopback or link-local.
+/// (IpAddr itself has no is_private: the check is per family.)
 fn is_private_or_local(ip: &IpAddr) -> bool {
-    ip.is_private()
-        || ip.is_loopback()
-        || match ip {
-            IpAddr::V4(v4) => v4.is_link_local(),
-            IpAddr::V6(v6) => v6.is_unicast_link_local(),
-        }
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_loopback() || v6.is_unicast_link_local(),
+    }
 }
 
 /// A client may connect when it is in `allowed_clients` (or when that
@@ -257,16 +256,11 @@ impl Engine {
         }
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let listener = std::sync::Arc::new(listener);
+        let listener_for_task = std::sync::Arc::clone(&listener);
         let engine = std::sync::Arc::clone(self);
         let task_config = config.clone();
         let accept = rt.spawn(async move {
-            accept_loop(
-                engine,
-                std::sync::Arc::clone(&listener),
-                task_config,
-                shutdown_rx,
-            )
-            .await;
+            accept_loop(engine, listener_for_task, task_config, shutdown_rx).await;
         });
         inner.listener_socket = Some(listener);
         inner.accept_task = Some(accept);
@@ -294,7 +288,10 @@ impl Engine {
                 task.abort();
             }
             inner.listener_socket = None;
-            for (_, record) in inner.connections.drain() {
+            // Drain first, then add the counters: iterating the drain
+            // borrows the map, and the totals live in the same struct.
+            let drained: Vec<_> = inner.connections.drain().map(|(_, r)| r).collect();
+            for record in drained {
                 inner.total_up += record.up.load(Ordering::Relaxed);
                 inner.total_down += record.down.load(Ordering::Relaxed);
             }
@@ -457,7 +454,8 @@ async fn handle_connection(
 // reused; 0 is never a valid handle.
 // ---------------------------------------------------------------------------
 
-static ENGINES: Mutex<HashMap<i64, std::sync::Arc<Engine>>> = Mutex::new(HashMap::new());
+static ENGINES: std::sync::LazyLock<Mutex<HashMap<i64, std::sync::Arc<Engine>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
 
 fn lock_table() -> MutexGuard<'static, HashMap<i64, std::sync::Arc<Engine>>> {

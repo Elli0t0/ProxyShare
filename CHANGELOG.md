@@ -31,6 +31,14 @@
   stop is idempotent, start after stop rebinds); snapshot reflects the
   state; a SOCKS5 connection reports handler_missing and closes; a
   disabled protocol closes quietly with no event.
+- FIX (same version, run #12 red): cargo test failed to compile with 5
+  errors in engine.rs — `IpAddr` has no `is_private` (it is on
+  `Ipv4Addr`/`Ipv6Addr`, so the check is now per family);
+  `HashMap::new` is not const, so the `ENGINES` static is now a
+  `LazyLock`; an `async move` block captures the whole `listener` Arc,
+  so the task's clone is made before the spawn; and draining the
+  connection map while adding its counters to the same struct is two
+  mutable borrows, so the drain is collected first.
 
 ## 0.0.3 — Rust models, config, CIDR
 
