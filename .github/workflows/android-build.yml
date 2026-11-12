@@ -28,8 +28,27 @@ jobs:
         with:
           gradle-version: "9.5.0"
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+          components: clippy
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version "9.5.0"
+
+      - name: Cargo test (host)
+        if: hashFiles('rust/Cargo.toml') != ''
+        working-directory: rust
+        run: cargo test
+
+      - name: Cargo clippy
+        if: hashFiles('rust/Cargo.toml') != ''
+        working-directory: rust
+        run: cargo clippy -- -D warnings
 
       - name: Prepare signing
         id: prepare_signing
@@ -75,6 +94,19 @@ jobs:
 
       - name: Build release APK
         run: ./gradlew assembleRelease -PVERSION_CODE=$GITHUB_RUN_NUMBER
+
+      - name: Check native libs in debug APK
+        if: hashFiles('rust/engine/Cargo.toml') != ''
+        run: |
+          unzip -l app/build/outputs/apk/debug/*.apk | grep -q "lib/arm64-v8a/libproxyshare_engine.so"
+          unzip -l app/build/outputs/apk/debug/*.apk | grep -q "lib/x86_64/libproxyshare_engine.so"
+
+      - name: Check native libs in release APK
+        if: hashFiles('rust/engine/Cargo.toml') != ''
+        run: |
+          unzip -l app/build/outputs/apk/release/*.apk | grep -q "lib/arm64-v8a/libproxyshare_engine.so"
+          unzip -l app/build/outputs/apk/release/*.apk | grep -q "lib/armeabi-v7a/libproxyshare_engine.so"
+          unzip -l app/build/outputs/apk/release/*.apk | grep -q "lib/x86_64/libproxyshare_engine.so"
 
       - name: Upload signing keystore (one-time key only)
         if: steps.prepare_signing.outputs.key_generated == 'true'
