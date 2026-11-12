@@ -11,7 +11,8 @@ records metadata: client IP, target host:port, protocol, byte counts.
 
 ## Layout
 
-- `core/` — proxy engine, plain Kotlin, no Android imports.
+- `rust/engine/` — proxy engine, a Rust crate (cdylib, `proxyshare_engine`).
+- `engine/` — thin JNI wrapper only. No proxy logic in Kotlin.
 - `service/` — Android foreground service hosting the engine.
 - `data/` — settings persistence (DataStore).
 - `ui/` — screens, theme, components.

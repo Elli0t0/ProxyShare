@@ -1,13 +1,23 @@
 # Changelog
 
-## 0.1.0 — Project scaffold
+## 0.0.1 — Kotlin skeleton
 
-- Repo + Gradle project: AGP 9.3.1, Kotlin 2.2.10, Compose BOM 2024.09.00,
-  minSdk 26, targetSdk 36, package `com.example.proxyshare`.
-- Layout `core/` / `service/` / `data/` / `ui/` (screens, theme, components).
-- Minimal home screen, Material 3 dynamic color (Android 12+), light/dark/
-  system theme, RTL, strings in English + Persian.
-- DataStore + Coroutines + lifecycle-viewmodel dependencies ready.
-- CI builds the debug APK; persistent debug signing via `PROXYSHARE_*`
-  secrets (workflow generates a one-time key + artifact until they exist).
-- No proxy engine yet — that is Step 1.
+- Folders engine/ service/ data/ ui/theme ui/components ui/screens; no core/
+  folder (its empty placeholder is removed separately — the push tool cannot
+  delete files).
+- Dependencies only: Compose BOM, material3, activity-compose,
+  lifecycle-runtime-compose, kotlinx-coroutines-android, datastore-preferences.
+- ProxyShareTheme: System/Light/Dark, dynamic color on Android 12+, fallback
+  palette below that, large rounded shapes, edge-to-edge.
+- MainActivity with a centered placeholder from strings; manifest
+  supportsRtl=true, enableOnBackInvokedCallback=true; strings in English +
+  Persian.
+- Release: isMinifyEnabled + isShrinkResources, proguard-android-optimize.txt,
+  locale filter en/fa, packaging excludes, Kotlin -Xno-param-assertions /
+  -Xno-call-assertions / -Xno-receiver-assertions, -assumenosideeffects for
+  Log.v/d in proguard-rules.pro.
+- Gradle wrapper properties (9.5.0); CI generates the wrapper scripts + jar
+  with `gradle wrapper` and verifies ./gradlew assembleDebug +
+  ./gradlew assembleRelease.
+- No proxy engine yet — that is a later step. No Rust crate in this step, so
+  the cargo test / clippy checks apply from the step that adds rust/engine.

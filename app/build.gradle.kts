@@ -4,8 +4,8 @@ plugins {
 }
 
 val versionMajor = (project.findProperty("VERSION_MAJOR") as? String)?.toInt() ?: 0
-val versionMinor = (project.findProperty("VERSION_MINOR") as? String)?.toInt() ?: 1
-val versionPatch = (project.findProperty("VERSION_PATCH") as? String)?.toInt() ?: 0
+val versionMinor = (project.findProperty("VERSION_MINOR") as? String)?.toInt() ?: 0
+val versionPatch = (project.findProperty("VERSION_PATCH") as? String)?.toInt() ?: 1
 val appVersionName = "$versionMajor.$versionMinor.$versionPatch"
 // versionCode comes from CI: -PVERSION_CODE=$GITHUB_RUN_NUMBER. Local builds use 1.
 val appVersionCode = (project.findProperty("VERSION_CODE") as? String)?.toIntOrNull() ?: 1
@@ -56,9 +56,17 @@ android {
             }
         }
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
+    }
+
+    androidResources {
+        localeFilters += listOf("en", "fa")
     }
 
     packaging {
@@ -84,6 +92,14 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xno-param-assertions")
+        freeCompilerArgs.add("-Xno-call-assertions")
+        freeCompilerArgs.add("-Xno-receiver-assertions")
+    }
+}
+
 base {
     archivesName.set("ProxyShare-$appVersionName")
 }
@@ -91,12 +107,8 @@ base {
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.androidx.lifecycle.viewmodel.ktx)
-    testImplementation(libs.junit)
 }
