@@ -19,12 +19,14 @@
 - proguard keeps native methods; docs/ENGINE_API.md records the contract.
 - CI: Rust toolchain + cargo-ndk, cargo test, cargo clippy -D warnings,
   and APK .so checks.
-- FIX (same version, run #8 red): clippy -D warnings failed on
-  `unused_mut` — in jni 0.21, JNIEnv::new_string takes &self, so the
-  `mut` on the env parameter from the spec snippet is unused. Dropped it.
-  Also moved [profile.release] to the workspace root rust/Cargo.toml:
-  cargo ignores profiles in a non-root member, so the engine's release
-  profile (opt-level z, LTO, strip) was silently ignored.
+- FIX (same version, run #9 red): the debug build compiled and packaged,
+  then failed storing the configuration cache — `doFirst
+  { checkCargoToolchain() }` makes the cargoBuild task action reference the
+  build script object, which cannot be serialized ("cannot serialize Gradle
+  script object references"). The cargo/cargo-ndk presence check now runs
+  inside the shell command itself (same readable error messages); the task
+  command line is plain data, so it is cache-safe. The checkCargoToolchain()
+  function is gone.
 - FIX: the 0.0.1 release APK shipped unsigned
   (ProxyShare-0.0.1-release-unsigned.apk) — the persistent signing config was
   only applied to the debug build type, so assembleRelease never signed it

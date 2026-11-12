@@ -111,48 +111,35 @@ base {
 // Rust engine build (cargo-ndk). The engine is a Rust cdylib; these tasks
 // build it into app/src/main/jniLibs before the Android build packages it.
 // Debug builds arm64-v8a + x86_64 only, for speed; release builds all ABIs.
-fun checkCargoToolchain() {
-    val tools = listOf(
-        "cargo" to "Install the Rust toolchain from https://rustup.rs.",
-        "cargo-ndk" to "Install it with: cargo install cargo-ndk"
-    )
-    for ((tool, hint) in tools) {
-        val found = try {
-            ProcessBuilder("sh", "-c", "command -v $tool")
-                .redirectErrorStream(true)
-                .start()
-                .waitFor() == 0
-        } catch (_: Exception) {
-            false
-        }
-        if (!found) {
-            throw GradleException("$tool is not installed or not on PATH. $hint")
-        }
-    }
-}
+//
+// The cargo/cargo-ndk presence check runs inside the shell command itself:
+// a doFirst { checkCargoToolchain() } call breaks the configuration cache,
+// because the task action then references the build script object, which
+// cannot be serialized ("cannot serialize Gradle script object references").
+// A plain command line is just data, so it is cache-safe.
+val cargoToolchainCheck = "command -v cargo >/dev/null 2>&1 || " +
+    "{ echo 'cargo is not installed or not on PATH. Install the Rust toolchain from https://rustup.rs.' >&2; exit 1; }; " +
+    "command -v cargo-ndk >/dev/null 2>&1 || " +
+    "{ echo 'cargo-ndk is not installed or not on PATH. Install it with: cargo install cargo-ndk' >&2; exit 1; }; "
 
 val cargoBuild = tasks.register<Exec>("cargoBuild") {
     description = "Build the Rust engine (debug, arm64-v8a + x86_64) into jniLibs."
     workingDir = rootProject.projectDir.resolve("rust")
     commandLine(
-        "cargo", "ndk",
-        "-t", "arm64-v8a", "-t", "x86_64",
-        "-o", "../app/src/main/jniLibs",
-        "build"
+        "sh", "-c",
+        cargoToolchainCheck +
+            "exec cargo ndk -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build"
     )
-    doFirst { checkCargoToolchain() }
 }
 
 val cargoBuildRelease = tasks.register<Exec>("cargoBuildRelease") {
     description = "Build the Rust engine (release, all ABIs) into jniLibs."
     workingDir = rootProject.projectDir.resolve("rust")
     commandLine(
-        "cargo", "ndk",
-        "-t", "arm64-v8a", "-t", "armeabi-v7a", "-t", "x86_64",
-        "-o", "../app/src/main/jniLibs",
-        "build", "--release"
+        "sh", "-c",
+        cargoToolchainCheck +
+            "exec cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release"
     )
-    doFirst { checkCargoToolchain() }
 }
 
 // preDebugBuild / preReleaseBuild are registered by AGP only after the
