@@ -19,6 +19,10 @@
 - proguard keeps native methods; docs/ENGINE_API.md records the contract.
 - CI: Rust toolchain + cargo-ndk, cargo test, cargo clippy -D warnings,
   and APK .so checks.
+- FIX (same version, run #7 red): tasks.named("preDebugBuild") throws at
+  configuration time — AGP registers preDebugBuild/preReleaseBuild only
+  after the build script is evaluated. Replaced with tasks.configureEach,
+  which fires when the task is registered.
 - FIX: the 0.0.1 release APK shipped unsigned
   (ProxyShare-0.0.1-release-unsigned.apk) — the persistent signing config was
   only applied to the debug build type, so assembleRelease never signed it

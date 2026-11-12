@@ -155,8 +155,16 @@ val cargoBuildRelease = tasks.register<Exec>("cargoBuildRelease") {
     doFirst { checkCargoToolchain() }
 }
 
-tasks.named("preDebugBuild") { dependsOn(cargoBuild) }
-tasks.named("preReleaseBuild") { dependsOn(cargoBuildRelease) }
+// preDebugBuild / preReleaseBuild are registered by AGP only after the
+// build script is evaluated, so tasks.named() throws at configuration time
+// ("Task with name 'preDebugBuild' not found"). configureEach fires when
+// the task is registered, whenever that happens.
+tasks.configureEach {
+    when (name) {
+        "preDebugBuild" -> dependsOn(cargoBuild)
+        "preReleaseBuild" -> dependsOn(cargoBuildRelease)
+    }
+}
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
