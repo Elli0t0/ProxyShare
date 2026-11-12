@@ -1,0 +1,88 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build debug APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Prepare signing
+        id: prepare_signing
+        shell: bash
+        env:
+          PROXYSHARE_KEYSTORE_BASE64: ${{ secrets.PROXYSHARE_KEYSTORE_BASE64 }}
+          PROXYSHARE_KEYSTORE_PASSWORD: ${{ secrets.PROXYSHARE_KEYSTORE_PASSWORD }}
+          PROXYSHARE_KEY_ALIAS: ${{ secrets.PROXYSHARE_KEY_ALIAS }}
+          PROXYSHARE_KEY_PASSWORD: ${{ secrets.PROXYSHARE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROXYSHARE_KEYSTORE_BASE64" ]; then
+            printf '%s' "$PROXYSHARE_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/proxyshare.jks"
+            {
+              echo "KEYSTORE_PATH=$RUNNER_TEMP/proxyshare.jks"
+              echo "KEYSTORE_PASSWORD=$PROXYSHARE_KEYSTORE_PASSWORD"
+              echo "KEY_ALIAS=$PROXYSHARE_KEY_ALIAS"
+              echo "KEY_PASSWORD=$PROXYSHARE_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "key_generated=false" >> "$GITHUB_OUTPUT"
+            echo "Using persistent signing secrets."
+          else
+            echo "::warning::No PROXYSHARE_* signing secrets found. Generating a one-time key for this build and uploading it as a CI artifact (proxyshare-signing-keystore). Download that artifact and save it as PROXYSHARE_KEYSTORE_BASE64 / PROXYSHARE_KEYSTORE_PASSWORD / PROXYSHARE_KEY_ALIAS / PROXYSHARE_KEY_PASSWORD before the next update, so future APKs keep the same signature and install over this one. Then delete the artifact."
+            GEN_PASS=$(openssl rand -hex 16)
+            echo "::add-mask::$GEN_PASS"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/proxyshare.jks" -alias proxyshare \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$GEN_PASS" -keypass "$GEN_PASS" \
+              -dname "CN=ProxyShare, OU=ProxyShare, O=ProxyShare, L=Unknown, ST=Unknown, C=US" > /dev/null 2>&1
+            cp "$RUNNER_TEMP/proxyshare.jks" "$RUNNER_TEMP/proxyshare-keystore.jks"
+            printf '%s' "$GEN_PASS" > "$RUNNER_TEMP/proxyshare-key-password.txt"
+            {
+              echo "KEYSTORE_PATH=$RUNNER_TEMP/proxyshare.jks"
+              echo "KEYSTORE_PASSWORD=$GEN_PASS"
+              echo "KEY_ALIAS=proxyshare"
+              echo "KEY_PASSWORD=$GEN_PASS"
+            } >> "$GITHUB_ENV"
+            echo "key_generated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build debug APK
+        run: gradle assembleDebug -PVERSION_CODE=$GITHUB_RUN_NUMBER
+
+      - name: Upload signing keystore (one-time key only)
+        if: steps.prepare_signing.outputs.key_generated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxyshare-signing-keystore
+          path: |
+            ${{ runner.temp }}/proxyshare-keystore.jks
+            ${{ runner.temp }}/proxyshare-key-password.txt
+          if-no-files-found: error
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProxyShare-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
