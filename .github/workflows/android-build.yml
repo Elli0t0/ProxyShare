@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build APKs
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
@@ -27,6 +27,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.5.0"
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version "9.5.0"
 
       - name: Prepare signing
         id: prepare_signing
@@ -68,7 +71,10 @@ jobs:
           fi
 
       - name: Build debug APK
-        run: gradle assembleDebug -PVERSION_CODE=$GITHUB_RUN_NUMBER
+        run: ./gradlew assembleDebug -PVERSION_CODE=$GITHUB_RUN_NUMBER
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease -PVERSION_CODE=$GITHUB_RUN_NUMBER
 
       - name: Upload signing keystore (one-time key only)
         if: steps.prepare_signing.outputs.key_generated == 'true'
