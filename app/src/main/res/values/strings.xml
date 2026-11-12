@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ProxyShare</string>
+    <string name="app_tagline">Share your phone\u2019s VPN with your laptop over Wi-Fi.</string>
+    <string name="proxy_stopped">Proxy stopped</string>
+</resources>
