@@ -32,6 +32,11 @@
   0xFF; BIND -> 0x07; bad ATYP -> 0x08; unresolvable domain -> 0x04;
   connector and relay unit tests over real sockets and in-memory
   duplex streams. `nativeVersion()` now returns "engine 0.0.5".
+- FIX (same version, run #18 red): cargo test failed to compile with 2
+  errors in relay.rs:22 — `AsyncRead` / `AsyncWrite` not found in scope.
+  `pump`'s signature bounds on the bare traits, but only the `Ext`
+  traits were imported. The import is now `tokio::io::{AsyncRead,
+  AsyncReadExt, AsyncWrite, AsyncWriteExt}`.
 - docs/ENGINE_API.md records the SOCKS5, outbound and relay contracts.
 
 ## 0.0.4 — server shell + JNI lifecycle
