@@ -58,6 +58,16 @@
   simplifies to `catch_unwind(AssertUnwindSafe(create_engine))
   .unwrap_or_default()` (the closure was redundant too). No behavior
   changed — the tests had already passed.
+- FIX (same version, run #15 red): cargo test failed on one test,
+  start_stop_twice_is_safe: "start after stop" failed to bind the same
+  port — "Address already in use". Cause: `stop()` only aborted the
+  accept task, and the socket stays bound until the task is actually
+  dropped, so an immediate restart raced the teardown (it passed in
+  run #14 by luck). `stop()` now waits for the accept task to finish
+  unwinding (bounded by 2 s, skipped when called inside a runtime,
+  where block_on would panic), so the socket is closed before `stop()`
+  returns — which is also what the real app needs when the user toggles
+  the proxy off and on quickly.
 
 ## 0.0.3 — Rust models, config, CIDR
 

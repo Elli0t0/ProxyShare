@@ -289,16 +289,20 @@ impl Engine {
     /// Stop listening, cancel the accept task and close the sockets.
     /// Idempotent: stopping an already stopped engine is a no-op. A
     /// connection task stuck waiting for a first byte is woken by the
-    /// shutdown signal, so every socket is closed well within 2 seconds.
+    /// shutdown signal. The accept task is waited for (at most 2 s) so
+    /// its listener socket is closed before this returns: aborting alone
+    /// leaves the socket bound until the task is dropped, and a restart
+    /// on the same port would fail with "Address already in use".
     pub fn stop(&self) {
-        let was_running;
+        let (accept_task, was_running);
         {
             let mut inner = lock_inner(&self.inner);
             was_running = inner.state != EngineState::Stopped;
             if let Some(tx) = inner.shutdown_tx.take() {
                 let _ = tx.send(true);
             }
-            if let Some(task) = inner.accept_task.take() {
+            accept_task = inner.accept_task.take();
+            if let Some(task) = &accept_task {
                 task.abort();
             }
             // Drain first, then add the counters: iterating the drain
@@ -309,6 +313,9 @@ impl Engine {
                 inner.total_down += record.down.load(Ordering::Relaxed);
             }
             inner.state = EngineState::Stopped;
+        }
+        if let Some(task) = accept_task {
+            wait_for_task(task);
         }
         if was_running {
             self.emit(Event::StateChanged(EngineState::Stopped));
@@ -380,6 +387,21 @@ impl Engine {
             inner.total_up += record.up.load(Ordering::Relaxed);
             inner.total_down += record.down.load(Ordering::Relaxed);
         }
+    }
+}
+
+/// Wait for a cancelled task to finish unwinding (at most 2 s), so its
+/// sockets are closed. Only blocks when called outside a runtime:
+/// block_on panics inside one, and the engine is never stopped from a
+/// worker thread anyway.
+fn wait_for_task(task: JoinHandle<()>) {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return; // Inside a runtime: the task unwinds on its own.
+    }
+    if let Ok(rt) = runtime() {
+        let _ = rt.block_on(async {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        });
     }
 }
 
