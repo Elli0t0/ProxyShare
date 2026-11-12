@@ -1,3 +1,12 @@
 [workspace]
 members = ["engine"]
 resolver = "2"
+
+# Profiles live at the workspace root: cargo ignores [profile.*] in a
+# non-root member (rust/engine/Cargo.toml).
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"   # keep unwind during development; the size step decides on abort

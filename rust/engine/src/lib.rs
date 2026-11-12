@@ -16,7 +16,7 @@ use jni::JNIEnv;
 /// and a null jstring is returned instead.
 #[no_mangle]
 pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeVersion<'local>(
-    mut env: JNIEnv<'local>,
+    env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jstring {
     // FFI boundary: catch_unwind keeps a panic inside Rust. JNIEnv is not

@@ -19,10 +19,12 @@
 - proguard keeps native methods; docs/ENGINE_API.md records the contract.
 - CI: Rust toolchain + cargo-ndk, cargo test, cargo clippy -D warnings,
   and APK .so checks.
-- FIX (same version, run #7 red): tasks.named("preDebugBuild") throws at
-  configuration time — AGP registers preDebugBuild/preReleaseBuild only
-  after the build script is evaluated. Replaced with tasks.configureEach,
-  which fires when the task is registered.
+- FIX (same version, run #8 red): clippy -D warnings failed on
+  `unused_mut` — in jni 0.21, JNIEnv::new_string takes &self, so the
+  `mut` on the env parameter from the spec snippet is unused. Dropped it.
+  Also moved [profile.release] to the workspace root rust/Cargo.toml:
+  cargo ignores profiles in a non-root member, so the engine's release
+  profile (opt-level z, LTO, strip) was silently ignored.
 - FIX: the 0.0.1 release APK shipped unsigned
   (ProxyShare-0.0.1-release-unsigned.apk) — the persistent signing config was
   only applied to the debug build type, so assembleRelease never signed it
