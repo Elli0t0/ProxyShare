@@ -83,7 +83,6 @@ struct EngineInner {
     config: Option<Config>,
     sink: Option<std::sync::Arc<dyn EventSink>>,
     state: EngineState,
-    listener_socket: Option<std::sync::Arc<TcpListener>>,
     accept_task: Option<JoinHandle<()>>,
     shutdown_tx: Option<watch::Sender<bool>>,
     connections: HashMap<u64, std::sync::Arc<ConnRecord>>,
@@ -144,7 +143,6 @@ impl Engine {
                 config: None,
                 sink: None,
                 state: EngineState::Stopped,
-                listener_socket: None,
                 accept_task: None,
                 shutdown_tx: None,
                 connections: HashMap::new(),
@@ -186,7 +184,10 @@ impl Engine {
     }
 
     /// Bind the listening socket with SO_REUSEADDR and a backlog of 128.
-    fn bind_listener(config: &Config) -> Result<TcpListener, String> {
+    /// Returns the plain std listener: turning it into a tokio listener
+    /// (from_std) needs a runtime context, so that happens inside the
+    /// accept task, not here on the caller's thread.
+    fn bind_listener(config: &Config) -> Result<std::net::TcpListener, String> {
         let addr = SocketAddr::new(config.bind_addr, config.port);
         let domain = if config.bind_addr.is_ipv4() {
             Domain::IPV4
@@ -208,8 +209,7 @@ impl Engine {
             .set_nonblocking(true)
             .map_err(|e| format!("failed to set nonblocking on {addr}: {e}"))?;
         let std_listener: std::net::TcpListener = socket.into();
-        TcpListener::from_std(std_listener)
-            .map_err(|e| format!("failed to wrap listener for {addr}: {e}"))
+        Ok(std_listener)
     }
 
     /// Start listening. Idempotent: starting an already starting or
@@ -240,7 +240,7 @@ impl Engine {
                 return Err(e);
             }
         };
-        let listener = match Self::bind_listener(&config) {
+        let std_listener = match Self::bind_listener(&config) {
             Ok(listener) => listener,
             Err(e) => {
                 self.transition_to_error(e.clone());
@@ -255,14 +255,22 @@ impl Engine {
             return Ok(());
         }
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let listener = std::sync::Arc::new(listener);
-        let listener_for_task = std::sync::Arc::clone(&listener);
         let engine = std::sync::Arc::clone(self);
         let task_config = config.clone();
+        // The std listener becomes a tokio listener inside this task, where
+        // a runtime context exists. If that fails, the engine reports an
+        // error instead of listening.
         let accept = rt.spawn(async move {
-            accept_loop(engine, listener_for_task, task_config, shutdown_rx).await;
+            match TcpListener::from_std(std_listener) {
+                Ok(listener) => {
+                    accept_loop(engine, std::sync::Arc::new(listener), task_config, shutdown_rx)
+                        .await;
+                }
+                Err(e) => {
+                    engine.transition_to_error(format!("failed to wrap listener: {e}"));
+                }
+            }
         });
-        inner.listener_socket = Some(listener);
         inner.accept_task = Some(accept);
         inner.shutdown_tx = Some(shutdown_tx);
         inner.config = Some(config);
@@ -287,7 +295,6 @@ impl Engine {
             if let Some(task) = inner.accept_task.take() {
                 task.abort();
             }
-            inner.listener_socket = None;
             // Drain first, then add the counters: iterating the drain
             // borrows the map, and the totals live in the same struct.
             let drained: Vec<_> = inner.connections.drain().map(|(_, r)| r).collect();
@@ -427,6 +434,15 @@ async fn handle_connection(
             None => return, // client closed, errored, or sent nothing in time
         },
     };
+    // Consume the sniffed byte before anything else, so the close is a
+    // clean FIN rather than a reset: closing with unread received data
+    // makes the kernel send RST. (Shell only: a real handler must get
+    // the stream untouched, so this consume goes away with the handlers.)
+    {
+        use tokio::io::AsyncReadExt;
+        let mut scratch = [0u8; 1];
+        let _ = stream.read(&mut scratch).await;
+    }
     let enabled = {
         let inner = lock_inner(&engine.inner);
         match &inner.config {
@@ -436,12 +452,6 @@ async fn handle_connection(
     };
     if !enabled {
         return; // sniffed protocol is disabled: close, no event
-    }
-    // Consume the sniffed byte so the close is clean.
-    {
-        use tokio::io::AsyncReadExt;
-        let mut scratch = [0u8; 1];
-        let _ = stream.read(&mut scratch).await;
     }
     let record = engine.register(peer.ip(), protocol);
     engine.emit(Event::HandlerMissing(record.to_conn_info()));

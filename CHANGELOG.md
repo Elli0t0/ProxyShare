@@ -39,6 +39,18 @@
   so the task's clone is made before the spawn; and draining the
   connection map while adding its counters to the same struct is two
   mutable borrows, so the drain is collected first.
+- FIX (same version, run #13 red): cargo test compiled, but 4 tests
+  failed. Three panicked with "there is no reactor running":
+  `TcpListener::from_std` needs a tokio runtime context, but `start()`
+  runs on the caller's (plain) thread. The bind now returns a plain
+  std listener, and the accept task converts it with `from_std` inside
+  the runtime (on failure it reports an Error state); the engine no
+  longer stores the listener — the task owns it, so `stop()` closes it
+  by aborting the task. The fourth test failed because the
+  disabled-protocol path closed the connection with the sniffed byte
+  still unread, so the kernel sent RST and the client's read got
+  "Connection reset by peer": the byte is now consumed right after
+  sniffing, before the enabled check, so every close is a clean FIN.
 
 ## 0.0.3 — Rust models, config, CIDR
 
