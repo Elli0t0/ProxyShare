@@ -104,6 +104,12 @@ impl EngineState {
     }
 }
 
+/// Something that receives engine events. The JNI listener implements this
+/// by calling back into Java; tests use a collecting sink instead.
+pub trait EventSink: Send + Sync {
+    fn on_event(&self, event: Event);
+}
+
 /// Something the Kotlin side is told about through the onEvent callback.
 /// The callback takes (type: Int, a: String, b: String); `to_callback`
 /// is the fixed mapping, see docs/ENGINE_API.md.
@@ -115,11 +121,16 @@ pub enum Event {
     ConnectionOpened(ConnInfo),
     /// A connection closed. a = connection id, b = its final snapshot line.
     ConnectionClosed(ConnInfo),
+    /// A connection was accepted and sniffed, but no handler is implemented
+    /// for its protocol yet (server shell): it was closed, and this event
+    /// records it. a = connection id, b = its snapshot line.
+    HandlerMissing(ConnInfo),
 }
 
 impl Event {
     /// Callback type numbers: 1 = state changed, 2 = connection opened,
-    /// 3 = connection closed. They are part of the contract: do not renumber.
+    /// 3 = connection closed, 4 = handler missing. They are part of the
+    /// contract: do not renumber.
     pub fn to_callback(&self) -> (i32, String, String) {
         match self {
             Event::StateChanged(state) => {
@@ -131,6 +142,7 @@ impl Event {
             }
             Event::ConnectionOpened(info) => (2, info.id.to_string(), info.snapshot_line()),
             Event::ConnectionClosed(info) => (3, info.id.to_string(), info.snapshot_line()),
+            Event::HandlerMissing(info) => (4, info.id.to_string(), info.snapshot_line()),
         }
     }
 }
@@ -230,6 +242,10 @@ mod tests {
         assert_eq!(b, conn.snapshot_line());
         let (t, a, b) = Event::ConnectionClosed(conn.clone()).to_callback();
         assert_eq!(t, 3);
+        assert_eq!(a, "1");
+        assert_eq!(b, conn.snapshot_line());
+        let (t, a, b) = Event::HandlerMissing(conn.clone()).to_callback();
+        assert_eq!(t, 4);
         assert_eq!(a, "1");
         assert_eq!(b, conn.snapshot_line());
     }

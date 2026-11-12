@@ -25,10 +25,45 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.3"`.
+- Returns the engine version string, e.g. `"engine 0.0.4"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
+
+### Engine lifecycle
+
+Each engine is owned by Kotlin through a handle (`Long`, > 0; 0 is never
+a valid handle). Handles are never reused. All of these are `@JvmStatic`
+methods on `object NativeEngine`, so the Rust side takes a `JClass`
+second parameter.
+
+| Kotlin | Rust | Meaning |
+| --- | --- | --- |
+| `nativeCreate(): Long` | creates an `Engine`, stores it in the global handle table | Returns the handle. |
+| `nativeStart(h: Long, cfg: String): String` | `Engine::start` | Parses the config and starts listening. Returns `""` on success, an error text on failure. Starting an already starting or running engine is a no-op returning `""`. |
+| `nativeStop(h: Long)` | `Engine::stop` | Stops listening, cancels the accept task and closes the sockets (within 2 s). Safe on a stopped engine. |
+| `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
+| `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
+| `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
+
+## Server shell (0.0.4)
+
+- `start` binds one `TcpListener` through socket2 (`SO_REUSEADDR`,
+  backlog 128) and runs an accept loop on the global tokio runtime
+  (`Builder::new_multi_thread`, 2 worker threads named "ps-worker").
+- A client is accepted only when it passes the config's client filter
+  (`allowed_clients` list, `private_only`); others are dropped with no
+  event. The accept loop also enforces `max_connections` (counting every
+  connection task currently running, including in-flight sniffs); further
+  connections are dropped with no event.
+- Each accepted connection is handled by its own tokio task: the first
+  byte is peeked (up to 5 s) and classified — `0x04` SOCKS4, `0x05`
+  SOCKS5, anything else HTTP. A sniffed protocol that is not enabled in
+  the config closes the connection quietly.
+- **No handlers exist yet.** A sniffed connection is registered, its
+  sniffed byte is consumed, it is reported as a `handler_missing` event
+  (type 4), and it is closed cleanly. The snapshot therefore only ever
+  shows transient connections in this step.
 
 ## Config
 
@@ -110,12 +145,11 @@ are never renumbered. `a` and `b` are always strings; an empty string means
 | 1 | State changed | new state name (`stopped`, `starting`, `running`, `error`) | error message, or `""` |
 | 2 | Connection opened | connection id | snapshot line of that connection |
 | 3 | Connection closed | connection id | final snapshot line of that connection |
+| 4 | Handler missing | connection id | snapshot line of that connection |
 
 This is the fixed mapping of the `Event` enum in `rust/engine/src/model.rs`
-(`Event::to_callback`). The JNI callback registration — Kotlin handing the
-engine its `onEvent` — and the JNI getters for the config and the snapshot
-land with the engine start in a later step; the formats above are decided
-now so both sides can build against them.
+(`Event::to_callback`). The callback is registered with
+`nativeSetListener`; see the lifecycle table above.
 
 ## Rules
 

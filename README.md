@@ -13,7 +13,8 @@ records metadata: client IP, target host:port, protocol, byte counts.
 
 - `rust/engine/` — proxy engine, a Rust crate (cdylib, `proxyshare_engine`).
   0.0.2: JNI hello world (`nativeVersion`) only; 0.0.3: models, config,
-  CIDR (parse + contains, unit tested); no networking yet.
+  CIDR (parse + contains, unit tested); 0.0.4: server shell (tokio
+  runtime, accept loop, sniffer, JNI lifecycle) — no handlers yet.
 - `engine/` — thin JNI wrapper only. No proxy logic in Kotlin.
 - `service/` — Android foreground service hosting the engine.
 - `data/` — settings persistence (DataStore).

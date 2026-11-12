@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.0.4 — server shell + JNI lifecycle
+
+- New rust/engine/src/engine.rs: a global tokio runtime (multi-thread, 2
+  workers named "ps-worker"), an Engine stored in a global handle table
+  (Mutex<HashMap<i64, Arc<Engine>>>), start() binding a TcpListener via
+  socket2 (SO_REUSEADDR, backlog 128) with an accept loop enforcing
+  max_connections and the client filter (allowed_clients + private_only),
+  a connection registry (id, counters as AtomicU64), stop() cancelling
+  the accept task and closing sockets (connection tasks are woken by the
+  shutdown signal, so everything closes well within 2 s).
+- New rust/engine/src/sniffer.rs: ProtocolSniffer via peek() — 0x04
+  Socks4, 0x05 Socks5, else Http — with a 5 s wait for the first byte.
+  Handlers are not implemented yet: a sniffed connection is registered,
+  its sniffed byte consumed, reported as a handler_missing event (type 4)
+  and closed cleanly.
+- New rust/engine/src/listener.rs: JniListener (cached JavaVM, GlobalRef
+  to the Kotlin listener, cached onEvent method ID, events sent from
+  tokio threads via attach_current_thread) behind a small EventSink trait,
+  so the engine core is testable without Java.
+- JNI API: nativeCreate(): Long, nativeStart(h, cfg): String ("" = ok,
+  else error text), nativeStop(h), nativeDestroy(h), nativeSnapshot(h):
+  String, nativeSetListener(h, listener: EngineListener). Kotlin
+  EngineListener interface + the five externs on NativeEngine; keep rule
+  for EngineListener. nativeVersion() now returns "engine 0.0.4".
+- Event type 4 (handler missing) added to the contract and to
+  docs/ENGINE_API.md, with the lifecycle and server-shell sections.
+- Tests: bind failure (port in use) gives a clear error naming the
+  address and port; start/stop twice is safe (start is idempotent,
+  stop is idempotent, start after stop rebinds); snapshot reflects the
+  state; a SOCKS5 connection reports handler_missing and closes; a
+  disabled protocol closes quietly with no event.
+
 ## 0.0.3 — Rust models, config, CIDR
 
 - New rust/engine/src/model.rs: Protocol (Http, Socks4, Socks5), ConnInfo,
