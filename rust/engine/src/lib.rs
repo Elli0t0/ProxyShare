@@ -43,7 +43,7 @@ fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
 /// Read a Java string into a Rust String.
 fn from_jstring(env: &mut JNIEnv, s: &JString) -> Result<String, String> {
     env.get_string(s)
-        .map(|java_str| String::from(java_str))
+        .map(String::from)
         .map_err(|e| format!("failed to read a string from Java: {e}"))
 }
 
@@ -74,10 +74,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeCre
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jlong {
-    match catch_unwind(AssertUnwindSafe(|| create_engine())) {
-        Ok(handle) => handle,
-        Err(_) => 0,
-    }
+    catch_unwind(AssertUnwindSafe(create_engine)).unwrap_or_default()
 }
 
 /// Start the engine with a "key=value" config text. Returns "" on success,

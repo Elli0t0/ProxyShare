@@ -51,6 +51,13 @@
   still unread, so the kernel sent RST and the client's read got
   "Connection reset by peer": the byte is now consumed right after
   sniffing, before the enabled check, so every close is a clean FIN.
+- FIX (same version, run #14 red): cargo test passed (22 passed), but
+  clippy `-D warnings` failed with 4 style lints: Engine needs a
+  `Default` impl next to `new()`; `.map(|j| String::from(j))` is a
+  redundant closure (use `.map(String::from)`); the nativeCreate match
+  simplifies to `catch_unwind(AssertUnwindSafe(create_engine))
+  .unwrap_or_default()` (the closure was redundant too). No behavior
+  changed — the tests had already passed.
 
 ## 0.0.3 — Rust models, config, CIDR
 
