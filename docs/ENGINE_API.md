@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.4"`.
+- Returns the engine version string, e.g. `"engine 0.0.5"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -46,7 +46,7 @@ second parameter.
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
 | `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
 
-## Server shell (0.0.4)
+## Server (0.0.4, extended in 0.0.5)
 
 - `start` binds one `TcpListener` through socket2 (`SO_REUSEADDR`,
   backlog 128) and runs an accept loop on the global tokio runtime
@@ -59,11 +59,60 @@ second parameter.
 - Each accepted connection is handled by its own tokio task: the first
   byte is peeked (up to 5 s) and classified — `0x04` SOCKS4, `0x05`
   SOCKS5, anything else HTTP. A sniffed protocol that is not enabled in
-  the config closes the connection quietly.
-- **No handlers exist yet.** A sniffed connection is registered, its
-  sniffed byte is consumed, it is reported as a `handler_missing` event
-  (type 4), and it is closed cleanly. The snapshot therefore only ever
-  shows transient connections in this step.
+  the config closes the connection quietly. The peek does not consume
+  the byte, so the handler that runs next still sees the whole stream;
+  a path where no handler reads the stream consumes the byte first, so
+  the close is a clean FIN instead of a reset.
+- SOCKS5 connections are handled (see below): a `ConnectionOpened`
+  event (type 2) is emitted when the connection is registered, and a
+  `ConnectionClosed` event (type 3) with the final byte counts when it
+  ends. HTTP and SOCKS4 have no handler yet: a sniffed connection is
+  registered, its sniffed byte is consumed, it is reported as a
+  `handler_missing` event (type 4), and it is closed cleanly.
+
+## SOCKS5 (0.0.5)
+
+- Method negotiation (no-auth only for now): the client offers a list
+  of methods; if it includes 0x00 the engine answers `[0x05, 0x00]`.
+  Any other list gets `[0x05, 0xFF]` and the connection closes.
+- Requests: ATYP IPv4 (0x01), domain (0x03), IPv6 (0x04). CMD CONNECT
+  (0x01) only. The target host and port are recorded on the connection
+  as soon as the request is parsed, so the snapshot shows them while
+  the relay runs.
+- Reply codes: 0x00 success (with the bound address of the upstream
+  socket), 0x04 host unreachable (the name did not resolve), 0x05
+  connection refused (no address accepted the connection), 0x07
+  command not supported (anything other than CONNECT), 0x08 address
+  type not supported. An error reply is sent before the connection
+  closes; any request bytes the client already sent go unread, so such
+  a close may be a reset rather than a clean FIN — the client has the
+  reply code by then.
+- The greeting and the request must arrive within 10 s of the first
+  byte, or the connection is closed.
+
+## Outbound and relay (0.0.5)
+
+- `Outbound` (`rust/engine/src/connector.rs`) is the trait the handler
+  dials targets through. `TcpOutbound` is the plain implementation:
+  resolves with `tokio::net::lookup_host`, tries the addresses in
+  order, applies `connect_timeout_s` to the lookup and to each connect
+  attempt, and sets `TCP_NODELAY` on the connected socket. It is the
+  seam 0.1.1 uses to bind sockets to an Android Network: the handler
+  is generic over `Outbound`, so a different implementation can be
+  stored on the engine without changing the handler.
+- A connect failure is one of two kinds: the name did not resolve
+  (`Dns`) or no address accepted the connection (`Connect`). The
+  SOCKS5 handler maps them to the reply codes 0x04 and 0x05.
+- `relay` (`rust/engine/src/relay.rs`) copies bytes both ways with two
+  `pump` tasks joined with `tokio::join!`. Each pump counts live into
+  the connection record's counters (client -> target is `up`, target ->
+  client is `down`), so the snapshot and the totals update during a
+  transfer, not only at the end. A pump ends when its read side hits
+  EOF, errors, or sits idle for `idle_timeout_s`; it then shuts down
+  its write half, so the peer sees EOF and its own pump ends too. When
+  either pump ends, the pair is closed.
+- The counters count relayed payload only, not the SOCKS5 greeting,
+  request or reply bytes.
 
 ## Config
 
@@ -124,7 +173,9 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down
   is the number of connection lines that follow.
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
-  milliseconds, `up` / `down` the connection's byte counts.
+  milliseconds, `up` / `down` the connection's byte counts. For a SOCKS5
+  connection the host and port are empty / 0 until the request is parsed;
+  after that they are the target the client asked for.
 
 Example:
 

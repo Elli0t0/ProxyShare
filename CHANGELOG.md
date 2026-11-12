@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.0.5 — relay + SOCKS5 CONNECT
+
+- New rust/engine/src/connector.rs: an `Outbound` trait (the seam 0.1.1
+  uses to bind sockets to an Android Network) with a plain `TcpOutbound`
+  implementation: resolves via `tokio::net::lookup_host`, tries the
+  addresses in order, applies `connect_timeout_s` to the lookup and to
+  each connect attempt, sets `TCP_NODELAY`. A failure is `Dns` (name did
+  not resolve) or `Connect` (no address accepted it), so the handler can
+  answer with the right SOCKS5 reply code.
+- New rust/engine/src/relay.rs: `pump` (16 KiB buffer, live counting into
+  the connection record's counters, idle timeout, clean shutdown on EOF)
+  and `relay` (two pumps joined with `tokio::join!`, one per direction;
+  when either side ends, the other ends with it).
+- New rust/engine/src/socks5.rs: method negotiation (no-auth only — any
+  other list gets `[0x05, 0xFF]`), CONNECT requests with ATYP IPv4 /
+  domain / IPv6, reply codes 0x00, 0x04, 0x05, 0x07, 0x08, a 10 s
+  negotiation timeout, the record's target filled in as soon as the
+  request is parsed, and the relay counting live into the record.
+- Engine: SOCKS5 connections now emit `ConnectionOpened` (type 2) at
+  registration and `ConnectionClosed` (type 3) with the final counts at
+  the end (unregistered first, so the snapshot already carries the final
+  totals); HTTP and SOCKS4 still report `handler_missing` (type 4). The
+  sniffer only peeks, so the SOCKS5 handler reads the stream from its
+  first byte; the paths where no handler reads the stream still consume
+  the sniffed byte first, so the close is a clean FIN. Counters count
+  relayed payload only, not the greeting, request or reply bytes.
+- Tests: a SOCKS5 client talking to a local echo server through the
+  engine (greeting, CONNECT, payload echoed back, opened/closed events,
+  5 up / 5 down, snapshot totals kept after close); unknown method ->
+  0xFF; BIND -> 0x07; bad ATYP -> 0x08; unresolvable domain -> 0x04;
+  connector and relay unit tests over real sockets and in-memory
+  duplex streams. `nativeVersion()` now returns "engine 0.0.5".
+- docs/ENGINE_API.md records the SOCKS5, outbound and relay contracts.
+
 ## 0.0.4 — server shell + JNI lifecycle
 
 - New rust/engine/src/engine.rs: a global tokio runtime (multi-thread, 2
@@ -72,6 +106,8 @@
   but clippy failed with one lint: `let _ = rt.block_on(...)` — block_on
   returns `()` (unit), so binding it is a `let_unit_value` error. Dropped
   the `let _ =`. One line.
+- Run #17 GREEN (2026-11-12); v0.0.4 release APK is signed
+  (ProxyShare-0.0.4-release.apk). Step 0.0.4 complete.
 
 ## 0.0.3 — Rust models, config, CIDR
 

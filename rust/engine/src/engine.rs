@@ -6,10 +6,10 @@
 //! Kotlin talks to it only through the JNI functions in lib.rs; this file
 //! has no JNI in it.
 //!
-//! No proxy handlers exist yet (shell step): a sniffed connection is
-//! registered, reported as a `handler_missing` event and closed. Events
-//! go out through the `EventSink` the JNI listener registers; the sink is
-//! never called while the engine lock is held.
+//! SOCKS5 is handled (see `socks5`); HTTP and SOCKS4 still end in a
+//! `handler_missing` event. Events go out through the `EventSink` the
+//! JNI listener registers; the sink is never called while the engine
+//! lock is held.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -24,6 +24,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::config::Config;
+use crate::connector::TcpOutbound;
 use crate::model::{snapshot_text, ConnInfo, EngineState, Event, EventSink, Protocol};
 use crate::sniffer;
 
@@ -46,15 +47,14 @@ fn runtime() -> Result<&'static Runtime, String> {
 }
 
 /// One connection the engine knows about. Counters are atomic because a
-/// connection task updates them while the snapshot reads them.
+/// connection task updates them while the snapshot reads them. The
+/// target is behind one mutex so a handler can set it (once the request
+/// is parsed) while the snapshot reads it.
 pub struct ConnRecord {
     pub id: u64,
     pub client_ip: IpAddr,
-    /// Target host. Empty in the shell: the target is only known once a
-    /// handler parses the request, and no handlers exist yet.
-    pub host: String,
-    /// Target port. 0 in the shell, for the same reason.
-    pub port: u16,
+    /// Target host and port. Empty / 0 until a handler parses the request.
+    pub target: Mutex<(String, u16)>,
     pub protocol: Protocol,
     /// When the connection opened, unix time in milliseconds.
     pub started_ms: u64,
@@ -65,12 +65,18 @@ pub struct ConnRecord {
 }
 
 impl ConnRecord {
+    /// Fill in the target once a handler has parsed the request.
+    pub fn set_target(&self, host: String, port: u16) {
+        *self.target.lock().unwrap_or_else(|e| e.into_inner()) = (host, port);
+    }
+
     fn to_conn_info(&self) -> ConnInfo {
+        let (host, port) = self.target.lock().unwrap_or_else(|e| e.into_inner()).clone();
         ConnInfo {
             id: self.id,
             client_ip: self.client_ip,
-            host: self.host.clone(),
-            port: self.port,
+            host,
+            port,
             protocol: self.protocol,
             started_ms: self.started_ms,
             up: self.up.load(Ordering::Relaxed),
@@ -100,6 +106,11 @@ pub struct Engine {
     /// `max_connections` is enforced on this count, so in-flight sniffs
     /// count too, not only registered connections.
     active: AtomicUsize,
+    /// The outbound used to dial targets. The SOCKS5 handler is generic
+    /// over `Outbound`, so a future step can store a different
+    /// implementation here (for example one bound to an Android Network)
+    /// without changing the handler.
+    outbound: std::sync::Arc<TcpOutbound>,
 }
 
 fn lock_inner(inner: &Mutex<EngineInner>) -> MutexGuard<'_, EngineInner> {
@@ -157,6 +168,7 @@ impl Engine {
                 total_down: 0,
             }),
             active: AtomicUsize::new(0),
+            outbound: std::sync::Arc::new(TcpOutbound),
         }
     }
 
@@ -370,8 +382,7 @@ impl Engine {
         let record = std::sync::Arc::new(ConnRecord {
             id,
             client_ip,
-            host: String::new(),
-            port: 0,
+            target: std::sync::Mutex::new((String::new(), 0)),
             protocol,
             started_ms: now_ms(),
             up: AtomicU64::new(0),
@@ -444,10 +455,18 @@ async fn accept_loop(
     }
 }
 
-/// One connection, shell step: sniff the protocol, and if it is enabled,
-/// register the connection, report it as `handler_missing` and close it.
-/// The sniffed byte is consumed before closing so the close is a clean
-/// FIN rather than a reset.
+/// Read one byte (the sniffed one) so the close is a clean FIN rather
+/// than a reset: closing with unread received data makes the kernel send
+/// RST. Only for paths where no handler reads the stream.
+async fn consume_one(stream: &mut TcpStream) {
+    use tokio::io::AsyncReadExt;
+    let mut scratch = [0u8; 1];
+    let _ = stream.read(&mut scratch).await;
+}
+
+/// One connection: sniff the protocol, then hand it to the handler for
+/// that protocol. The sniffer only peeked, so a handler reads the stream
+/// from its first byte.
 async fn handle_connection(
     engine: std::sync::Arc<Engine>,
     mut stream: TcpStream,
@@ -462,29 +481,31 @@ async fn handle_connection(
             None => return, // client closed, errored, or sent nothing in time
         },
     };
-    // Consume the sniffed byte before anything else, so the close is a
-    // clean FIN rather than a reset: closing with unread received data
-    // makes the kernel send RST. (Shell only: a real handler must get
-    // the stream untouched, so this consume goes away with the handlers.)
-    {
-        use tokio::io::AsyncReadExt;
-        let mut scratch = [0u8; 1];
-        let _ = stream.read(&mut scratch).await;
-    }
-    let enabled = {
-        let inner = lock_inner(&engine.inner);
-        match &inner.config {
-            Some(config) => config.protocols.contains(&protocol),
-            None => false,
-        }
+    let config = match lock_inner(&engine.inner).config.clone() {
+        Some(config) => config,
+        None => return, // engine stopped while the sniff was running
     };
-    if !enabled {
+    if !config.protocols.contains(&protocol) {
+        consume_one(&mut stream).await;
         return; // sniffed protocol is disabled: close, no event
     }
     let record = engine.register(peer.ip(), protocol);
-    engine.emit(Event::HandlerMissing(record.to_conn_info()));
-    engine.unregister(record.id);
-    // `stream` is dropped here: a clean close.
+    match protocol {
+        Protocol::Socks5 => {
+            engine.emit(Event::ConnectionOpened(record.to_conn_info()));
+            let _ = crate::socks5::handle(stream, &*engine.outbound, &config, &record).await;
+            engine.unregister(record.id);
+            // Unregistered first, so the snapshot already carries the
+            // final totals when the close is reported.
+            engine.emit(Event::ConnectionClosed(record.to_conn_info()));
+        }
+        _ => {
+            // HTTP and SOCKS4 have no handler yet.
+            consume_one(&mut stream).await;
+            engine.emit(Event::HandlerMissing(record.to_conn_info()));
+            engine.unregister(record.id);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -612,6 +633,8 @@ mod tests {
 
     #[tokio::test]
     async fn sniffed_connection_reports_handler_missing() {
+        // SOCKS4 has no handler yet: it reports handler_missing and closes.
+        // (SOCKS5 is covered by socks5_connect_relays_to_echo_server.)
         let engine = std::sync::Arc::new(Engine::new());
         let sink = CollectingSink::new();
         engine.set_sink(sink.clone());
@@ -622,7 +645,7 @@ mod tests {
         let mut client = TcpStream::connect(("127.0.0.1", port))
             .await
             .expect("connect");
-        client.write_all(&[0x05]).await.expect("write");
+        client.write_all(&[0x04]).await.expect("write");
         // Wait up to 2 s for the handler_missing event.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -672,6 +695,192 @@ mod tests {
                 .all(|e| !matches!(e, Event::HandlerMissing(_))),
             "disabled protocol must not emit handler_missing"
         );
+        engine.stop();
+    }
+
+    /// Start an engine with `extra_config` (one "key=value" line, or "")
+    /// on a free port, with a collecting sink. Returns (engine, sink, port).
+    fn start_test_engine(
+        extra_config: &str,
+    ) -> (std::sync::Arc<Engine>, std::sync::Arc<CollectingSink>, u16) {
+        let engine = std::sync::Arc::new(Engine::new());
+        let sink = CollectingSink::new();
+        engine.set_sink(sink.clone());
+        let port = free_port();
+        engine
+            .start(&format!("port = {port}\n{extra_config}"))
+            .expect("start");
+        (engine, sink, port)
+    }
+
+    /// A local TCP echo server: accepts connections and echoes them back.
+    /// Returns its port.
+    async fn start_echo_server() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind echo");
+        let port = listener.local_addr().expect("echo addr").port();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let (mut r, mut w) = stream.into_split();
+                    let _ = tokio::io::copy(&mut r, &mut w).await;
+                });
+            }
+        });
+        port
+    }
+
+    /// Read exactly `buf.len()` bytes within 5 s, or panic.
+    async fn read_exact(client: &mut TcpStream, buf: &mut [u8]) {
+        tokio::time::timeout(Duration::from_secs(5), client.read_exact(buf))
+            .await
+            .expect("read timed out")
+            .expect("read failed");
+    }
+
+    /// Send a SOCKS5 greeting with one method and return the 2-byte reply.
+    async fn socks5_greet(client: &mut TcpStream, method: u8) -> [u8; 2] {
+        client
+            .write_all(&[0x05, 0x01, method])
+            .await
+            .expect("write greeting");
+        let mut reply = [0u8; 2];
+        read_exact(client, &mut reply).await;
+        reply
+    }
+
+    /// Send a SOCKS5 request and return the 10-byte reply (every reply
+    /// in this step is a 10-byte IPv4 form).
+    async fn socks5_request_reply(client: &mut TcpStream, request: &[u8]) -> [u8; 10] {
+        client.write_all(request).await.expect("write request");
+        let mut reply = [0u8; 10];
+        read_exact(client, &mut reply).await;
+        reply
+    }
+
+    /// The engine closed the connection: a read gives EOF. A reset is
+    /// accepted too — after an error reply the handler closes with
+    /// request bytes unread, so the kernel may send RST instead of FIN.
+    async fn assert_closed(client: &mut TcpStream) {
+        let mut buf = [0u8; 1];
+        match tokio::time::timeout(Duration::from_secs(2), client.read(&mut buf)).await {
+            Ok(Ok(0)) => {}
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+            other => panic!("expected the engine to close the connection, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn socks5_connect_relays_to_echo_server() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let mut req = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
+        req.extend_from_slice(&echo_port.to_be_bytes());
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[0], 0x05);
+        assert_eq!(reply[1], 0x00, "CONNECT succeeded, got {reply:?}");
+        // Payload through the relay: the echo server sends it back.
+        client.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        // Close our side and wait for the engine to close the connection.
+        drop(client);
+        let closed = {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                let events = sink.events();
+                if let Some(Event::ConnectionClosed(info)) = events
+                    .iter()
+                    .find(|e| matches!(e, Event::ConnectionClosed(_)))
+                {
+                    break info.clone();
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "no ConnectionClosed, got: {events:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        assert_eq!(closed.host, "127.0.0.1");
+        assert_eq!(closed.port, echo_port);
+        assert_eq!(closed.protocol, Protocol::Socks5);
+        assert_eq!(closed.up, 5, "5 bytes relayed client -> target");
+        assert_eq!(closed.down, 5, "5 bytes relayed target -> client");
+        assert!(sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, Event::ConnectionOpened(_))));
+        // The snapshot totals kept the bytes after the connection closed.
+        assert!(
+            engine.snapshot().starts_with("running\t5\t5\t0"),
+            "{}",
+            engine.snapshot()
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_rejects_unknown_method() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        // Only GSSAPI (0x01), no no-auth: the engine has nothing to accept.
+        assert_eq!(socks5_greet(&mut client, 0x01).await, [0x05, 0xFF]);
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_rejects_unsupported_command() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        // BIND (0x02) to 127.0.0.1:80.
+        let reply =
+            socks5_request_reply(&mut client, &[0x05, 0x02, 0x00, 0x01, 127, 0, 0, 1, 0, 80])
+                .await;
+        assert_eq!(reply[1], 0x07, "command not supported, got {reply:?}");
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_bad_address_type_is_refused() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let reply =
+            socks5_request_reply(&mut client, &[0x05, 0x01, 0x00, 0x06, 127, 0, 0, 1, 0, 80])
+                .await;
+        assert_eq!(reply[1], 0x08, "address type not supported, got {reply:?}");
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_unresolvable_domain_is_host_unreachable() {
+        let (engine, _sink, port) = start_test_engine("connect_timeout_s = 2");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        // CONNECT nonexistent.invalid:80 — the domain does not resolve.
+        let mut req = vec![0x05, 0x01, 0x00, 0x03, 18];
+        req.extend_from_slice(b"nonexistent.invalid");
+        req.extend_from_slice(&80u16.to_be_bytes());
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x04, "host unreachable, got {reply:?}");
+        assert_closed(&mut client).await;
         engine.stop();
     }
 }
