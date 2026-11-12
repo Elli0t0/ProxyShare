@@ -32,11 +32,16 @@
   0xFF; BIND -> 0x07; bad ATYP -> 0x08; unresolvable domain -> 0x04;
   connector and relay unit tests over real sockets and in-memory
   duplex streams. `nativeVersion()` now returns "engine 0.0.5".
-- FIX (same version, run #18 red): cargo test failed to compile with 2
-  errors in relay.rs:22 — `AsyncRead` / `AsyncWrite` not found in scope.
-  `pump`'s signature bounds on the bare traits, but only the `Ext`
-  traits were imported. The import is now `tokio::io::{AsyncRead,
-  AsyncReadExt, AsyncWrite, AsyncWriteExt}`.
+- FIX (same version, run #19 red): cargo test failed to compile with 3
+  errors in relay.rs — E0505 "cannot move out of `ctr` / `up` /
+  `down` because it is borrowed". This red was my own doing: in the
+  previous push I changed two `tokio::join!` arms to `async move`
+  "to be safe" without the compiler asking for it, and a `move` arm
+  moves the counter while the sibling arm borrows it. In edition 2021
+  a plain `async` arm captures by reference, so a value borrowed by
+  one arm can also be read by the other — the plain version was
+  correct. Both arms are back to plain `async`. Lesson: never apply a
+  speculative fix the compiler never asked for.
 - docs/ENGINE_API.md records the SOCKS5, outbound and relay contracts.
 
 ## 0.0.4 — server shell + JNI lifecycle

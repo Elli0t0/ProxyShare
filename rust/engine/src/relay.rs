@@ -77,7 +77,7 @@ mod tests {
         let ctr = AtomicU64::new(0);
         let (result, _) = tokio::join!(
             pump(relay_in, relay_out, &ctr, Duration::from_secs(5)),
-            async move {
+            async {
                 client_end.write_all(b"hello").await.expect("write");
                 let mut buf = [0u8; 5];
                 server_end.read_exact(&mut buf).await.expect("read");
@@ -128,7 +128,7 @@ mod tests {
         let down = AtomicU64::new(0);
         let (result, _) = tokio::join!(
             relay(relay_client, upstream, &up, &down, Duration::from_secs(5)),
-            async move {
+            async {
                 client_side.write_all(b"ping").await.expect("write");
                 let mut buf = [0u8; 4];
                 client_side.read_exact(&mut buf).await.expect("read echo");
