@@ -5,6 +5,14 @@
 //! This file exposes version information only. It never inspects traffic
 //! payloads (no MITM): only metadata (client IP, target host:port, protocol,
 //! byte counts) may ever leave the engine, and that comes in a later step.
+//!
+//! The engine's types live in sibling modules: [`model`] (protocols,
+//! connections, state, events), [`config`] (key=value configuration) and
+//! [`cidr`] (client network ranges).
+
+pub mod cidr;
+pub mod config;
+pub mod model;
 
 use jni::objects::JClass;
 use jni::sys::jstring;
