@@ -1,0 +1,7 @@
+# 16 KB page alignment for Android 15+ / Play: the linker must lay out
+# segments on 16 KB boundaries, or the .so cannot load on 16 KB-page devices.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

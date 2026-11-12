@@ -3,4 +3,5 @@
     <string name="app_name">ProxyShare</string>
     <string name="app_tagline">Share your phone\u2019s VPN with your laptop over Wi-Fi.</string>
     <string name="proxy_stopped">Proxy stopped</string>
+    <string name="engine_unavailable">Engine unavailable</string>
 </resources>

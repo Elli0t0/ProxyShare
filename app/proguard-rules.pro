@@ -4,3 +4,8 @@
     public static int v(...);
     public static int d(...);
 }
+
+# JNI: keep native method names so the engine can find them.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}

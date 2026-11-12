@@ -5,7 +5,7 @@ plugins {
 
 val versionMajor = (project.findProperty("VERSION_MAJOR") as? String)?.toInt() ?: 0
 val versionMinor = (project.findProperty("VERSION_MINOR") as? String)?.toInt() ?: 0
-val versionPatch = (project.findProperty("VERSION_PATCH") as? String)?.toInt() ?: 1
+val versionPatch = (project.findProperty("VERSION_PATCH") as? String)?.toInt() ?: 2
 val appVersionName = "$versionMajor.$versionMinor.$versionPatch"
 // versionCode comes from CI: -PVERSION_CODE=$GITHUB_RUN_NUMBER. Local builds use 1.
 val appVersionCode = (project.findProperty("VERSION_CODE") as? String)?.toIntOrNull() ?: 1
@@ -23,7 +23,7 @@ android {
     }
 
     signingConfigs {
-        // Persistent key for the debug APK, so every later update installs
+        // Persistent key for the APKs, so every later update installs
         // over the previous one. Values come from the workflow as env vars:
         // KEYSTORE_PATH / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD, set
         // either from PROXYSHARE_* repo secrets, or from the one-time key
@@ -62,6 +62,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val persistentKey = signingConfigs.getByName("proxyshare")
+            if (persistentKey.storeFile != null) {
+                signingConfig = persistentKey
+            }
         }
     }
 
@@ -103,6 +107,56 @@ kotlin {
 base {
     archivesName.set("ProxyShare-$appVersionName")
 }
+
+// Rust engine build (cargo-ndk). The engine is a Rust cdylib; these tasks
+// build it into app/src/main/jniLibs before the Android build packages it.
+// Debug builds arm64-v8a + x86_64 only, for speed; release builds all ABIs.
+fun checkCargoToolchain() {
+    val tools = listOf(
+        "cargo" to "Install the Rust toolchain from https://rustup.rs.",
+        "cargo-ndk" to "Install it with: cargo install cargo-ndk"
+    )
+    for ((tool, hint) in tools) {
+        val found = try {
+            ProcessBuilder("sh", "-c", "command -v $tool")
+                .redirectErrorStream(true)
+                .start()
+                .waitFor() == 0
+        } catch (_: Exception) {
+            false
+        }
+        if (!found) {
+            throw GradleException("$tool is not installed or not on PATH. $hint")
+        }
+    }
+}
+
+val cargoBuild = tasks.register<Exec>("cargoBuild") {
+    description = "Build the Rust engine (debug, arm64-v8a + x86_64) into jniLibs."
+    workingDir = rootProject.projectDir.resolve("rust")
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a", "-t", "x86_64",
+        "-o", "../app/src/main/jniLibs",
+        "build"
+    )
+    doFirst { checkCargoToolchain() }
+}
+
+val cargoBuildRelease = tasks.register<Exec>("cargoBuildRelease") {
+    description = "Build the Rust engine (release, all ABIs) into jniLibs."
+    workingDir = rootProject.projectDir.resolve("rust")
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a", "-t", "armeabi-v7a", "-t", "x86_64",
+        "-o", "../app/src/main/jniLibs",
+        "build", "--release"
+    )
+    doFirst { checkCargoToolchain() }
+}
+
+tasks.named("preDebugBuild") { dependsOn(cargoBuild) }
+tasks.named("preReleaseBuild") { dependsOn(cargoBuildRelease) }
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))

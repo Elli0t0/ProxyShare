@@ -3,4 +3,5 @@
     <string name="app_name">پروکسی‌شیر</string>
     <string name="app_tagline">VPN گوشی را از طریق Wi-Fi با لپ‌تاپ به اشتراک بگذارید.</string>
     <string name="proxy_stopped">پروکسی متوقف است</string>
+    <string name="engine_unavailable">موتور در دسترس نیست</string>
 </resources>
