@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.2 — SettingsRepository (step 0.0.10a)
+
+- New app/src/main/java/com/example/proxyshare/data/SettingsRepository.kt:
+  Preferences DataStore with every Config field plus themeMode,
+  language and keepScreenOn. Exposes `Flow<AppSettings>` and a
+  suspend update function per field; `ensurePassword` generates a
+  random 12-character password at first run when auth is on and none
+  is set. The password is never logged.
+- `AppSettings.toEngineConfig()` maps settings to the engine's
+  key=value text (verbatim from the spec): auth keys only when auth
+  is enabled with a non-blank user and password, `allowed_clients`
+  only when the list is non-empty — no empty keys are written.
+  Defaults: port 8080, all three protocols on, private_only true.
+- Unit test (new app/src/test/.../SettingsRepositoryTest.kt, JUnit
+  4.13.2 added to the version catalog): the full default mapping,
+  auth keys omitted when the password is empty or auth is off,
+  `allowed_clients` omitted when empty / joined when set, password
+  length and character set. 6 tests.
+- Step 0.0.10a shipped as 0.1.2: 0.0.10, 0.1.0 and 0.1.1 were taken.
+  Note: the CI workflow does not run `./gradlew testDebugUnitTest`
+  yet — run it locally until the workflow gains the step.
+
 ## 0.1.1 — SOCKS5 UDP ASSOCIATE (step 0.0.9b)
 
 - CMD 0x03 in socks5.rs: `read_request` now returns the command too
