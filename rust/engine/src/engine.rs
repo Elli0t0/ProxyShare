@@ -405,13 +405,12 @@ impl Engine {
     /// only. A handler reports auth failure as a PermissionDenied
     /// error; other errors are not auth failures.
     fn record_auth_failure(&self, record: &ConnRecord, result: &std::io::Result<()>) {
-        if matches!(result, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied) {
-            if self
+        if matches!(result, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied)
+            && self
                 .auth_guard
                 .record_failure(record.client_ip, Instant::now())
-            {
-                self.emit(Event::AuthFailed(record.client_ip));
-            }
+        {
+            self.emit(Event::AuthFailed(record.client_ip));
         }
     }
 }
