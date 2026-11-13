@@ -267,6 +267,7 @@ async fn connect(
     target: Target,
     port: u16,
 ) -> io::Result<()> {
+    let host = target.host();
     record.set_target(host.clone(), port);
     let upstream = match outbound
         .connect(
