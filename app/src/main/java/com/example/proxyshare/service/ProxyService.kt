@@ -12,6 +12,7 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.example.proxyshare.R
+import com.example.proxyshare.data.AppSettings
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -45,9 +46,8 @@ class ProxyService : Service() {
             return START_NOT_STICKY
         }
         createChannel()
-        val port = ProxyController.settings.value.port
         ServiceCompat.startForeground(
-            this, NOTIF_ID, buildNotification(getString(R.string.notif_running, port)),
+            this, NOTIF_ID, buildNotification(notificationText(ProxyController.settings.value)),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
         acquireWakeLock()
@@ -84,17 +84,34 @@ class ProxyService : Service() {
                 }
             }
         }
-        // Keep the notification's port current if the settings land or
+        // Keep the notification's ports current if the settings land or
         // change after the service started.
         serviceScope.launch {
             ProxyController.settings.collect { settings ->
                 if (ProxyController.state.value is EngineState.Running) {
                     getSystemService(NotificationManager::class.java)?.notify(
                         NOTIF_ID,
-                        buildNotification(getString(R.string.notif_running, settings.port)),
+                        buildNotification(notificationText(settings)),
                     )
                 }
             }
+        }
+    }
+
+    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. */
+    private fun notificationText(settings: AppSettings): String {
+        if (!settings.separatePorts) return getString(R.string.notif_running, settings.port)
+        val http = if ("http" in settings.protocols) settings.httpPort else null
+        val socks = if ("socks4" in settings.protocols || "socks5" in settings.protocols) {
+            settings.socksPort
+        } else {
+            null
+        }
+        return when {
+            http != null && socks != null -> getString(R.string.notif_running_ports, http, socks)
+            http != null -> getString(R.string.notif_running_http, http)
+            socks != null -> getString(R.string.notif_running_socks, socks)
+            else -> getString(R.string.notif_running, settings.port)
         }
     }
 

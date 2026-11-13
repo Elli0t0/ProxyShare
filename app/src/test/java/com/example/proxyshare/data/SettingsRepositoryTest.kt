@@ -12,7 +12,8 @@ class SettingsRepositoryTest {
         val config = AppSettings(authPass = "secret").toEngineConfig()
         assertEquals(
             "bind_addr=0.0.0.0\n" +
-                "port=8080\n" +
+                "http_port=8080\n" +
+                "socks_port=1080\n" +
                 "protocols=http,socks4,socks5\n" +
                 "auth_user=proxy\n" +
                 "auth_pass=secret\n" +
@@ -22,6 +23,42 @@ class SettingsRepositoryTest {
                 "connect_timeout_s=10\n",
             config
         )
+    }
+
+    @Test
+    fun singleModeWritesPort() {
+        val config = AppSettings(authPass = "secret", separatePorts = false).toEngineConfig()
+        assertTrue(config.contains("port=8080\n"))
+        assertFalse(config.contains("http_port"))
+        assertFalse(config.contains("socks_port"))
+    }
+
+    @Test
+    fun splitModeOnlyHttpWritesOnlyHttpPort() {
+        val config = AppSettings(authPass = "secret", protocols = setOf("http")).toEngineConfig()
+        assertTrue(config.contains("http_port=8080\n"))
+        assertFalse(config.contains("socks_port"))
+    }
+
+    @Test
+    fun splitModeOnlySocksWritesOnlySocksPort() {
+        val config = AppSettings(
+            authPass = "secret",
+            protocols = setOf("socks5"),
+        ).toEngineConfig()
+        assertFalse(config.contains("http_port"))
+        assertTrue(config.contains("socks_port=1080\n"))
+    }
+
+    @Test
+    fun httpPortOnlyWhenHttpEnabled() {
+        // HTTP off, SOCKS on: no http_port line even in split mode.
+        val config = AppSettings(
+            authPass = "secret",
+            protocols = setOf("socks4", "socks5"),
+        ).toEngineConfig()
+        assertFalse(config.contains("http_port"))
+        assertTrue(config.contains("socks_port=1080\n"))
     }
 
     @Test

@@ -44,4 +44,22 @@ class NetworkInfoTest {
         assertEquals(IfKind.OTHER, classifyInterface("dummy0"))
         assertEquals(IfKind.OTHER, classifyInterface(""))
     }
+
+    @Test
+    fun rankInterfacesOrdersAndDropsVpn() {
+        val ranked = rankInterfaces(
+            listOf(
+                NetIf("rmnet0", "10.0.0.2", IfKind.MOBILE),
+                NetIf("tun0", "10.8.0.2", IfKind.VPN),
+                NetIf("wlan0", "192.168.1.5", IfKind.WIFI),
+                NetIf("swlan0", "192.168.43.1", IfKind.HOTSPOT),
+                NetIf("eth0", "192.168.0.9", IfKind.ETHERNET),
+                NetIf("dummy0", "172.16.0.1", IfKind.OTHER),
+            )
+        )
+        assertEquals(
+            listOf("swlan0", "wlan0", "eth0", "dummy0", "rmnet0"),
+            ranked.map { it.name },
+        )
+    }
 }

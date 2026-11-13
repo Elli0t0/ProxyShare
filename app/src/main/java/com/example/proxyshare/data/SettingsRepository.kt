@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.map
 data class AppSettings(
     val bindAddr: String = "0.0.0.0",
     val port: Int = 8080,
+    /** Split mode: HTTP on httpPort, SOCKS on socksPort. False keeps the single `port`. */
+    val separatePorts: Boolean = true,
+    val httpPort: Int = 8080,
+    val socksPort: Int = 1080,
     val protocols: Set<String> = setOf("http", "socks4", "socks5"),
     val authEnabled: Boolean = true,
     val authUser: String = "proxy",
@@ -37,7 +41,12 @@ data class AppSettings(
 /** Map settings to the engine's key=value config text (see docs/ENGINE_API.md). */
 fun AppSettings.toEngineConfig(): String = buildString {
     appendLine("bind_addr=$bindAddr")
-    appendLine("port=$port")
+    if (separatePorts) {
+        if ("http" in protocols) appendLine("http_port=$httpPort")
+        if ("socks4" in protocols || "socks5" in protocols) appendLine("socks_port=$socksPort")
+    } else {
+        appendLine("port=$port")
+    }
     appendLine("protocols=${protocols.joinToString(",")}")
     if (authEnabled && authUser.isNotBlank() && authPass.isNotBlank()) {
         appendLine("auth_user=$authUser")
@@ -71,6 +80,9 @@ class SettingsRepository(context: Context) {
         AppSettings(
             bindAddr = prefs[Keys.BIND_ADDR] ?: defaults.bindAddr,
             port = prefs[Keys.PORT] ?: defaults.port,
+            separatePorts = prefs[Keys.SEPARATE_PORTS] ?: defaults.separatePorts,
+            httpPort = prefs[Keys.HTTP_PORT] ?: defaults.httpPort,
+            socksPort = prefs[Keys.SOCKS_PORT] ?: defaults.socksPort,
             protocols = prefs[Keys.PROTOCOLS] ?: defaults.protocols,
             authEnabled = prefs[Keys.AUTH_ENABLED] ?: defaults.authEnabled,
             authUser = prefs[Keys.AUTH_USER] ?: defaults.authUser,
@@ -109,6 +121,18 @@ class SettingsRepository(context: Context) {
 
     suspend fun updatePort(value: Int) {
         dataStore.edit { it[Keys.PORT] = value }
+    }
+
+    suspend fun updateSeparatePorts(value: Boolean) {
+        dataStore.edit { it[Keys.SEPARATE_PORTS] = value }
+    }
+
+    suspend fun updateHttpPort(value: Int) {
+        dataStore.edit { it[Keys.HTTP_PORT] = value }
+    }
+
+    suspend fun updateSocksPort(value: Int) {
+        dataStore.edit { it[Keys.SOCKS_PORT] = value }
     }
 
     suspend fun updateProtocols(value: Set<String>) {
@@ -170,6 +194,9 @@ class SettingsRepository(context: Context) {
     private object Keys {
         val BIND_ADDR = stringPreferencesKey("bind_addr")
         val PORT = intPreferencesKey("port")
+        val SEPARATE_PORTS = booleanPreferencesKey("separate_ports")
+        val HTTP_PORT = intPreferencesKey("http_port")
+        val SOCKS_PORT = intPreferencesKey("socks_port")
         val PROTOCOLS = stringSetPreferencesKey("protocols")
         val AUTH_ENABLED = booleanPreferencesKey("auth_enabled")
         val AUTH_USER = stringPreferencesKey("auth_user")

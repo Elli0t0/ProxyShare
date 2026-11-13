@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.3 — ports UI, ranked addresses, per-protocol rows
+
+- Settings gains separatePorts (default on), httpPort 8080, socksPort
+  1080; toEngineConfig writes http_port/socks_port in split mode and
+  the single port in single mode, only for the enabled protocols.
+- Settings > Server: "Separate ports for HTTP and SOCKS" switch; on,
+  HTTP and SOCKS port fields (1024-65535, must differ); off, the
+  single Port field. Restart banner as usual.
+- Home addresses card: rankInterfaces (hotspot, Wi-Fi, Ethernet,
+  other, mobile; VPN dropped) — first is PRIMARY, shown large
+  monospace with one copyable row per enabled protocol (HTTP and
+  SOCKS5/4); other interfaces under "Other addresses"; mobile tagged
+  "carrier address, usually not reachable from your laptop"; mobile
+  as the only address shows the hotspot/Wi-Fi hint; VPN stays in its
+  own greyed "outbound only" section.
+- Laptop sheet: laptopCommands(host, httpPort, socksPort, user, pass)
+  — a null port omits those commands. Notification text is now
+  "HTTP :8080 · SOCKS :1080" (only the enabled ones).
+- Tests: 4 new toEngineConfig tests (split, single, only-HTTP,
+  only-SOCKS), 1 rankInterfaces test, 3 laptopCommands null-port
+  tests. Existing tests untouched apart from the expected default
+  config and the laptopCommands call order.
+
 ## 0.2.2 — separate ports per protocol (Rust only)
 
 - Config gains optional `http_port` and `socks_port`. Neither set:

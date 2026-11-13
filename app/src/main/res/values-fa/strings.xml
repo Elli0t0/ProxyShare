@@ -10,6 +10,9 @@
     <string name="proxy_error">خطای پروکسی</string>
     <string name="notif_channel_name">پروکسی در حال اجراست</string>
     <string name="notif_running">در حال اجرا روی پورت %1$d</string>
+    <string name="notif_running_ports">HTTP :%1$d · SOCKS :%2$d</string>
+    <string name="notif_running_http">HTTP :%1$d</string>
+    <string name="notif_running_socks">SOCKS :%1$d</string>
     <string name="notif_stop">توقف</string>
     <string name="notif_explain_title">اعلان‌ها</string>
     <string name="notif_explain_text">پروکسی‌شیر هنگام اجرای پروکسی یک اعلان دائمی با دکمه توقف نشان می‌دهد. برای دیدن آن، اعلان‌ها را مجاز کنید.</string>
@@ -54,6 +57,14 @@
     <string name="settings_appearance">ظاهر</string>
     <string name="port_label">پورت</string>
     <string name="port_error">پورت باید 1024 تا 65535 باشد</string>
+    <string name="separate_ports_label">پورت‌های جداگانه برای HTTP و SOCKS</string>
+    <string name="http_port_label">پورت HTTP</string>
+    <string name="socks_port_label">پورت SOCKS</string>
+    <string name="ports_differ_error">پورت HTTP و SOCKS باید متفاوت باشند</string>
+    <string name="primary_address">آدرس اصلی</string>
+    <string name="other_addresses">آدرس‌های دیگر</string>
+    <string name="mobile_unreachable">آدرس اپراتور، معمولاً از لپ‌تاپ در دسترس نیست</string>
+    <string name="mobile_only_hint">هات‌اسپات را روشن کنید یا به همان وای‌فای لپ‌تاپ وصل شوید.</string>
     <string name="bind_label">آدرس شنود</string>
     <string name="bind_all">همه اینترفیس‌ها</string>
     <string name="auth_label">احراز هویت</string>

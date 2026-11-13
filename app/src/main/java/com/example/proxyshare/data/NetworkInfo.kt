@@ -33,6 +33,16 @@ fun classifyInterface(name: String): IfKind = when {
     else -> IfKind.OTHER
 }
 
+/**
+ * Rank interfaces for the Home addresses card: hotspot first, then
+ * Wi-Fi, Ethernet, other, mobile last. VPN interfaces are dropped
+ * (they are outbound only, shown in their own section).
+ */
+fun rankInterfaces(list: List<NetIf>): List<NetIf> {
+    val order = listOf(IfKind.HOTSPOT, IfKind.WIFI, IfKind.ETHERNET, IfKind.OTHER, IfKind.MOBILE)
+    return list.filter { it.kind != IfKind.VPN }.sortedBy { order.indexOf(it.kind) }
+}
+
 fun listIPv4(): List<NetIf> =
     (NetworkInterface.getNetworkInterfaces()?.toList() ?: emptyList())
         .filter { it.isUp && !it.isLoopback }

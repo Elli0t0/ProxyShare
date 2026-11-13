@@ -10,6 +10,9 @@
     <string name="proxy_error">Proxy error</string>
     <string name="notif_channel_name">Proxy running</string>
     <string name="notif_running">Running on port %1$d</string>
+    <string name="notif_running_ports">HTTP :%1$d · SOCKS :%2$d</string>
+    <string name="notif_running_http">HTTP :%1$d</string>
+    <string name="notif_running_socks">SOCKS :%1$d</string>
     <string name="notif_stop">Stop</string>
     <string name="notif_explain_title">Notifications</string>
     <string name="notif_explain_text">ProxyShare shows an ongoing notification while the proxy runs, with a Stop action. Allow notifications to see it.</string>
@@ -54,6 +57,14 @@
     <string name="settings_appearance">Appearance</string>
     <string name="port_label">Port</string>
     <string name="port_error">Port must be 1024–65535</string>
+    <string name="separate_ports_label">Separate ports for HTTP and SOCKS</string>
+    <string name="http_port_label">HTTP port</string>
+    <string name="socks_port_label">SOCKS port</string>
+    <string name="ports_differ_error">HTTP and SOCKS ports must differ</string>
+    <string name="primary_address">Primary address</string>
+    <string name="other_addresses">Other addresses</string>
+    <string name="mobile_unreachable">carrier address, usually not reachable from your laptop</string>
+    <string name="mobile_only_hint">Turn on the hotspot or join the same Wi-Fi as your laptop.</string>
     <string name="bind_label">Listen address</string>
     <string name="bind_all">All interfaces</string>
     <string name="auth_label">Authentication</string>

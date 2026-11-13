@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.networkInterfaces
+import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.service.ProxyController
 import java.net.URLEncoder
@@ -42,18 +43,34 @@ import java.net.URLEncoder
 /** One copyable command shown in the laptop sheet. */
 data class Cmd(val title: String, val text: String)
 
-/** Copyable laptop commands for [host]:[port]. Credentials are URL-encoded when given. */
-fun laptopCommands(host: String, port: Int, user: String?, pass: String?): List<Cmd> {
+/** Copyable laptop commands for [host]. Credentials are URL-encoded when given. A null port omits those commands. */
+fun laptopCommands(
+    host: String,
+    httpPort: Int?,
+    socksPort: Int?,
+    user: String?,
+    pass: String?,
+): List<Cmd> {
     val auth = if (user != null && pass != null) {
         URLEncoder.encode(user, "UTF-8") + ":" + URLEncoder.encode(pass, "UTF-8") + "@"
     } else {
         ""
     }
-    return listOf(
-        Cmd("curl (HTTP)", "curl -x http://$auth$host:$port https://ifconfig.me"),
-        Cmd("curl (SOCKS5)", "curl --socks5-hostname $auth$host:$port https://ifconfig.me"),
-        Cmd("Linux / macOS terminal", "export http_proxy=http://$auth$host:$port https_proxy=http://$auth$host:$port"),
-    )
+    val cmds = mutableListOf<Cmd>()
+    if (httpPort != null) {
+        cmds += Cmd("curl (HTTP)", "curl -x http://$auth$host:$httpPort https://ifconfig.me")
+        cmds += Cmd(
+            "Linux / macOS terminal",
+            "export http_proxy=http://$auth$host:$httpPort https_proxy=http://$auth$host:$httpPort",
+        )
+    }
+    if (socksPort != null) {
+        cmds += Cmd(
+            "curl (SOCKS5)",
+            "curl --socks5-hostname $auth$host:$socksPort https://ifconfig.me",
+        )
+    }
+    return cmds
 }
 
 /**
@@ -68,12 +85,28 @@ fun LaptopSheet(onDismiss: () -> Unit) {
     val settings by ProxyController.settings.collectAsState()
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
-    val nonVpn = interfaces.filter { it.kind != IfKind.VPN }
+    val nonVpn = rankInterfaces(interfaces)
     var selectedIp by rememberSaveable { mutableStateOf<String?>(null) }
     val host = selectedIp?.takeIf { ip -> nonVpn.any { it.ip == ip } }
         ?: nonVpn.firstOrNull()?.ip
     val user = settings.authUser.takeIf { settings.authEnabled }
     val pass = settings.authPass.takeIf { settings.authEnabled }
+    val httpPort = if (settings.separatePorts && "http" in settings.protocols) {
+        settings.httpPort
+    } else if (!settings.separatePorts) {
+        settings.port
+    } else {
+        null
+    }
+    val socksPort = if (settings.separatePorts &&
+        ("socks4" in settings.protocols || "socks5" in settings.protocols)
+    ) {
+        settings.socksPort
+    } else if (!settings.separatePorts) {
+        settings.port
+    } else {
+        null
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -125,7 +158,7 @@ fun LaptopSheet(onDismiss: () -> Unit) {
                 }
             }
             if (host != null) {
-                for (cmd in laptopCommands(host, settings.port, user, pass)) {
+                for (cmd in laptopCommands(host, httpPort, socksPort, user, pass)) {
                     CommandCard(cmd = cmd)
                 }
             }

@@ -136,13 +136,49 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
             // Server.
             SectionCard(title = stringResource(R.string.settings_server)) {
-                NumberField(
-                    label = stringResource(R.string.port_label),
-                    value = settings.port,
-                    errorText = stringResource(R.string.port_error),
-                    validate = ::validatePort,
-                    onValid = { saveRestart { updatePort(it) } },
+                SwitchRow(
+                    label = stringResource(R.string.separate_ports_label),
+                    checked = settings.separatePorts,
+                    onCheckedChange = { saveRestart { updateSeparatePorts(it) } },
                 )
+                if (settings.separatePorts) {
+                    val portsDifferError = settings.httpPort == settings.socksPort &&
+                        validatePort(settings.httpPort.toString()) != null
+                    NumberField(
+                        label = stringResource(R.string.http_port_label),
+                        value = settings.httpPort,
+                        errorText = if (portsDifferError) {
+                            stringResource(R.string.ports_differ_error)
+                        } else {
+                            stringResource(R.string.port_error)
+                        },
+                        validate = { text ->
+                            validatePort(text)?.takeIf { it != settings.socksPort }
+                        },
+                        onValid = { saveRestart { updateHttpPort(it) } },
+                    )
+                    NumberField(
+                        label = stringResource(R.string.socks_port_label),
+                        value = settings.socksPort,
+                        errorText = if (portsDifferError) {
+                            stringResource(R.string.ports_differ_error)
+                        } else {
+                            stringResource(R.string.port_error)
+                        },
+                        validate = { text ->
+                            validatePort(text)?.takeIf { it != settings.httpPort }
+                        },
+                        onValid = { saveRestart { updateSocksPort(it) } },
+                    )
+                } else {
+                    NumberField(
+                        label = stringResource(R.string.port_label),
+                        value = settings.port,
+                        errorText = stringResource(R.string.port_error),
+                        validate = ::validatePort,
+                        onValid = { saveRestart { updatePort(it) } },
+                    )
+                }
                 Text(
                     text = stringResource(R.string.bind_label),
                     style = MaterialTheme.typography.bodyLarge,

@@ -49,12 +49,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.proxyshare.R
+import com.example.proxyshare.data.AppSettings
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.data.networkInterfaces
+import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.NativeEngine
 import com.example.proxyshare.service.OutboundMode
@@ -237,11 +240,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 }
             }
 
-            // Address card.
+            // Address card: first ranked interface is primary, with one
+            // row per enabled protocol; the rest expand under "Other addresses".
             AddressCard(
-                interfaces = interfaces.filter { it.kind != IfKind.VPN },
+                ranked = rankInterfaces(interfaces),
                 vpnInterfaces = interfaces.filter { it.kind == IfKind.VPN },
-                port = settings.port,
+                settings = settings,
             )
 
             // Credentials card, only when auth is on; otherwise a compact chip.
@@ -323,8 +327,31 @@ private fun copyText(context: Context, text: String) {
 }
 
 @Composable
-private fun AddressCard(interfaces: List<NetIf>, vpnInterfaces: List<NetIf>, port: Int) {
+private fun AddressCard(
+    ranked: List<NetIf>,
+    vpnInterfaces: List<NetIf>,
+    settings: AppSettings,
+) {
     val context = LocalContext.current
+    var showOthers by rememberSaveable { mutableStateOf(false) }
+    val primary = ranked.firstOrNull()
+    val others = ranked.drop(1)
+    val httpPort = if (settings.separatePorts && "http" in settings.protocols) {
+        settings.httpPort
+    } else if (!settings.separatePorts) {
+        settings.port
+    } else {
+        null
+    }
+    val socksPort = if (settings.separatePorts &&
+        ("socks4" in settings.protocols || "socks5" in settings.protocols)
+    ) {
+        settings.socksPort
+    } else if (!settings.separatePorts) {
+        settings.port
+    } else {
+        null
+    }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -334,26 +361,76 @@ private fun AddressCard(interfaces: List<NetIf>, vpnInterfaces: List<NetIf>, por
                 text = stringResource(R.string.addresses_title),
                 style = MaterialTheme.typography.titleMedium,
             )
-            if (interfaces.isEmpty() && vpnInterfaces.isEmpty()) {
+            if (primary == null && vpnInterfaces.isEmpty()) {
                 Text(
                     text = stringResource(R.string.addresses_none),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            for (nif in interfaces) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = "${kindLabel(nif.kind)} (${nif.name}): ${nif.ip}:$port",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
+            if (primary != null) {
+                Text(
+                    text = "${stringResource(R.string.primary_address)} — " +
+                        "${kindLabel(primary.kind)} (${primary.name})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (httpPort != null) {
+                    ProtocolAddressRow(
+                        label = "HTTP",
+                        address = "${primary.ip}:$httpPort",
+                        onCopy = { copyText(context, "${primary.ip}:$httpPort") },
                     )
-                    TextButton(onClick = { copyText(context, "${nif.ip}:$port") }) {
-                        Text(stringResource(R.string.copy))
+                }
+                if (socksPort != null) {
+                    ProtocolAddressRow(
+                        label = if ("socks5" in settings.protocols) "SOCKS5" else "SOCKS4",
+                        address = "${primary.ip}:$socksPort",
+                        onCopy = { copyText(context, "${primary.ip}:$socksPort") },
+                    )
+                }
+                if (primary.kind == IfKind.MOBILE) {
+                    Text(
+                        text = stringResource(R.string.mobile_unreachable),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (ranked.size == 1 && primary.kind == IfKind.MOBILE) {
+                    Text(
+                        text = stringResource(R.string.mobile_only_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (others.isNotEmpty()) {
+                TextButton(onClick = { showOthers = !showOthers }) {
+                    Text(stringResource(R.string.other_addresses))
+                }
+                if (showOthers) {
+                    for (nif in others) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = "${kindLabel(nif.kind)} (${nif.name}): ${nif.ip}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { copyText(context, nif.ip) }) {
+                                Text(stringResource(R.string.copy))
+                            }
+                        }
+                        if (nif.kind == IfKind.MOBILE) {
+                            Text(
+                                text = stringResource(R.string.mobile_unreachable),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -371,6 +448,25 @@ private fun AddressCard(interfaces: List<NetIf>, vpnInterfaces: List<NetIf>, por
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ProtocolAddressRow(label: String, address: String, onCopy: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = "$label  $address",
+            style = MaterialTheme.typography.titleLarge,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onCopy) {
+            Text(stringResource(R.string.copy))
         }
     }
 }
