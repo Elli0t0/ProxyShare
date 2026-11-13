@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.1.0"`.
+- Returns the engine version string, e.g. `"engine 0.1.1"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -116,27 +116,40 @@ second parameter.
   of methods; if it includes 0x00 the engine answers `[0x05, 0x00]`.
   Any other list gets `[0x05, 0xFF]` and the connection closes.
 - Requests: ATYP IPv4 (0x01), domain (0x03), IPv6 (0x04). CMD CONNECT
-  (0x01) only. The target host and port are recorded on the connection
-  as soon as the request is parsed, so the snapshot shows them while
-  the relay runs.
+  (0x01) and UDP ASSOCIATE (0x03). The target host and port are
+  recorded on the connection as soon as the request is parsed, so the
+  snapshot shows them while the relay runs.
 - Reply codes: 0x00 success (with the bound address of the upstream
   socket), 0x04 host unreachable (the name did not resolve), 0x05
   connection refused (no address accepted the connection), 0x07
-  command not supported (anything other than CONNECT), 0x08 address
-  type not supported. An error reply is sent before the connection
+  command not supported (anything other than CONNECT and UDP
+  ASSOCIATE), 0x08 address type not supported. An error reply is sent before the connection
   closes; any request bytes the client already sent go unread, so such
   a close may be a reset rather than a clean FIN — the client has the
   reply code by then.
 - The greeting and the request must arrive within 10 s of the first
   byte, or the connection is closed.
 
-## SOCKS5 UDP (0.1.0)
+## SOCKS5 UDP (0.1.0–0.1.1)
 
 - Pure header functions only, no sockets yet: `parse_udp_header`
   and `build_udp_header` in rust/engine/src/udp.rs. A datagram is
   RSV(2) = 0, FRAG(1) = 0, ATYP, DST.ADDR, DST.PORT, DATA. FRAG != 0
   means drop the datagram. `Target` in socks5.rs is `pub(crate)` so
   udp.rs can use it.
+- UDP ASSOCIATE (0.1.1): the request's DST fields are read and
+  ignored. One UDP socket is bound on the TCP connection's local IP
+  (port 0) and its address goes back in the success reply. The
+  association runs until the TCP control connection closes or the UDP
+  socket sits idle: a datagram from the client's IP is parsed, its
+  target resolved with lookup_host, its DATA sent to the target from
+  the same socket, and the client's UDP source address remembered;
+  a datagram from anyone else gets the sender's address prepended as
+  a header and is sent to the remembered client address, and is
+  dropped while no client address is known yet. Only the IP that
+  opened the association may send. Whole datagrams count into the
+  record's up/down counters; the destination host:port is recorded as
+  metadata only.
 
 ## HTTP (0.0.6–0.0.7)
 

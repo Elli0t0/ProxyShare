@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.1 — SOCKS5 UDP ASSOCIATE (step 0.0.9b)
+
+- CMD 0x03 in socks5.rs: `read_request` now returns the command too
+  and `handle` dispatches CONNECT (existing body, now in `connect`)
+  vs UDP ASSOCIATE (new `associate`) vs anything else (0x07).
+- `associate` binds one UdpSocket on the TCP connection's local IP
+  (port 0), replies success with its address, then loops with
+  `tokio::select!` over the TCP control connection (read 0 or error
+  ends the association) and `udp.recv_from` with the idle timeout.
+  Client-IP datagrams are parsed, resolved with lookup_host, their
+  DATA sent to the target and the client's UDP source remembered;
+  other datagrams get the sender's address prepended as a header and
+  go to the remembered client address, and are dropped while no
+  client address is known yet. Only the opening IP may send. Whole
+  datagrams count into up/down; the destination host:port is metadata
+  only. The `#[allow(dead_code)]` on `parse_udp_header` is gone —
+  it is used now.
+- Tests: 3 new engine tests with a local UDP echo server (it listens
+  on 127.0.0.2, a different loopback IP from the client, because the
+  dispatch treats a datagram from the client's own IP as a client
+  datagram): round trip (answer comes back wrapped in a header),
+  foreign-IP datagram ignored (snapshot counters stay 0), closing
+  the TCP connection ends the association (ConnectionClosed + no UDP
+  answer). Total tests now 74 (71 + 3).
+- docs/ENGINE_API.md records UDP ASSOCIATE.
+- Step 0.0.9b shipped as 0.1.1: 0.0.9, 0.0.10 and 0.1.0 were taken.
+
 ## 0.1.0 — SOCKS5 UDP header, pure functions (step 0.0.9a)
 
 - New rust/engine/src/udp.rs: `parse_udp_header` and

@@ -576,7 +576,9 @@ pub fn destroy_engine(handle: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UdpSocket;
 
     /// A sink that remembers every event, for tests.
     struct CollectingSink {
@@ -726,6 +728,32 @@ mod tests {
             .await
             .expect("read timed out")
             .expect("read failed");
+    }
+
+    /// A local UDP echo server: echoes datagrams back to their sender.
+    /// Returns its port. It listens on 127.0.0.2, a different loopback
+    /// IP from the 127.0.0.1 test client: the associate dispatch treats
+    /// a datagram from the client's own IP as a client datagram, so a
+    /// reply from 127.0.0.1 would be parsed as a header and dropped.
+    async fn start_udp_echo_server() -> u16 {
+        let socket = UdpSocket::bind("127.0.0.2:0")
+            .await
+            .expect("bind udp echo");
+        let port = socket.local_addr().expect("udp echo addr").port();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match socket.recv_from(&mut buf).await {
+                    Ok((n, from)) => {
+                        if socket.send_to(&buf[..n], from).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        port
     }
 
     /// Send a SOCKS5 greeting with one method and return the 2-byte reply.
@@ -1654,6 +1682,124 @@ mod tests {
                 .await;
         assert_eq!(reply[1], 0x07, "command not supported, got {reply:?}");
         assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    /// Open a UDP ASSOCIATE and return the bound UDP port.
+    async fn socks5_associate(client: &mut TcpStream) -> u16 {
+        assert_eq!(socks5_greet(client, 0x00).await, [0x05, 0x00]);
+        // UDP ASSOCIATE (0x03) to 0.0.0.0:0; the DST fields are ignored.
+        let reply =
+            socks5_request_reply(client, &[0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+        assert_eq!(reply[0], 0x05);
+        assert_eq!(reply[1], 0x00, "UDP ASSOCIATE succeeded, got {reply:?}");
+        u16::from_be_bytes([reply[8], reply[9]])
+    }
+
+    #[tokio::test]
+    async fn socks5_udp_associate_round_trip() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_udp_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let udp_port = socks5_associate(&mut client).await;
+        assert_ne!(udp_port, 0);
+        let udp = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind client udp");
+        // Datagram to the echo server (127.0.0.2) with "hello" as DATA.
+        let mut d = vec![0, 0, 0, 0x01, 127, 0, 0, 2];
+        d.extend_from_slice(&echo_port.to_be_bytes());
+        d.extend_from_slice(b"hello");
+        udp.send_to(&d, ("127.0.0.1", udp_port))
+            .await
+            .expect("send datagram");
+        let mut buf = vec![0u8; 64 * 1024];
+        let (n, _) = tokio::time::timeout(Duration::from_secs(2), udp.recv_from(&mut buf))
+            .await
+            .expect("reply timed out")
+            .expect("recv failed");
+        let (target, _port, offset) = crate::udp::parse_udp_header(&buf[..n])
+            .expect("reply parses as a UDP header");
+        assert_eq!(
+            target,
+            crate::socks5::Target::Ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)))
+        );
+        assert_eq!(&buf[offset..n], b"hello");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_udp_associate_ignores_other_ip() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_udp_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let udp_port = socks5_associate(&mut client).await;
+        // A datagram from 127.0.0.3 — not the IP that opened the
+        // association — with a valid header pointing at the echo server.
+        let foreign = UdpSocket::bind("127.0.0.3:0")
+            .await
+            .expect("bind foreign udp");
+        let mut d = vec![0, 0, 0, 0x01, 127, 0, 0, 2];
+        d.extend_from_slice(&echo_port.to_be_bytes());
+        d.extend_from_slice(b"hello");
+        foreign
+            .send_to(&d, ("127.0.0.1", udp_port))
+            .await
+            .expect("send foreign datagram");
+        // It is dropped before any client address is known: nothing
+        // was forwarded to the target, so the counters stay at zero.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            engine.snapshot().starts_with("running\t0\t0\t1"),
+            "{}",
+            engine.snapshot()
+        );
+        // And the client hears nothing back.
+        let udp = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind client udp");
+        let mut buf = vec![0u8; 64 * 1024];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), udp.recv_from(&mut buf))
+                .await
+                .is_err(),
+            "foreign datagram must not reach the client"
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_udp_associate_ends_when_tcp_closes() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_udp_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let udp_port = socks5_associate(&mut client).await;
+        drop(client); // close the TCP control connection
+        let closed = wait_closed(&sink).await;
+        assert_eq!(closed.protocol, Protocol::Socks5);
+        // The UDP socket is closed too: a datagram gets no reply.
+        let udp = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind client udp");
+        let mut d = vec![0, 0, 0, 0x01, 127, 0, 0, 2];
+        d.extend_from_slice(&echo_port.to_be_bytes());
+        d.extend_from_slice(b"hello");
+        udp.send_to(&d, ("127.0.0.1", udp_port))
+            .await
+            .expect("send datagram");
+        let mut buf = vec![0u8; 64 * 1024];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), udp.recv_from(&mut buf))
+                .await
+                .is_err(),
+            "closed association must not answer"
+        );
         engine.stop();
     }
 
