@@ -132,6 +132,30 @@ async fn send_status(client: &mut TcpStream, code: u16, reason: &str) -> io::Res
         .await
 }
 
+/// The Proxy-Authorization header value of a request head, if any.
+fn proxy_auth(head: &str) -> &str {
+    for line in head.split("\r\n").skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("proxy-authorization") {
+                return value.trim();
+            }
+        }
+    }
+    ""
+}
+
+/// Reply 407 with Proxy-Authenticate: Basic and close.
+async fn send_407(client: &mut TcpStream) -> io::Result<()> {
+    client
+        .write_all(
+            b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"ProxyShare\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await
+}
+
 /// Handle one HTTP connection. A CONNECT request opens a tunnel to
 /// `host:port`: the record's target is set as soon as it is parsed,
 /// the target is dialed (DNS or connect failure gets a 502), success
@@ -165,6 +189,14 @@ pub async fn handle(
                 ));
             }
         };
+    if crate::auth::required(config) && !crate::auth::check_basic(config, proxy_auth(&head))
+    {
+        let _ = send_407(&mut client).await;
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "HTTP proxy authentication failed",
+        ));
+    }
     let mut first_parts = head.split(' ');
     if first_parts.next().unwrap_or("") == "CONNECT" {
         let target = first_parts.next().unwrap_or("");

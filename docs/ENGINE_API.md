@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.8"`.
+- Returns the engine version string, e.g. `"engine 0.0.9"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -69,6 +69,23 @@ second parameter.
   ends. HTTP and SOCKS4 have no handler yet: a sniffed connection is
   registered, its sniffed byte is consumed, it is reported as a
   `handler_missing` event (type 4), and it is closed cleanly.
+
+## Authentication (0.0.9)
+
+- When the config has both `auth_user` and `auth_pass`, every protocol
+  must authenticate. No auth is configured by default.
+- SOCKS5: only method 0x02 (username/password) is accepted, otherwise
+  [0x05, 0xFF]. Then RFC 1929: [0x01, ulen, user, plen, pass]; reply
+  [0x01, 0x00] on success, [0x01, 0x01] on failure and close.
+- HTTP: without a valid `Proxy-Authorization: Basic` header, reply 407
+  with `Proxy-Authenticate: Basic realm="ProxyShare"`, `Content-Length:
+  0` and `Connection: close`. This applies to CONNECT and plain
+  requests. The header is hop-by-hop: the rewrite drops it, so it is
+  never forwarded to the target.
+- SOCKS4 has no auth: it is refused with 0x5B when auth is required.
+- Credentials are compared in constant time (`auth::ct_eq`); the
+  base64 decoder is hand-written, no crates. Attempted passwords are
+  never logged or emitted.
 
 ## SOCKS4/4a (0.0.8)
 

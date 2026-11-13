@@ -757,6 +757,47 @@ mod tests {
         reply
     }
 
+    /// Basic auth header values used by the auth tests.
+    const BASIC_USER_PASS: &str = "Basic dXNlcjpwYXNz";
+    const BASIC_WRONG: &str = "Basic dXNlcjp3cm9uZw==";
+
+    /// Start an engine that requires auth ("user" / "pass").
+    fn start_auth_engine() -> (std::sync::Arc<Engine>, std::sync::Arc<CollectingSink>, u16) {
+        start_test_engine("auth_user = user\nauth_pass = pass")
+    }
+
+    /// Send a SOCKS5 greeting offering the given methods and return the 2-byte reply.
+    async fn socks5_greet_many(client: &mut TcpStream, methods: &[u8]) -> [u8; 2] {
+        let mut greeting = vec![0x05, methods.len() as u8];
+        greeting.extend_from_slice(methods);
+        client.write_all(&greeting).await.expect("write greeting");
+        let mut reply = [0u8; 2];
+        read_exact(client, &mut reply).await;
+        reply
+    }
+
+    /// Send an RFC 1929 username/password subnegotiation and return the 2-byte reply.
+    async fn socks5_auth(client: &mut TcpStream, user: &str, pass: &str) -> [u8; 2] {
+        let mut req = vec![0x01, user.len() as u8];
+        req.extend_from_slice(user.as_bytes());
+        req.push(pass.len() as u8);
+        req.extend_from_slice(pass.as_bytes());
+        client.write_all(&req).await.expect("write auth");
+        let mut reply = [0u8; 2];
+        read_exact(client, &mut reply).await;
+        reply
+    }
+
+    /// A CONNECT request with an optional Proxy-Authorization header value.
+    fn connect_request(host: &str, port: u16, auth: Option<&str>) -> String {
+        match auth {
+            Some(value) => format!(
+                "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: {value}\r\n\r\n"
+            ),
+            None => format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n"),
+        }
+    }
+
     /// Wait up to 2 s for a ConnectionClosed event and return its info.
     async fn wait_closed(sink: &std::sync::Arc<CollectingSink>) -> crate::model::ConnInfo {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
@@ -1251,6 +1292,225 @@ mod tests {
             "{}",
             engine.snapshot()
         );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_auth_right_credentials_connect() {
+        let (engine, sink, port) = start_auth_engine();
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(
+            socks5_greet_many(&mut client, &[0x02]).await,
+            [0x05, 0x02]
+        );
+        assert_eq!(
+            socks5_auth(&mut client, "user", "pass").await,
+            [0x01, 0x00]
+        );
+        let mut req = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
+        req.extend_from_slice(&echo_port.to_be_bytes());
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x00, "CONNECT succeeded, got {reply:?}");
+        client.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        drop(client);
+        let closed = wait_closed(&sink).await;
+        assert_eq!(closed.protocol, Protocol::Socks5);
+        assert_eq!(closed.up, 5, "5 bytes relayed client -> target");
+        assert_eq!(closed.down, 5, "5 bytes relayed target -> client");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_auth_wrong_credentials_rejected() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(
+            socks5_greet_many(&mut client, &[0x02]).await,
+            [0x05, 0x02]
+        );
+        assert_eq!(
+            socks5_auth(&mut client, "user", "wrong").await,
+            [0x01, 0x01]
+        );
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_auth_no_credentials_rejected() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(
+            socks5_greet_many(&mut client, &[0x00]).await,
+            [0x05, 0xFF]
+        );
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_connect_auth_right_credentials() {
+        let (engine, sink, port) = start_auth_engine();
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = connect_request("127.0.0.1", echo_port, Some(BASIC_USER_PASS));
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert_eq!(
+            response,
+            b"HTTP/1.1 200 Connection Established\r\n\r\n",
+            "expected a 200 reply, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        client.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        drop(client);
+        let closed = wait_closed(&sink).await;
+        assert_eq!(closed.protocol, Protocol::Http);
+        assert_eq!(closed.up, 5, "5 bytes relayed client -> target");
+        assert_eq!(closed.down, 5, "5 bytes relayed target -> client");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_connect_auth_wrong_credentials_is_407() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = connect_request("127.0.0.1", 443, Some(BASIC_WRONG));
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        let text = String::from_utf8_lossy(&response).into_owned();
+        assert!(
+            text.starts_with("HTTP/1.1 407"),
+            "expected a 407 response, got: {text}"
+        );
+        assert!(
+            text.contains("Proxy-Authenticate: Basic realm=\"ProxyShare\""),
+            "407 must carry Proxy-Authenticate, got: {text}"
+        );
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_connect_auth_no_credentials_is_407() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = connect_request("127.0.0.1", 443, None);
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 407"),
+            "expected a 407 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_get_auth_right_credentials() {
+        let (engine, _sink, port) = start_auth_engine();
+        let (server_port, recorded) = start_recording_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "GET http://127.0.0.1:{server_port}/hello HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\nProxy-Authorization: {BASIC_USER_PASS}\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 200 OK"),
+            "expected a 200 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        let received = recorded.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let received = String::from_utf8_lossy(&received).into_owned();
+        assert!(
+            !received.contains("Proxy-Authorization"),
+            "the auth header must not be forwarded: {received}"
+        );
+        assert!(
+            received.contains("Connection: close"),
+            "Connection: close is present: {received}"
+        );
+        drop(client);
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_get_auth_wrong_credentials_is_407() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "GET http://127.0.0.1:80/hello HTTP/1.1\r\nHost: example.com\r\nProxy-Authorization: {BASIC_WRONG}\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 407"),
+            "expected a 407 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_get_auth_no_credentials_is_407() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "GET http://127.0.0.1:80/hello HTTP/1.1\r\nHost: example.com\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 407"),
+            "expected a 407 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks4_auth_required_is_refused() {
+        let (engine, _sink, port) = start_auth_engine();
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let reply =
+            socks4_request_reply(&mut client, 0x01, [127, 0, 0, 1], 80, "user", None).await;
+        assert_eq!(reply[0], 0x00);
+        assert_eq!(
+            reply[1], 0x5B,
+            "SOCKS4 refused when auth is required, got {reply:?}"
+        );
+        assert_closed(&mut client).await;
         engine.stop();
     }
 

@@ -85,9 +85,11 @@ async fn send_error_reply(client: &mut TcpStream, rep: u8) -> io::Result<()> {
     .await
 }
 
-/// Read the method greeting and answer it. Only no-auth (0x00) is
-/// accepted; any other list gets [0x05, 0xFF] and the connection closes.
-async fn negotiate(client: &mut TcpStream) -> io::Result<()> {
+/// Read the method greeting and answer it. Without auth, only no-auth
+/// (0x00) is accepted. With auth, only username/password (0x02) is
+/// accepted, followed by the RFC 1929 subnegotiation; any other list
+/// gets [0x05, 0xFF] and the connection closes.
+async fn negotiate(client: &mut TcpStream, config: &Config) -> io::Result<()> {
     let mut head = [0u8; 2];
     read_exact_timeout(client, &mut head).await?;
     let (ver, nmethods) = (head[0], head[1]);
@@ -105,13 +107,54 @@ async fn negotiate(client: &mut TcpStream) -> io::Result<()> {
     }
     let mut methods = vec![0u8; nmethods as usize];
     read_exact_timeout(client, &mut methods).await?;
-    if methods.contains(&0x00) {
+    if crate::auth::required(config) {
+        if methods.contains(&0x02) {
+            client.write_all(&[0x05, 0x02]).await?;
+            authenticate(client, config).await
+        } else {
+            let _ = client.write_all(&[0x05, REP_NO_ACCEPTABLE_METHOD]).await;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "client offers no acceptable authentication method",
+            ))
+        }
+    } else if methods.contains(&0x00) {
         client.write_all(&[0x05, 0x00]).await
     } else {
         let _ = client.write_all(&[0x05, REP_NO_ACCEPTABLE_METHOD]).await;
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "client offers no acceptable authentication method",
+        ))
+    }
+}
+
+/// RFC 1929 username/password subnegotiation: [0x01, ulen, user, plen,
+/// pass]. Reply [0x01, 0x00] on success, [0x01, 0x01] on failure and
+/// close. The attempted password is never logged or included in the
+/// error.
+async fn authenticate(client: &mut TcpStream, config: &Config) -> io::Result<()> {
+    let mut head = [0u8; 2];
+    read_exact_timeout(client, &mut head).await?;
+    if head[0] != 0x01 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bad username/password subnegotiation version",
+        ));
+    }
+    let mut user = vec![0u8; head[1] as usize];
+    read_exact_timeout(client, &mut user).await?;
+    let mut plen = [0u8; 1];
+    read_exact_timeout(client, &mut plen).await?;
+    let mut pass = vec![0u8; plen[0] as usize];
+    read_exact_timeout(client, &mut pass).await?;
+    if crate::auth::check(config, &user, &pass) {
+        client.write_all(&[0x01, 0x00]).await
+    } else {
+        let _ = client.write_all(&[0x01, 0x01]).await;
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "SOCKS5 username/password authentication failed",
         ))
     }
 }
@@ -202,7 +245,7 @@ pub async fn handle(
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
 ) -> io::Result<()> {
-    negotiate(&mut client).await?;
+    negotiate(&mut client, config).await?;
     let (target, port) = read_request(&mut client).await?;
     let host = target.host();
     record.set_target(host.clone(), port);

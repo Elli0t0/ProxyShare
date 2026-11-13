@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.9 — authentication (step 0.0.8a)
+
+- New rust/engine/src/auth.rs: `ct_eq` and `base64_decode`
+  (hand-written, no crates), `required` / `check` / `check_basic`
+  against the config's `auth_user` / `auth_pass`.
+- SOCKS5: with auth, only method 0x02 is accepted, then RFC 1929
+  ([0x01, 0x00] on success, [0x01, 0x01] on failure and close);
+  without auth, no-auth only as before.
+- HTTP: with auth, a missing or wrong `Proxy-Authorization: Basic`
+  header gets a 407 with `Proxy-Authenticate: Basic
+  realm="ProxyShare"`; applies to CONNECT and plain requests.
+- SOCKS4: refused with 0x5B when auth is required (it has no auth).
+- Tests: auth.rs unit tests (base64, ct_eq, check_basic); every
+  protocol with right, wrong and no credentials — SOCKS5 3, HTTP
+  CONNECT 3 + plain GET 3, SOCKS4 1 with auth → 0x5B. Attempted
+  passwords are never logged or emitted.
+- docs/ENGINE_API.md records the auth contract.
+
 ## 0.0.8 — SOCKS4/4a
 
 - New rust/engine/src/socks4.rs: `handle` (same signature as

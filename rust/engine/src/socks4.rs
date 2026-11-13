@@ -96,6 +96,14 @@ pub async fn handle(
             format!("SOCKS4 command {cd} is not supported (CONNECT only)"),
         ));
     }
+    if crate::auth::required(config) {
+        // SOCKS4 has no authentication: refuse it when auth is required.
+        let _ = send_reply(&mut client, REP_FAILURE).await;
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "SOCKS4 has no authentication",
+        ));
+    }
     record.set_target(host.clone(), port);
     let upstream = match outbound
         .connect(&host, port, Duration::from_secs(config.connect_timeout_s))
