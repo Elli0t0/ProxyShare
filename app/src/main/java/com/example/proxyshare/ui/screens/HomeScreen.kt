@@ -28,6 +28,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -76,6 +77,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     }
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
     var exitIpChecking by rememberSaveable { mutableStateOf(false) }
+    var showLaptopSheet by rememberSaveable { mutableStateOf(false) }
 
     // Keep the screen on while the proxy runs, when the setting is on.
     val view = LocalView.current
@@ -204,6 +206,18 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
+            }
+
+            // Connect your laptop sheet.
+            OutlinedButton(
+                onClick = { showLaptopSheet = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.laptop_button))
+            }
+
+            if (showLaptopSheet) {
+                LaptopSheet(onDismiss = { showLaptopSheet = false })
             }
 
             // Warning banner: open to the network with no auth.

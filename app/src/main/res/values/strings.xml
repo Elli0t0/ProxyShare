@@ -76,4 +76,11 @@
     <string name="keep_screen_on_label">Keep screen on</string>
     <string name="restart_banner">Restart the proxy to apply</string>
     <string name="restart_button">Restart</string>
+    <string name="laptop_button">Connect your laptop</string>
+    <string name="laptop_start_first">Start the proxy first, then run these on your laptop.</string>
+    <string name="laptop_pick_address">Use this address</string>
+    <string name="laptop_windows_title">Windows</string>
+    <string name="laptop_windows_steps">Settings → Network → Proxy → Manual proxy setup. Enter the host and port shown above.</string>
+    <string name="laptop_firefox_title">Firefox</string>
+    <string name="laptop_firefox_steps">Settings → Network Settings → Manual proxy. Choose SOCKS v5, enter the host and port, and tick "Proxy DNS when using SOCKS v5".</string>
 </resources>

@@ -76,4 +76,11 @@
     <string name="keep_screen_on_label">روشن نگه‌داشتن صفحه</string>
     <string name="restart_banner">برای اعمال تغییرات، پروکسی را دوباره راه‌اندازی کنید</string>
     <string name="restart_button">راه‌اندازی دوباره</string>
+    <string name="laptop_button">اتصال لپ‌تاپ</string>
+    <string name="laptop_start_first">اول پروکسی را روشن کنید، بعد این دستورها را روی لپ‌تاپ اجرا کنید.</string>
+    <string name="laptop_pick_address">از این آدرس استفاده کنید</string>
+    <string name="laptop_windows_title">ویندوز</string>
+    <string name="laptop_windows_steps">تنظیمات → شبکه → پروکسی → راه‌اندازی دستی پروکسی. میزبان و پورت بالا را وارد کنید.</string>
+    <string name="laptop_firefox_title">فایرفاکس</string>
+    <string name="laptop_firefox_steps">تنظیمات → تنظیمات شبکه → پروکسی دستی. SOCKS v5 را انتخاب کنید، میزبان و پورت را وارد کنید و «Proxy DNS when using SOCKS v5» را فعال کنید.</string>
 </resources>

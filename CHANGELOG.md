@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 — laptop setup sheet + first complete build
+
+- Home gets a "Connect your laptop" button opening a ModalBottomSheet:
+  pick a non-VPN address, then copyable commands built by the pure
+  laptopCommands() (curl HTTP, curl SOCKS5, Linux/macOS export line,
+  credentials URL-encoded when auth is on), plus plain-text Windows
+  and Firefox steps. (Step was numbered 0.1.10, but that version is
+  the Settings screen, so this ships as 0.2.0.)
+- New docs/TESTING.md manual checklist; README gains a feature list
+  and a short "How to use".
+- CI now uploads both the debug and the release APK (R8 on) and prints
+  the release APK size in the job summary (workflow edit via web UI).
+
 ## 0.1.10 — Settings screen
 
 - New ui/screens/SettingsScreen.kt on SettingsRepository: Server
