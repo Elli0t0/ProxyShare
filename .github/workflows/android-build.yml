@@ -98,6 +98,14 @@ jobs:
 
       - name: Build release APK
         run: ./gradlew assembleRelease -PVERSION_CODE=$GITHUB_RUN_NUMBER
+      - name: Release APK size
+        run: |
+          apk=$(ls app/build/outputs/apk/release/*.apk)
+          {
+            echo "### Release APK"
+            echo "- File: `$(basename "$apk")`"
+            echo "- Size: `$(du -h "$apk" | cut -f1)`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check native libs in debug APK
         if: hashFiles('rust/engine/Cargo.toml') != ''
@@ -127,6 +135,12 @@ jobs:
         with:
           name: ProxyShare-debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProxyShare-release
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Read version
