@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.1.4 — service + ProxyController
+
+- CI: `./gradlew testDebugUnitTest` now runs before assembleDebug
+  (workflow edit, separate commit).
+- New app/ProxyShareApp.kt: Application subclass calling
+  ProxyController.init(this) in onCreate; registered with
+  android:name in the manifest.
+- New service/ProxyController.kt: app-scoped singleton (object, no
+  Hilt) owning the one Engine, its own CoroutineScope (SupervisorJob
+  + Dispatchers.Default) and a SettingsRepository. Exposes state /
+  snapshot / events, plus a settings flow (needed for the
+  notification's port text; the settings screen will use it too).
+  start() reads settings, runs ensurePassword(), starts the engine;
+  stop() also resets an Error state to Stopped. Both are safe to call
+  twice and never throw; concurrent starts are guarded by a Mutex.
+- New service/ProxyService.kt: foreground service (specialUse,
+  PROPERTY_SPECIAL_USE_FGS_SUBTYPE local_proxy_server). Ongoing
+  notification (channel proxy_running, IMPORTANCE_LOW) with a Stop
+  action and a tap action opening MainActivity, using a new small
+  vector status icon (ic_proxy_status, swap arrows) instead of the
+  launcher icon; text "Running on port <port>", refreshed if the
+  settings land or change after start. Holds a non-reference-counted
+  PARTIAL_WAKE_LOCK only while running. Observes the engine state:
+  Stopped (from the app) stops the service; Error shows the error
+  text, keeps the notification visible (detach), and stops the
+  service. ACTION_STOP does the same from the notification.
+- Manifest: FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE,
+  POST_NOTIFICATIONS, WAKE_LOCK permissions; the service declared
+  exported=false with foregroundServiceType specialUse.
+- HomeScreen (temporary, replaced in 0.1.5): Start and Stop buttons
+  plus the live state text (Start launches the service, Stop calls
+  ProxyController.stop()).
+- New dependency: androidx.core 1.16.0, for ServiceCompat,
+  ContextCompat and NotificationCompat. It was already in the APK
+  through activity-compose, so the size cost is ~0.
+- Rust side untouched except ENGINE_VERSION, now "engine 0.1.4".
+
 ## 0.1.3 — engine/Engine.kt (step 0.0.10b)
 
 - New app/src/main/java/com/example/proxyshare/engine/Engine.kt:

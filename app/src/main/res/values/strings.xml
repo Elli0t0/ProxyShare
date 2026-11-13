@@ -3,5 +3,13 @@
     <string name="app_name">ProxyShare</string>
     <string name="app_tagline">Share your phone\u2019s VPN with your laptop over Wi-Fi.</string>
     <string name="proxy_stopped">Proxy stopped</string>
+    <string name="proxy_start">Start</string>
+    <string name="proxy_stop">Stop</string>
+    <string name="proxy_starting">Starting…</string>
+    <string name="proxy_running">Proxy running</string>
+    <string name="proxy_error">Proxy error</string>
+    <string name="notif_channel_name">Proxy running</string>
+    <string name="notif_running">Running on port %1$d</string>
+    <string name="notif_stop">Stop</string>
     <string name="engine_unavailable">Engine unavailable</string>
 </resources>
