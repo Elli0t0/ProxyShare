@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6 — outbound network binding (Rust only, TCP only)
+
+- New rust/engine/src/netbind.rs: bind_socket_to_network calls
+  android_setsocknetwork (libandroid) on Android, no-op elsewhere.
+- Connector holds an AtomicU64 network handle (0 = default); connect
+  opens each outbound socket with TcpSocket and binds it before
+  connecting. Timeout, per-address loop, TCP_NODELAY and error
+  mapping unchanged.
+- Engine::set_outbound_network + JNI nativeSetOutboundNetwork
+  (nativeStop pattern) + Kotlin NativeEngine/Engine wrappers.
+- Known limitation: UDP ASSOCIATE sockets and DNS lookups are NOT
+  bound yet — TCP only.
+
 ## 0.1.5 — navigation shell + Home screen
 
 - New ui/AppRoot.kt (a composable, not the Application class):

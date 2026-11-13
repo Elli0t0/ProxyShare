@@ -16,7 +16,8 @@
 //! [`socks4`] (SOCKS4/4a CONNECT), [`socks5`] (SOCKS5 negotiation and
 //! CONNECT), [`udp`] (SOCKS5 UDP datagram header parse/build, pure
 //! functions), [`http`] (plain HTTP forwarding and CONNECT tunnels),
-//! [`listener`] (the JNI event callback).
+//! [`listener`] (the JNI event callback), [`netbind`] (bind an outbound
+//! socket to an Android Network).
 
 pub mod auth;
 pub mod cidr;
@@ -26,6 +27,7 @@ pub mod engine;
 pub mod http;
 pub mod listener;
 pub mod model;
+pub mod netbind;
 pub mod relay;
 pub mod sniffer;
 pub mod socks4;
@@ -41,8 +43,8 @@ use jni::JNIEnv;
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.1.5".
-pub const ENGINE_VERSION: &str = "engine 0.1.5";
+/// The engine version string, e.g. "engine 0.1.6".
+pub const ENGINE_VERSION: &str = "engine 0.1.6";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -127,6 +129,21 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSto
 ) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         with_engine(handle, |engine| engine.stop());
+    }));
+}
+
+/// Set the Android Network handle (net_handle_t) for outbound TCP
+/// connections. 0 means the default network. Safe on a stopped or
+/// unknown handle (no-op).
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSetOutboundNetwork<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    network: jlong,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        with_engine(handle, |engine| engine.set_outbound_network(network as u64));
     }));
 }
 

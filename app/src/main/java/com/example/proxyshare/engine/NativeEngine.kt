@@ -24,6 +24,10 @@ object NativeEngine {
     @JvmStatic
     external fun nativeStop(handle: Long)
 
+    /** Set the Android Network handle for outbound TCP connections (0 = default network). */
+    @JvmStatic
+    external fun nativeSetOutboundNetwork(handle: Long, network: Long)
+
     /** Stop the engine if running and release its handle. */
     @JvmStatic
     external fun nativeDestroy(handle: Long)

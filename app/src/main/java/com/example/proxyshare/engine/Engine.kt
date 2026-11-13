@@ -140,6 +140,12 @@ class Engine(private val scope: CoroutineScope) {
         fastPolling = enabled
     }
 
+    /** Set the Android Network handle for outbound TCP connections (0 = default network). No-op after close. */
+    fun setOutboundNetwork(network: Long) {
+        if (closed) return
+        NativeEngine.nativeSetOutboundNetwork(handle, network)
+    }
+
     /**
      * Start the engine with these settings. Returns "" on success, or
      * an error text. On success the snapshot is polled until stop().

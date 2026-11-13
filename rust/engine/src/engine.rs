@@ -105,8 +105,8 @@ pub struct Engine {
     /// `max_connections` is enforced on this count, so in-flight sniffs
     /// count too, not only registered connections.
     active: AtomicUsize,
-    /// The outbound used to dial targets. A plain struct; 0.1.1 adds a
-    /// network-handle field to it.
+    /// The outbound used to dial targets. It holds the Android Network
+    /// handle for outbound sockets (0 = default network).
     outbound: std::sync::Arc<Connector>,
     /// Failed-auth throttle: 5 failures in 60 s block an IP for 5 min.
     auth_guard: crate::auth::AuthGuard,
@@ -167,7 +167,7 @@ impl Engine {
                 total_down: 0,
             }),
             active: AtomicUsize::new(0),
-            outbound: std::sync::Arc::new(Connector),
+            outbound: std::sync::Arc::new(Connector::default()),
             auth_guard: crate::auth::AuthGuard::default(),
         }
     }
@@ -180,6 +180,13 @@ impl Engine {
     /// Register the event sink (the JNI listener, or a test sink).
     pub fn set_sink(&self, sink: std::sync::Arc<dyn EventSink>) {
         lock_inner(&self.inner).sink = Some(sink);
+    }
+
+    /// Set the Android Network handle (net_handle_t) for outbound TCP
+    /// connections. 0 means the default network. Applies to connections
+    /// opened after the call.
+    pub fn set_outbound_network(&self, handle: u64) {
+        self.outbound.set_network(handle);
     }
 
     /// Send an event to the sink, if one is registered. Never called with

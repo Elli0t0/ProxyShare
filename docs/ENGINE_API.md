@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.1.5"`.
+- Returns the engine version string, e.g. `"engine 0.1.6"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -42,6 +42,7 @@ second parameter.
 | `nativeCreate(): Long` | creates an `Engine`, stores it in the global handle table | Returns the handle. |
 | `nativeStart(h: Long, cfg: String): String` | `Engine::start` | Parses the config and starts listening. Returns `""` on success, an error text on failure. Starting an already starting or running engine is a no-op returning `""`. |
 | `nativeStop(h: Long)` | `Engine::stop` | Stops listening, cancels the accept task and closes the sockets (within 2 s). Safe on a stopped engine. |
+| `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
 | `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
@@ -178,8 +179,17 @@ second parameter.
 
 ## Outbound and relay (0.0.5)
 
-- `Connector` (`rust/engine/src/connector.rs`) is a plain struct; 0.1.1
-  adds a network-handle field to it.
+- `Connector` (`rust/engine/src/connector.rs`) holds the Android
+  Network handle for outbound sockets (`network: AtomicU64`, 0 =
+  default network; set with `Engine::set_outbound_network`, reached
+  from Kotlin as `nativeSetOutboundNetwork`). `connect_addr` opens
+  each outbound TCP socket with `TcpSocket` (v4 or v6 by address) and
+  binds it with `netbind::bind_socket_to_network` (0.1.6), which calls
+  `android_setsocknetwork` (libandroid) on Android and does nothing on
+  other targets. The DNS lookup, per-address loop, connect timeout,
+  `TCP_NODELAY` and the `Dns`/`Connect` error mapping are unchanged.
+- **Known limitation:** UDP ASSOCIATE sockets and DNS lookups are NOT
+  bound to the network yet — only outbound TCP connections are.
 - A connect failure is one of two kinds: the name did not resolve
   (`Dns`) or no address accepted the connection (`Connect`). The
   SOCKS5 handler maps them to the reply codes 0x04 and 0x05.
