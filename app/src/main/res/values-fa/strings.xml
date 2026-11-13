@@ -28,7 +28,7 @@
     <string name="password_label">گذرواژه</string>
     <string name="password_hint">برای نمایش گذرواژه روی آن بزنید.</string>
     <string name="copy">کپی</string>
-    <string name="warning_open">هر کسی در این شبکه می‌تواند از این پروکسی استفاده کند: احراز هویت خاموش و فقط-خصوصی خاموش است.</string>
+    <string name="warning_open">برای همه، در هر شبکه‌ای که گوشی به آن وصل است، باز است.</string>
     <string name="if_wifi">وای‌فای</string>
     <string name="if_hotspot">هات‌اسپات</string>
     <string name="if_ethernet">اترنت</string>
@@ -83,4 +83,7 @@
     <string name="laptop_windows_steps">تنظیمات → شبکه → پروکسی → راه‌اندازی دستی پروکسی. میزبان و پورت بالا را وارد کنید.</string>
     <string name="laptop_firefox_title">فایرفاکس</string>
     <string name="laptop_firefox_steps">تنظیمات → تنظیمات شبکه → پروکسی دستی. SOCKS v5 را انتخاب کنید، میزبان و پورت را وارد کنید و «Proxy DNS when using SOCKS v5» را فعال کنید.</string>
+    <string name="auth_no_password">بدون رمز</string>
+    <string name="auth_no_password_note">هر کسی که به این پورت دسترسی داشته باشد می‌تواند از اتصال شما استفاده کند. «فقط شبکه‌های خصوصی» را روشن نگه دارید.</string>
+    <string name="no_password_private">بدون رمز · فقط شبکه‌های خصوصی</string>
 </resources>

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.1 — security presets: Password / No password
+
+- Settings > Security: the bare auth switch is now a Password | No
+  password segmented row. With No password the username/password
+  fields and Regenerate hide, the stored password is kept, and a note
+  warns that anyone reaching the port can use the connection.
+- No password + private-only off shows a red warning card at the top
+  of Settings and on Home ("Open to everyone on every network the
+  phone is connected to."). Home shows a compact "No password ·
+  private networks only" chip when auth is off and private-only is on.
+- No Rust change: the no-auth paths were already proven by
+  socks5_connect_relays_to_echo_server (0x00 only), 
+  http_get_is_rewritten_and_relayed (no Proxy-Authorization) and
+  socks4_connect_relays_to_echo_server, all on a no-auth config.
+  toEngineConfig() already wrote no auth lines when auth is off; the
+  test now spells out a stored user + password.
+
 ## 0.2.0 — laptop setup sheet + first complete build
 
 - Home gets a "Connect your laptop" button opening a ModalBottomSheet:

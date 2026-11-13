@@ -244,9 +244,21 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 port = settings.port,
             )
 
-            // Credentials card, only when auth is on.
+            // Credentials card, only when auth is on; otherwise a compact chip.
             if (settings.authEnabled) {
                 CredentialsCard(user = settings.authUser, password = settings.authPass)
+            } else if (settings.privateOnly) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.no_password_private),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
             }
 
             // Protocol chips reflecting the settings.

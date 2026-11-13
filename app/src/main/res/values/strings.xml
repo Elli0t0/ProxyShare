@@ -28,7 +28,7 @@
     <string name="password_label">Password</string>
     <string name="password_hint">Tap the password to reveal it.</string>
     <string name="copy">Copy</string>
-    <string name="warning_open">Anyone on this network can use this proxy: authentication is off and private-only is off.</string>
+    <string name="warning_open">Open to everyone on every network the phone is connected to.</string>
     <string name="if_wifi">Wi-Fi</string>
     <string name="if_hotspot">Hotspot</string>
     <string name="if_ethernet">Ethernet</string>
@@ -83,4 +83,7 @@
     <string name="laptop_windows_steps">Settings → Network → Proxy → Manual proxy setup. Enter the host and port shown above.</string>
     <string name="laptop_firefox_title">Firefox</string>
     <string name="laptop_firefox_steps">Settings → Network Settings → Manual proxy. Choose SOCKS v5, enter the host and port, and tick "Proxy DNS when using SOCKS v5".</string>
+    <string name="auth_no_password">No password</string>
+    <string name="auth_no_password_note">Anyone who can reach this port can use your connection. Keep 'Private networks only' on.</string>
+    <string name="no_password_private">No password · private networks only</string>
 </resources>

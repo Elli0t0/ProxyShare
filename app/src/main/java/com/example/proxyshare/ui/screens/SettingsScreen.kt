@@ -117,6 +117,23 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 }
             }
 
+            // Open to everyone: no password and not private-only.
+            if (!settings.authEnabled && !settings.privateOnly) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.warning_open),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+
             // Server.
             SectionCard(title = stringResource(R.string.settings_server)) {
                 NumberField(
@@ -179,11 +196,31 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
             // Security.
             SectionCard(title = stringResource(R.string.settings_security)) {
-                SwitchRow(
-                    label = stringResource(R.string.auth_label),
-                    checked = settings.authEnabled,
-                    onCheckedChange = { saveRestart { updateAuthEnabled(it) } },
-                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    val modes = listOf(
+                        true to R.string.password_label,
+                        false to R.string.auth_no_password,
+                    )
+                    modes.forEachIndexed { index, (enabled, labelRes) ->
+                        SegmentedButton(
+                            selected = settings.authEnabled == enabled,
+                            onClick = { saveRestart { updateAuthEnabled(enabled) } },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = modes.size,
+                            ),
+                        ) {
+                            Text(text = stringResource(labelRes))
+                        }
+                    }
+                }
+                if (!settings.authEnabled) {
+                    Text(
+                        text = stringResource(R.string.auth_no_password_note),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (settings.authEnabled) {
                     OutlinedTextField(
                         value = settings.authUser,

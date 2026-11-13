@@ -33,7 +33,12 @@ class SettingsRepositoryTest {
 
     @Test
     fun authDisabledOmitsAuthKeys() {
-        val config = AppSettings(authEnabled = false, authPass = "secret").toEngineConfig()
+        // Stored password, but auth off: no auth lines at all.
+        val config = AppSettings(
+            authEnabled = false,
+            authUser = "proxy",
+            authPass = "secret",
+        ).toEngineConfig()
         assertFalse(config.contains("auth_user"))
         assertFalse(config.contains("auth_pass"))
     }
