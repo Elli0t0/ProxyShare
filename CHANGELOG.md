@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.6 — plain HTTP forwarding (step 0.0.6b)
+
+- New rust/engine/src/http.rs: `rewrite_head` (pure function, the
+  reference rewrite verbatim: absolute URI to origin-form, hop-by-hop
+  headers dropped, `Connection: close` added) and `handle` (reads the
+  head with a 10 s timeout, 400 for anything but an absolute-URI
+  request, 502 for an unreachable target, sends the rewritten head
+  plus body bytes already read, then relays both directions untouched;
+  bodies are never parsed or logged).
+- Engine: HTTP connections now emit `ConnectionOpened` (type 2) at
+  registration and `ConnectionClosed` (type 3) at the end, like SOCKS5;
+  SOCKS4 still reports `handler_missing` (type 4). `nativeVersion()`
+  now returns "engine 0.0.6".
+- Tests: `rewrite_head` unit tests (absolute URI with and without a
+  port, all 7 hop-by-hop headers dropped, relative URI / CONNECT /
+  https / bad port rejected); GET and POST against a local recording
+  server (rewritten head received, body intact), relative URI gives
+  400, unreachable target gives 502.
+- docs/ENGINE_API.md records the HTTP contract.
+
 ## 0.0.5 — relay + SOCKS5 CONNECT
 
 - New rust/engine/src/connector.rs: an `Outbound` trait (the seam 0.1.1

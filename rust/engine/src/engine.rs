@@ -497,8 +497,14 @@ async fn handle_connection(
             // final totals when the close is reported.
             engine.emit(Event::ConnectionClosed(record.to_conn_info()));
         }
+        Protocol::Http => {
+            engine.emit(Event::ConnectionOpened(record.to_conn_info()));
+            let _ = crate::http::handle(stream, &engine.outbound, &config, &record).await;
+            engine.unregister(record.id);
+            engine.emit(Event::ConnectionClosed(record.to_conn_info()));
+        }
         _ => {
-            // HTTP and SOCKS4 have no handler yet.
+            // SOCKS4 has no handler yet.
             consume_one(&mut stream).await;
             engine.emit(Event::HandlerMissing(record.to_conn_info()));
             engine.unregister(record.id);
@@ -765,6 +771,204 @@ mod tests {
             Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
             other => panic!("expected the engine to close the connection, got {other:?}"),
         }
+    }
+
+    /// Read a whole response (up to EOF) within 5 s, or panic.
+    async fn read_response(client: &mut TcpStream) -> Vec<u8> {
+        let mut buf = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut buf))
+            .await
+            .expect("response read timed out")
+            .expect("response read failed");
+        buf
+    }
+
+    /// A local HTTP server that records the raw request it received and
+    /// answers `ok`. Returns (port, recorded bytes).
+    async fn start_recording_server() -> (u16, std::sync::Arc<Mutex<Vec<u8>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let recorded = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let recorded_clone = std::sync::Arc::clone(&recorded);
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                // Read the head (up to the blank line).
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let mut head_end = None;
+                while head_end.is_none() {
+                    match stream.read(&mut chunk).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            buf.extend_from_slice(&chunk[..n]);
+                            head_end = buf
+                                .windows(4)
+                                .position(|w| w == b"\r\n\r\n")
+                                .map(|i| i + 4);
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let Some(end) = head_end else {
+                    return;
+                };
+                // Read the body, if the head declares one.
+                let head = String::from_utf8_lossy(&buf[..end]).into_owned();
+                let content_length = head
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            value.trim().parse::<usize>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                while buf.len() < end + content_length {
+                    match stream.read(&mut chunk).await {
+                        Ok(0) => break,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                        Err(_) => break,
+                    }
+                }
+                *recorded_clone
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = buf;
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await;
+            }
+        });
+        (port, recorded)
+    }
+
+    #[tokio::test]
+    async fn http_get_is_rewritten_and_relayed() {
+        let (engine, sink, port) = start_test_engine("");
+        let (server_port, recorded) = start_recording_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "GET http://127.0.0.1:{server_port}/hello HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\nProxy-Connection: keep-alive\r\nX-Test: yes\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 200 OK"),
+            "expected a 200 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        assert!(response.ends_with(b"ok"), "response body is 'ok'");
+        drop(client); // let the relay finish, so the close is reported
+        let received = recorded.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let expected = format!(
+            "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\nX-Test: yes\r\nConnection: close\r\n\r\n"
+        );
+        assert_eq!(
+            received,
+            expected.as_bytes(),
+            "server got the rewritten request"
+        );
+        // Opened at registration, closed with the final counts.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let events = sink.events();
+            if events
+                .iter()
+                .any(|e| matches!(e, Event::ConnectionClosed(_)))
+            {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no ConnectionClosed, got: {events:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, Event::ConnectionOpened(_))));
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_post_body_arrives_intact() {
+        let (engine, _sink, port) = start_test_engine("");
+        let (server_port, recorded) = start_recording_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        // Head and body in a single write: the body may arrive with the
+        // head (body prefix) or after it (pump); either way it must
+        // reach the server intact.
+        let request = format!(
+            "POST http://127.0.0.1:{server_port}/submit HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\nContent-Length: 5\r\n\r\nhello"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 200 OK"),
+            "expected a 200 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        let received = recorded.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let expected = format!(
+            "POST /submit HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello"
+        );
+        assert_eq!(
+            received,
+            expected.as_bytes(),
+            "server got the rewritten request with the body intact"
+        );
+        drop(client);
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_relative_uri_is_400() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        client
+            .write_all(b"GET /hello HTTP/1.1\r\nHost: example.com\r\n\r\n")
+            .await
+            .expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 400"),
+            "expected a 400 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_unreachable_target_is_502() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        // A port that is free right now, so nothing listens on it.
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe bind");
+        let target_port = probe.local_addr().expect("probe addr").port();
+        drop(probe);
+        let request = format!(
+            "GET http://127.0.0.1:{target_port}/ HTTP/1.1\r\nHost: 127.0.0.1:{target_port}\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 502"),
+            "expected a 502 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        engine.stop();
     }
 
     #[tokio::test]

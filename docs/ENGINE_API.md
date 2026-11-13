@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.5"`.
+- Returns the engine version string, e.g. `"engine 0.0.6"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -89,6 +89,24 @@ second parameter.
   reply code by then.
 - The greeting and the request must arrive within 10 s of the first
   byte, or the connection is closed.
+
+## HTTP (0.0.6)
+
+- Plain HTTP forwarding, every method except CONNECT: the request line
+  must carry an absolute URI (`http://host[:port]/path`); anything else
+  gets a 400. A CONNECT request (authority-form) gets a 400 too.
+- The request is rewritten to origin-form, the hop-by-hop headers are
+  dropped (`Proxy-Connection`, `Proxy-Authorization`, `Connection`,
+  `Keep-Alive`, `TE`, `Trailer`, `Upgrade`), and `Connection: close`
+  is added (no keep-alive in this version).
+- The engine connects to `host:port` (default 80), sends the rewritten
+  head plus any body bytes already read, then relays both directions
+  untouched. A target that cannot be reached gets a 502.
+- Bodies are never parsed or logged; only the target host/port and the
+  byte counts are recorded. The rewritten head is not counted; body
+  bytes already read are counted as `up`.
+- IPv6 literals in absolute URIs are not supported: the rewrite keeps
+  the brackets, so the lookup fails and the client gets a 502.
 
 ## Outbound and relay (0.0.5)
 
