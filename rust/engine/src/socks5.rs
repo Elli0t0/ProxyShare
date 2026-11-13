@@ -19,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::config::Config;
-use crate::connector::{ConnectError, Outbound};
+use crate::connector::{ConnectError, Connector};
 use crate::engine::ConnRecord;
 use crate::relay;
 
@@ -196,9 +196,9 @@ async fn read_request(client: &mut TcpStream) -> io::Result<(Target, u16)> {
 /// parsed, and the relay counts live into its up/down counters. The
 /// client stream is consumed: on any outcome the connection is closed
 /// when this returns.
-pub async fn handle<O: Outbound>(
+pub async fn handle(
     mut client: TcpStream,
-    outbound: &O,
+    outbound: &Connector,
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
 ) -> io::Result<()> {

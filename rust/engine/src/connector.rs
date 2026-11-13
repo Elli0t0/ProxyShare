@@ -54,73 +54,58 @@ impl From<ConnectError> for io::Error {
     }
 }
 
-/// Something that can open an outbound TCP connection to a `host:port`.
-/// The handler is generic over this trait, so a future step can swap
-/// the implementation (for example one bound to an Android Network)
-/// without changing the handler.
-pub trait Outbound: Send + Sync {
+/// Opens outbound TCP connections: resolve with `lookup_host`, try the
+/// addresses in order, apply the connect timeout, set `TCP_NODELAY`.
+/// A plain struct; 0.1.1 adds a network-handle field to it.
+#[derive(Default)]
+pub struct Connector;
+
+impl Connector {
     /// Connect to `host:port` within `timeout` (the timeout bounds the
-    /// DNS lookup and each connect attempt). Written as a plain `fn`
-    /// returning `impl Future` rather than `async fn`: clippy's
-    /// `async_fn_in_trait` lint forbids the latter, because an `async
-    /// fn` in a trait cannot state the `Send` bound its future needs.
-    fn connect(
+    /// DNS lookup and each connect attempt).
+    pub async fn connect(
         &self,
         host: &str,
         port: u16,
         timeout: Duration,
-    ) -> impl std::future::Future<Output = Result<TcpStream, ConnectError>> + Send;
-}
-
-/// The plain outbound: the system resolver and a normal TCP connect.
-pub struct TcpOutbound;
-
-impl Outbound for TcpOutbound {
-    fn connect(
-        &self,
-        host: &str,
-        port: u16,
-        timeout: Duration,
-    ) -> impl std::future::Future<Output = Result<TcpStream, ConnectError>> + Send {
-        async move {
-            let addrs: Vec<SocketAddr> =
-                match tokio::time::timeout(timeout, lookup_host((host, port))).await {
-                    Ok(Ok(addrs)) => addrs.collect(),
-                    Ok(Err(e)) => return Err(ConnectError::Dns(e)),
-                    Err(_) => {
-                        return Err(ConnectError::Dns(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            format!("DNS lookup for {host} timed out"),
-                        )))
-                    }
-                };
-            if addrs.is_empty() {
-                return Err(ConnectError::Dns(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("{host} resolved to no addresses"),
-                )));
-            }
-            let mut last_err =
-                io::Error::new(io::ErrorKind::AddrNotAvailable, "no address was tried");
-            for addr in addrs {
-                match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
-                    Ok(Ok(stream)) => {
-                        stream
-                            .set_nodelay(true)
-                            .map_err(ConnectError::Connect)?;
-                        return Ok(stream);
-                    }
-                    Ok(Err(e)) => last_err = e,
-                    Err(_) => {
-                        last_err = io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            format!("connect to {addr} timed out"),
-                        )
-                    }
+    ) -> Result<TcpStream, ConnectError> {
+        let addrs: Vec<SocketAddr> =
+            match tokio::time::timeout(timeout, lookup_host((host, port))).await {
+                Ok(Ok(addrs)) => addrs.collect(),
+                Ok(Err(e)) => return Err(ConnectError::Dns(e)),
+                Err(_) => {
+                    return Err(ConnectError::Dns(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("DNS lookup for {host} timed out"),
+                    )))
+                }
+            };
+        if addrs.is_empty() {
+            return Err(ConnectError::Dns(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{host} resolved to no addresses"),
+            )));
+        }
+        let mut last_err =
+            io::Error::new(io::ErrorKind::AddrNotAvailable, "no address was tried");
+        for addr in addrs {
+            match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
+                Ok(Ok(stream)) => {
+                    stream
+                        .set_nodelay(true)
+                        .map_err(ConnectError::Connect)?;
+                    return Ok(stream);
+                }
+                Ok(Err(e)) => last_err = e,
+                Err(_) => {
+                    last_err = io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("connect to {addr} timed out"),
+                    )
                 }
             }
-            Err(ConnectError::Connect(last_err))
         }
+        Err(ConnectError::Connect(last_err))
     }
 }
 
@@ -133,7 +118,7 @@ mod tests {
     async fn connects_to_a_local_listener() {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
-        let stream = TcpOutbound
+        let stream = Connector
             .connect("127.0.0.1", port, Duration::from_secs(2))
             .await
             .expect("connect to a listening socket");
@@ -147,7 +132,7 @@ mod tests {
         let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe bind");
         let port = probe.local_addr().expect("probe addr").port();
         drop(probe);
-        let err = TcpOutbound
+        let err = Connector
             .connect("127.0.0.1", port, Duration::from_secs(2))
             .await
             .expect_err("nothing listens on the port");
@@ -160,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn bad_domain_is_a_dns_error() {
         // ".invalid" never resolves (RFC 2606), with or without network.
-        let err = TcpOutbound
+        let err = Connector
             .connect("nonexistent.invalid", 80, Duration::from_secs(2))
             .await
             .expect_err("the domain does not resolve");

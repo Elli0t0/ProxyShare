@@ -50,6 +50,11 @@
   Result<TcpStream, ConnectError>> + Send`, with the body wrapped in
   `async move`; the call site (socks5) and the tests await it the
   same way, so nothing else changed.
+- FIX (same version, runs #20–#21 red): the `Outbound` trait's
+  async-in-trait signature failed clippy, and the trait had exactly
+  one implementation with nothing needing it before 0.1.1, so it is
+  deleted: `Connector` is now a plain struct with an inherent async
+  `connect`, and the SOCKS5 handler takes `&Connector` directly.
 - docs/ENGINE_API.md records the SOCKS5, outbound and relay contracts.
 
 ## 0.0.4 — server shell + JNI lifecycle

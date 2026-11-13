@@ -24,7 +24,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::config::Config;
-use crate::connector::TcpOutbound;
+use crate::connector::Connector;
 use crate::model::{snapshot_text, ConnInfo, EngineState, Event, EventSink, Protocol};
 use crate::sniffer;
 
@@ -106,11 +106,9 @@ pub struct Engine {
     /// `max_connections` is enforced on this count, so in-flight sniffs
     /// count too, not only registered connections.
     active: AtomicUsize,
-    /// The outbound used to dial targets. The SOCKS5 handler is generic
-    /// over `Outbound`, so a future step can store a different
-    /// implementation here (for example one bound to an Android Network)
-    /// without changing the handler.
-    outbound: std::sync::Arc<TcpOutbound>,
+    /// The outbound used to dial targets. A plain struct; 0.1.1 adds a
+    /// network-handle field to it.
+    outbound: std::sync::Arc<Connector>,
 }
 
 fn lock_inner(inner: &Mutex<EngineInner>) -> MutexGuard<'_, EngineInner> {
@@ -168,7 +166,7 @@ impl Engine {
                 total_down: 0,
             }),
             active: AtomicUsize::new(0),
-            outbound: std::sync::Arc::new(TcpOutbound),
+            outbound: std::sync::Arc::new(Connector),
         }
     }
 

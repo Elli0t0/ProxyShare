@@ -92,14 +92,8 @@ second parameter.
 
 ## Outbound and relay (0.0.5)
 
-- `Outbound` (`rust/engine/src/connector.rs`) is the trait the handler
-  dials targets through. `TcpOutbound` is the plain implementation:
-  resolves with `tokio::net::lookup_host`, tries the addresses in
-  order, applies `connect_timeout_s` to the lookup and to each connect
-  attempt, and sets `TCP_NODELAY` on the connected socket. It is the
-  seam 0.1.1 uses to bind sockets to an Android Network: the handler
-  is generic over `Outbound`, so a different implementation can be
-  stored on the engine without changing the handler.
+- `Connector` (`rust/engine/src/connector.rs`) is a plain struct; 0.1.1
+  adds a network-handle field to it.
 - A connect failure is one of two kinds: the name did not resolve
   (`Dns`) or no address accepted the connection (`Connect`). The
   SOCKS5 handler maps them to the reply codes 0x04 and 0x05.
