@@ -1,5 +1,7 @@
 package com.example.proxyshare.ui.screens
 
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -49,7 +51,10 @@ import com.example.proxyshare.data.SettingsRepository
 import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.randomPassword
 import com.example.proxyshare.engine.EngineState
+import com.example.proxyshare.engine.NativeEngine
 import com.example.proxyshare.service.ProxyController
+import com.example.proxyshare.ui.components.SectionCard
+import com.example.proxyshare.ui.components.SettingRow
 import kotlinx.coroutines.launch
 
 /**
@@ -68,6 +73,21 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val interfaces by netFlow.collectAsState(initial = emptyList())
     var changedWhileRunning by rememberSaveable { mutableStateOf(false) }
     val running = state is EngineState.Running
+    val appVersion = remember {
+        runCatching {
+            val pm = context.packageManager
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(context.packageName, 0)
+            }
+            info.versionName
+        }.getOrNull() ?: "?"
+    }
+    val engineVersion = remember {
+        runCatching { NativeEngine.nativeVersion() }.getOrNull() ?: "?"
+    }
 
     /** Save a change that needs a restart to apply. */
     fun saveRestart(block: suspend SettingsRepository.() -> Unit) {
@@ -136,10 +156,15 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
             // Server.
             SectionCard(title = stringResource(R.string.settings_server)) {
-                SwitchRow(
-                    label = stringResource(R.string.separate_ports_label),
-                    checked = settings.separatePorts,
-                    onCheckedChange = { saveRestart { updateSeparatePorts(it) } },
+                SettingRow(
+                    title = stringResource(R.string.separate_ports_label),
+                    subtitle = stringResource(R.string.separate_ports_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = settings.separatePorts,
+                            onCheckedChange = { saveRestart { updateSeparatePorts(it) } },
+                        )
+                    },
                 )
                 if (settings.separatePorts) {
                     val portsDifferError = settings.httpPort == settings.socksPort &&
@@ -217,14 +242,19 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             SectionCard(title = stringResource(R.string.settings_protocols)) {
                 for ((key, label) in listOf("http" to "HTTP", "socks4" to "SOCKS4", "socks5" to "SOCKS5")) {
                     val isOn = key in settings.protocols
-                    SwitchRow(
-                        label = label,
-                        checked = isOn,
-                        // At least one protocol must stay on.
-                        enabled = settings.protocols.size > 1 || !isOn,
-                        onCheckedChange = { on ->
-                            val new = if (on) settings.protocols + key else settings.protocols - key
-                            if (new.isNotEmpty()) saveRestart { updateProtocols(new) }
+                    SettingRow(
+                        title = label,
+                        subtitle = stringResource(protocolSubtitle(key)),
+                        trailing = {
+                            Switch(
+                                checked = isOn,
+                                // At least one protocol must stay on.
+                                enabled = settings.protocols.size > 1 || !isOn,
+                                onCheckedChange = { on ->
+                                    val new = if (on) settings.protocols + key else settings.protocols - key
+                                    if (new.isNotEmpty()) saveRestart { updateProtocols(new) }
+                                },
+                            )
                         },
                     )
                 }
@@ -279,10 +309,15 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         Text(stringResource(R.string.regenerate))
                     }
                 }
-                SwitchRow(
-                    label = stringResource(R.string.private_only_label),
-                    checked = settings.privateOnly,
-                    onCheckedChange = { saveRestart { updatePrivateOnly(it) } },
+                SettingRow(
+                    title = stringResource(R.string.private_only_label),
+                    subtitle = stringResource(R.string.private_only_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = settings.privateOnly,
+                            onCheckedChange = { saveRestart { updatePrivateOnly(it) } },
+                        )
+                    },
                 )
                 Text(
                     text = stringResource(R.string.allowed_clients_label),
@@ -361,10 +396,31 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                SwitchRow(
-                    label = stringResource(R.string.keep_screen_on_label),
-                    checked = settings.keepScreenOn,
-                    onCheckedChange = { saveLive { updateKeepScreenOn(it) } },
+                SettingRow(
+                    title = stringResource(R.string.keep_screen_on_label),
+                    subtitle = stringResource(R.string.keep_screen_on_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = settings.keepScreenOn,
+                            onCheckedChange = { saveLive { updateKeepScreenOn(it) } },
+                        )
+                    },
+                )
+            }
+
+            // About.
+            SectionCard(title = stringResource(R.string.about_title)) {
+                SettingRow(
+                    title = stringResource(R.string.about_app_version),
+                    subtitle = appVersion,
+                )
+                SettingRow(
+                    title = stringResource(R.string.about_engine_version),
+                    subtitle = engineVersion,
+                )
+                SettingRow(
+                    title = stringResource(R.string.about_repo),
+                    subtitle = "github.com/Elli0t0/ProxyShare",
                 )
             }
         }
@@ -372,37 +428,10 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(text = title, style = MaterialTheme.typography.titleMedium)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SwitchRow(
-    label: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.weight(1f),
-        )
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
-    }
+private fun protocolSubtitle(key: String): Int = when (key) {
+    "http" -> R.string.protocol_http_subtitle
+    "socks4" -> R.string.protocol_socks4_subtitle
+    else -> R.string.protocol_socks5_subtitle
 }
 
 @Composable

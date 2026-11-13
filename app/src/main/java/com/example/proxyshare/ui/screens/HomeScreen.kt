@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -56,7 +55,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.proxyshare.R
-import com.example.proxyshare.data.AppSettings
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.data.networkInterfaces
@@ -66,7 +64,11 @@ import com.example.proxyshare.service.OutboundMode
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.service.ProxyService
 import com.example.proxyshare.service.toOutboundMode
+import com.example.proxyshare.ui.components.CopyChip
+import com.example.proxyshare.ui.components.InfoChip
 import com.example.proxyshare.ui.components.PowerButton
+import com.example.proxyshare.ui.components.SectionCard
+import com.example.proxyshare.ui.components.StatTile
 import com.example.proxyshare.ui.components.toPowerState
 import kotlinx.coroutines.launch
 
@@ -139,7 +141,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val running = state is EngineState.Running
     val ranked = rankInterfaces(interfaces)
     val primary = ranked.firstOrNull()
-    val (httpPort, socksPort) = enabledPorts(settings)
+    val (httpPort, socksPort) = settings.enabledPorts()
     val heroAddress = primary?.let { nif ->
         val port = httpPort ?: socksPort
         if (port != null) "${nif.ip}:$port" else nif.ip
@@ -228,17 +230,17 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     StatTile(
-                        labelRes = R.string.stat_clients,
+                        label = stringResource(R.string.stat_clients),
                         value = snapshot.active.toString(),
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
-                        labelRes = R.string.stat_upload,
+                        label = stringResource(R.string.stat_upload),
                         value = formatBytes(snapshot.totalUp),
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
-                        labelRes = R.string.stat_download,
+                        label = stringResource(R.string.stat_download),
                         value = formatBytes(snapshot.totalDown),
                         modifier = Modifier.weight(1f),
                     )
@@ -277,17 +279,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             if (settings.authEnabled) {
                 CredentialsCard(user = settings.authUser, password = settings.authPass)
             } else if (settings.privateOnly) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.no_password_private),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
-                }
+                InfoChip(text = stringResource(R.string.no_password_private))
             }
 
             // Protocol chips reflecting the settings.
@@ -347,52 +339,6 @@ private fun copyText(context: Context, text: String) {
     cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
 }
 
-/** The port each protocol listens on, or null when it is disabled. */
-private fun enabledPorts(settings: AppSettings): Pair<Int?, Int?> {
-    val httpPort = if (settings.separatePorts && "http" in settings.protocols) {
-        settings.httpPort
-    } else if (!settings.separatePorts) {
-        settings.port
-    } else {
-        null
-    }
-    val socksPort = if (settings.separatePorts &&
-        ("socks4" in settings.protocols || "socks5" in settings.protocols)
-    ) {
-        settings.socksPort
-    } else if (!settings.separatePorts) {
-        settings.port
-    } else {
-        null
-    }
-    return httpPort to socksPort
-}
-
-@Composable
-private fun StatTile(labelRes: Int, value: String, modifier: Modifier = Modifier) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        shape = RoundedCornerShape(20.dp),
-        modifier = modifier,
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = stringResource(labelRes),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            AnimatedContent(targetState = value, label = "statValue") { animatedValue ->
-                Text(
-                    text = animatedValue,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun AddressCard(
     ranked: List<NetIf>,
@@ -405,22 +351,8 @@ private fun AddressCard(
     var showOthers by rememberSaveable { mutableStateOf(false) }
     val primary = ranked.firstOrNull()
     val others = ranked.drop(1)
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.addresses_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            if (primary == null && vpnInterfaces.isEmpty()) {
+    SectionCard(title = stringResource(R.string.addresses_title)) {
+        if (primary == null && vpnInterfaces.isEmpty()) {
                 Text(
                     text = stringResource(R.string.addresses_none),
                     style = MaterialTheme.typography.bodyMedium,
@@ -438,14 +370,12 @@ private fun AddressCard(
                     ProtocolAddressRow(
                         label = "HTTP",
                         address = "${primary.ip}:$httpPort",
-                        onCopy = { copyText(context, "${primary.ip}:$httpPort") },
                     )
                 }
                 if (socksPort != null) {
                     ProtocolAddressRow(
                         label = if (socks5On) "SOCKS5" else "SOCKS4",
                         address = "${primary.ip}:$socksPort",
-                        onCopy = { copyText(context, "${primary.ip}:$socksPort") },
                     )
                 }
                 if (primary.kind == IfKind.MOBILE) {
@@ -480,15 +410,8 @@ private fun AddressCard(
                                         text = "${kindLabel(nif.kind)} (${nif.name})",
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
-                                    Text(
-                                        text = nif.ip,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontFamily = FontFamily.Monospace,
-                                    )
                                 }
-                                TextButton(onClick = { copyText(context, nif.ip) }) {
-                                    Text(stringResource(R.string.copy))
-                                }
+                                CopyChip(text = nif.ip)
                             }
                             if (nif.kind == IfKind.MOBILE) {
                                 Text(
@@ -515,26 +438,22 @@ private fun AddressCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
     }
 }
 
 @Composable
-private fun ProtocolAddressRow(label: String, address: String, onCopy: () -> Unit) {
+private fun ProtocolAddressRow(label: String, address: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(
-            text = "$label  $address",
-            style = MaterialTheme.typography.titleLarge,
-            fontFamily = FontFamily.Monospace,
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onCopy) {
-            Text(stringResource(R.string.copy))
-        }
+        CopyChip(text = address)
     }
 }
 
@@ -554,21 +473,7 @@ private fun kindLabel(kind: IfKind): String = stringResource(
 private fun CredentialsCard(user: String, password: String) {
     val context = LocalContext.current
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.credentials_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
+    SectionCard(title = stringResource(R.string.credentials_title)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -606,7 +511,6 @@ private fun CredentialsCard(user: String, password: String) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
     }
 }
 
@@ -620,21 +524,7 @@ private fun OutboundCard(
     exitIpOk: Boolean,
     onCheckExitIp: () -> Unit,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.outbound_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
+    SectionCard(title = stringResource(R.string.outbound_title)) {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 OutboundMode.entries.forEachIndexed { index, item ->
                     SegmentedButton(
@@ -693,7 +583,6 @@ private fun OutboundCard(
                     }
                 }
             }
-        }
     }
 }
 

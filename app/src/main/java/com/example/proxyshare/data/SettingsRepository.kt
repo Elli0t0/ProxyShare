@@ -59,6 +59,27 @@ fun AppSettings.toEngineConfig(): String = buildString {
     appendLine("connect_timeout_s=$connectTimeoutS")
 }
 
+/** The port each protocol listens on, or null when it is disabled. */
+fun AppSettings.enabledPorts(): Pair<Int?, Int?> {
+    val httpPort = if (separatePorts && "http" in protocols) {
+        httpPort
+    } else if (!separatePorts) {
+        port
+    } else {
+        null
+    }
+    val socksPort = if (separatePorts &&
+        ("socks4" in protocols || "socks5" in protocols)
+    ) {
+        socksPort
+    } else if (!separatePorts) {
+        port
+    } else {
+        null
+    }
+    return httpPort to socksPort
+}
+
 /** A random password from unambiguous characters (no 0/O/1/l). Never log it. */
 fun randomPassword(length: Int = 12): String {
     val chars = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.5 — Connections + Settings polish, shared components, new launcher icon
+
+- New shared components in ui/components: SectionCard, StatTile, InfoChip,
+  SettingRow, CopyChip — Home, Connections and Settings now share the same
+  20dp cards, 16dp padding and 12dp gaps. StatTile and SectionCard moved out
+  of Home/Settings; the private ProtoChip, SwitchRow and copy buttons are
+  gone. No behavior or setting-key changes.
+- Connections: header is three StatTiles (Active, Upload speed, Download
+  speed) plus the totals line; client cards have a round avatar with the
+  last octet of the IP, client IP, total traffic and connection count;
+  expanded rows show the host in bold, a protocol chip, live up/down
+  speeds and duration. Empty state is a Canvas radar drawing with "No
+  clients yet" and the hint "Set your laptop's proxy to <primary address>".
+- Settings: rows use SettingRow with short subtitles; sections in order
+  Server, Protocols, Security, Limits, Appearance, About. About shows the
+  app version, the engine version and the GitHub repository text. The
+  engine version line moved here from Home.
+- New launcher icon: adaptive icon drawn from the logo the user sent —
+  teal (#44BBB9) background with the white S-route mark (vector, no image
+  files). Manifest now points at @mipmap/ic_launcher (it used the default
+  system icon before).
+- AppSettings.enabledPorts() moved from HomeScreen to SettingsRepository
+  so Home and Connections share it. RTL: start/end everywhere, no
+  left/right padding in the touched screens.
+
 ## 0.2.4 — Home screen visual polish (no behavior changes)
 
 - Home rebuilt around a hero card: large round PowerButton (144dp,
