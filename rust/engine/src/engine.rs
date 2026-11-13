@@ -1228,8 +1228,8 @@ mod tests {
         read_exact(&mut s5, &mut echo).await;
         assert_eq!(&echo, b"hello");
         drop(s5);
-        // All three connections closed: HTTP 0 up / 2 down ("ok"),
-        // SOCKS4 5/5, SOCKS5 5/5.
+        // All three connections closed: HTTP 0 up / 59 down (the whole
+        // response, head + "ok" body, is relayed), SOCKS4 5/5, SOCKS5 5/5.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
             let closed = sink
@@ -1247,7 +1247,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(
-            engine.snapshot().starts_with("running\t10\t12\t0"),
+            engine.snapshot().starts_with("running\t10\t69\t0"),
             "{}",
             engine.snapshot()
         );
