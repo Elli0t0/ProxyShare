@@ -1,14 +1,11 @@
 package com.example.proxyshare.ui
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -18,17 +15,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.example.proxyshare.R
 import com.example.proxyshare.ui.screens.ConnectionsScreen
 import com.example.proxyshare.ui.screens.HomeScreen
+import com.example.proxyshare.ui.screens.SettingsScreen
 
 /**
  * The navigation shell: a Scaffold with a bottom NavigationBar —
  * Home, Connections, Settings. Plain state (rememberSaveable), no
- * navigation library. Settings is a placeholder until a later step.
+ * navigation library.
  */
 @Composable
 fun AppRoot() {
@@ -60,18 +57,7 @@ fun AppRoot() {
         when (tab) {
             0 -> HomeScreen(modifier = Modifier.padding(padding))
             1 -> ConnectionsScreen(modifier = Modifier.padding(padding))
-            else -> PlaceholderScreen(stringResource(R.string.nav_settings))
+            else -> SettingsScreen(modifier = Modifier.padding(padding))
         }
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(name: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(
-            text = "$name — ${stringResource(R.string.coming_soon)}",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

@@ -76,54 +76,70 @@ object ProxyController {
     /** Read the settings, generate a password on first run, start the engine. */
     fun start() {
         scope.launch {
+            startMutex.withLock { startLocked() }
+        }
+    }
+
+    /** Stop the engine and start it again with the current settings. No-op when stopped. */
+    fun restart() {
+        scope.launch {
             startMutex.withLock {
-                if (started) return@withLock
-                val repo = repository ?: return@withLock
-                val selector = selector ?: return@withLock
-                started = true
-                try {
-                    repo.ensurePassword()
-                    val settings = repo.settings.first()
-                    val mode = settings.outboundMode.toOutboundMode()
-                    selector.select(mode)
-                    if (mode != OutboundMode.DEFAULT) {
-                        val network = withTimeoutOrNull(2000) {
-                            selector.network.filterNotNull().first()
-                        }
-                        if (network == null) {
-                            started = false
-                            engine.setError("No ${settings.outboundMode} network available")
-                            return@withLock
-                        }
-                    }
-                    networkJob?.cancel()
-                    networkJob = scope.launch {
-                        selector.network.collect { net ->
-                            if (!started) return@collect
-                            if (mode == OutboundMode.VPN_ONLY && net == null) {
-                                // Kill switch: never fall back to the default network.
-                                started = false
-                                runCatching { engine.stop() }
-                                engine.setError("VPN lost — proxy stopped")
-                                networkJob?.cancel()
-                                return@collect
-                            }
-                            engine.setOutboundNetwork(net?.networkHandle ?: 0L)
-                        }
-                    }
-                    val error = engine.start(settings)
-                    if (error.isNotEmpty()) {
-                        started = false
-                        networkJob?.cancel()
-                        networkJob = null
-                    }
-                } catch (_: Exception) {
+                if (!started) return@withLock
+                runCatching { engine.stop() }
+                networkJob?.cancel()
+                networkJob = null
+                started = false
+                startLocked()
+            }
+        }
+    }
+
+    private suspend fun startLocked() {
+        if (started) return
+        val repo = repository ?: return
+        val selector = selector ?: return
+        started = true
+        try {
+            repo.ensurePassword()
+            val settings = repo.settings.first()
+            val mode = settings.outboundMode.toOutboundMode()
+            selector.select(mode)
+            if (mode != OutboundMode.DEFAULT) {
+                val network = withTimeoutOrNull(2000) {
+                    selector.network.filterNotNull().first()
+                }
+                if (network == null) {
                     started = false
-                    networkJob?.cancel()
-                    networkJob = null
-                    runCatching { engine.stop() }
+                    engine.setError("No ${settings.outboundMode} network available")
+                    return
                 }
             }
+            networkJob?.cancel()
+            networkJob = scope.launch {
+                selector.network.collect { net ->
+                    if (!started) return@collect
+                    if (mode == OutboundMode.VPN_ONLY && net == null) {
+                        // Kill switch: never fall back to the default network.
+                        started = false
+                        runCatching { engine.stop() }
+                        engine.setError("VPN lost — proxy stopped")
+                        networkJob?.cancel()
+                        return@collect
+                    }
+                    engine.setOutboundNetwork(net?.networkHandle ?: 0L)
+                }
+            }
+            val error = engine.start(settings)
+            if (error.isNotEmpty()) {
+                started = false
+                networkJob?.cancel()
+                networkJob = null
+            }
+        } catch (_: Exception) {
+            started = false
+            networkJob?.cancel()
+            networkJob = null
+            runCatching { engine.stop() }
         }
     }
 
@@ -152,6 +168,11 @@ object ProxyController {
     /** Change the outbound mode. Only used while stopped (the UI enforces it). */
     suspend fun setOutboundMode(mode: OutboundMode) {
         repository?.updateOutboundMode(mode.toSettingString())
+    }
+
+    /** Run a settings update (saves immediately). The Settings screen calls this for every change. */
+    suspend fun updateSettings(block: suspend SettingsRepository.() -> Unit) {
+        repository?.block()
     }
 
     /** User-triggered exit-IP check, bound to the selected network when there is one. */

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.10 — Settings screen
+
+- New ui/screens/SettingsScreen.kt on SettingsRepository: Server
+  (port 1024-65535, bind address from live interface IPs), Protocols
+  (at least one stays on), Security (auth switch, username, hidden
+  password with Regenerate, private-only, allowed-clients CIDR
+  add/remove with validation), Limits (max connections, idle and
+  connect timeouts), Appearance (theme System/Light/Dark applied
+  live via MainActivity, keep screen on). No language selector.
+- Save on change; the stored password is never cleared by toggling
+  auth. While running, a change shows "Restart the proxy to apply"
+  with a Restart button (ProxyController.restart(): stop + start
+  under one mutex). Pure validators in SettingsLogic.kt, tested.
+  (Step was numbered 0.1.9, but that version is the Connections
+  screen, so this ships as 0.1.10.)
+
 ## 0.1.9 — Connections screen (live monitor)
 
 - New ui/screens/ConnectionsScreen.kt: header (totals + live total

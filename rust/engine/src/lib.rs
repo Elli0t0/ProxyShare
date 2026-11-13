@@ -43,8 +43,8 @@ use jni::JNIEnv;
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.1.9".
-pub const ENGINE_VERSION: &str = "engine 0.1.9";
+/// The engine version string, e.g. "engine 0.1.10".
+pub const ENGINE_VERSION: &str = "engine 0.1.10";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
