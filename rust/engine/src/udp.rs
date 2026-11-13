@@ -11,6 +11,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use crate::socks5::Target;
 
 /// Returns (target, port, offset where DATA starts).
+/// Unused until the UDP relay step wires it in.
+#[allow(dead_code)]
 pub(crate) fn parse_udp_header(buf: &[u8]) -> Option<(Target, u16, usize)> {
     if buf.len() < 4 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 {
         return None;
