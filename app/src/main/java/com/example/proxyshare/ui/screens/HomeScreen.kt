@@ -296,13 +296,6 @@ private fun copyText(context: Context, text: String) {
     cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
 }
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes < 1024 -> "$bytes B"
-    bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
-    bytes < 1024 * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
-    else -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
-}
-
 @Composable
 private fun AddressCard(interfaces: List<NetIf>, vpnInterfaces: List<NetIf>, port: Int) {
     val context = LocalContext.current

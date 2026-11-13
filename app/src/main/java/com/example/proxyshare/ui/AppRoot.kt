@@ -22,13 +22,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.example.proxyshare.R
+import com.example.proxyshare.ui.screens.ConnectionsScreen
 import com.example.proxyshare.ui.screens.HomeScreen
 
 /**
  * The navigation shell: a Scaffold with a bottom NavigationBar —
  * Home, Connections, Settings. Plain state (rememberSaveable), no
- * navigation library. Connections and Settings are placeholders
- * until 0.1.8 and 0.1.9.
+ * navigation library. Settings is a placeholder until a later step.
  */
 @Composable
 fun AppRoot() {
@@ -59,7 +59,7 @@ fun AppRoot() {
     ) { padding ->
         when (tab) {
             0 -> HomeScreen(modifier = Modifier.padding(padding))
-            1 -> PlaceholderScreen(stringResource(R.string.nav_connections))
+            1 -> ConnectionsScreen(modifier = Modifier.padding(padding))
             else -> PlaceholderScreen(stringResource(R.string.nav_settings))
         }
     }

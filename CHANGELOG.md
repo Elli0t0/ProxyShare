@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.9 — Connections screen (live monitor)
+
+- New ui/screens/ConnectionsScreen.kt: header (totals + live total
+  speed), per-client expandable cards sorted by traffic, per-row
+  host:port + protocol chip + live speed + duration. started_ms is a
+  unix time, so duration is now minus startedMs. Fast polling only
+  while the screen is visible (DisposableEffect).
+- New ui/screens/ConnectionsLogic.kt: computeSpeeds, formatBytes,
+  groupByClient, formatDuration (all pure, all tested). HomeScreen's
+  private formatBytes removed — it now uses the shared one.
+- AppRoot wires the Connections tab to the screen; Settings stays a
+  placeholder. Strings en/fa. (Step was numbered 0.1.8, but that
+  version is the crash fix, so this ships as 0.1.9.)
+
 ## 0.1.8 — fix crash on open (native lib failed to load)
 
 - Root cause, found in the shipped 0.1.7 APK: libproxyshare_engine.so

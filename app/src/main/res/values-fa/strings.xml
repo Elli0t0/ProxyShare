@@ -44,4 +44,7 @@
     <string name="check_exit_ip">بررسی IP خروجی</string>
     <string name="check_exit_ip_checking">در حال بررسی…</string>
     <string name="check_exit_ip_failed">بررسی ناموفق بود</string>
+    <string name="connections_speed">↑ %1$s/s · ↓ %2$s/s</string>
+    <string name="connections_empty">اتصال فعالی نیست</string>
+    <string name="connections_count">%1$d اتصال</string>
 </resources>
