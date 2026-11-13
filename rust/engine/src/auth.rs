@@ -125,6 +125,7 @@ impl AuthGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn base64_decode_decodes_user_pass() {
