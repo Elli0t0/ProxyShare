@@ -65,6 +65,10 @@
     <string name="other_addresses">آدرس‌های دیگر</string>
     <string name="mobile_unreachable">آدرس اپراتور، معمولاً از لپ‌تاپ در دسترس نیست</string>
     <string name="mobile_only_hint">هات‌اسپات را روشن کنید یا به همان وای‌فای لپ‌تاپ وصل شوید.</string>
+    <string name="retry">تلاش دوباره</string>
+    <string name="stat_clients">کلاینت‌ها</string>
+    <string name="stat_upload">آپلود</string>
+    <string name="stat_download">دانلود</string>
     <string name="bind_label">آدرس شنود</string>
     <string name="bind_all">همه اینترفیس‌ها</string>
     <string name="auth_label">احراز هویت</string>

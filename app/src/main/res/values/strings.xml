@@ -65,6 +65,10 @@
     <string name="other_addresses">Other addresses</string>
     <string name="mobile_unreachable">carrier address, usually not reachable from your laptop</string>
     <string name="mobile_only_hint">Turn on the hotspot or join the same Wi-Fi as your laptop.</string>
+    <string name="retry">Retry</string>
+    <string name="stat_clients">Clients</string>
+    <string name="stat_upload">Upload</string>
+    <string name="stat_download">Download</string>
     <string name="bind_label">Listen address</string>
     <string name="bind_all">All interfaces</string>
     <string name="auth_label">Authentication</string>

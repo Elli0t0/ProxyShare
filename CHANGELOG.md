@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.4 — Home screen visual polish (no behavior changes)
+
+- Home rebuilt around a hero card: large round PowerButton (144dp,
+  pulsing ring while running, progress ring while starting, static
+  rings when "remove animations" is on, light haptic on tap), state
+  headline, primary address line, Retry on error. Stat tiles
+  (Clients / Upload / Download) appear while running with animated
+  numbers.
+- 16dp grid, 12dp gaps, tonal cards (hero 28dp, others 20dp);
+  header is the small "ProxyShare" title only; engine version text
+  removed from Home (moves to Settings > About next step).
+- Addresses card: other interfaces expand with AnimatedVisibility;
+  credentials monospace; outbound card is compact with the exit-IP
+  result as a chip with a colored dot; "Connect your laptop" is a
+  tonal button. Power button carries a contentDescription.
+- New ui/components/PowerButton.kt (PowerState + EngineState mapping,
+  4 unit tests). Kotlin tests now 48.
+
 ## 0.2.3 — ports UI, ranked addresses, per-protocol rows
 
 - Settings gains separatePorts (default on), httpPort 8080, socksPort
