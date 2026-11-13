@@ -6,16 +6,15 @@
 //! Kotlin talks to it only through the JNI functions in lib.rs; this file
 //! has no JNI in it.
 //!
-//! SOCKS5 is handled (see `socks5`); HTTP and SOCKS4 still end in a
-//! `handler_missing` event. Events go out through the `EventSink` the
-//! JNI listener registers; the sink is never called while the engine
-//! lock is held.
+//! Each protocol has a handler (see `socks5`, `socks4`, `http`).
+//! Events go out through the `EventSink` the JNI listener registers;
+//! the sink is never called while the engine lock is held.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use socket2::{Domain, Protocol as SockProtocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
@@ -109,6 +108,8 @@ pub struct Engine {
     /// The outbound used to dial targets. A plain struct; 0.1.1 adds a
     /// network-handle field to it.
     outbound: std::sync::Arc<Connector>,
+    /// Failed-auth throttle: 5 failures in 60 s block an IP for 5 min.
+    auth_guard: crate::auth::AuthGuard,
 }
 
 fn lock_inner(inner: &Mutex<EngineInner>) -> MutexGuard<'_, EngineInner> {
@@ -167,6 +168,7 @@ impl Engine {
             }),
             active: AtomicUsize::new(0),
             outbound: std::sync::Arc::new(Connector),
+            auth_guard: crate::auth::AuthGuard::default(),
         }
     }
 
@@ -397,6 +399,21 @@ impl Engine {
             inner.total_down += record.down.load(Ordering::Relaxed);
         }
     }
+
+    /// Record a failed authentication attempt from this connection's
+    /// client. When it starts a block, emit AuthFailed with the IP
+    /// only. A handler reports auth failure as a PermissionDenied
+    /// error; other errors are not auth failures.
+    fn record_auth_failure(&self, record: &ConnRecord, result: &std::io::Result<()>) {
+        if matches!(result, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied) {
+            if self
+                .auth_guard
+                .record_failure(record.client_ip, Instant::now())
+            {
+                self.emit(Event::AuthFailed(record.client_ip));
+            }
+        }
+    }
 }
 
 /// Wait for a cancelled task to finish unwinding (at most 2 s), so its
@@ -472,6 +489,11 @@ async fn handle_connection(
     mut shutdown: watch::Receiver<bool>,
 ) {
     let _guard = ActiveGuard(std::sync::Arc::clone(&engine));
+    if engine.auth_guard.is_blocked(peer.ip(), Instant::now()) {
+        // Blocked: close without reading any protocol byte.
+        engine.emit(Event::AuthFailed(peer.ip()));
+        return;
+    }
     let protocol = tokio::select! {
         _ = shutdown.changed() => return,
         proto = sniffer::sniff_protocol(&mut stream) => match proto {
@@ -491,7 +513,9 @@ async fn handle_connection(
     match protocol {
         Protocol::Socks5 => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let _ = crate::socks5::handle(stream, &engine.outbound, &config, &record).await;
+            let result =
+                crate::socks5::handle(stream, &engine.outbound, &config, &record).await;
+            engine.record_auth_failure(&record, &result);
             engine.unregister(record.id);
             // Unregistered first, so the snapshot already carries the
             // final totals when the close is reported.
@@ -499,13 +523,17 @@ async fn handle_connection(
         }
         Protocol::Http => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let _ = crate::http::handle(stream, &engine.outbound, &config, &record).await;
+            let result =
+                crate::http::handle(stream, &engine.outbound, &config, &record).await;
+            engine.record_auth_failure(&record, &result);
             engine.unregister(record.id);
             engine.emit(Event::ConnectionClosed(record.to_conn_info()));
         }
         Protocol::Socks4 => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let _ = crate::socks4::handle(stream, &engine.outbound, &config, &record).await;
+            let result =
+                crate::socks4::handle(stream, &engine.outbound, &config, &record).await;
+            engine.record_auth_failure(&record, &result);
             engine.unregister(record.id);
             engine.emit(Event::ConnectionClosed(record.to_conn_info()));
         }
@@ -1511,6 +1539,39 @@ mod tests {
             "SOCKS4 refused when auth is required, got {reply:?}"
         );
         assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn auth_guard_blocks_ip_after_five_failures() {
+        let (engine, sink, port) = start_auth_engine();
+        // 5 failed SOCKS5 logins from 127.0.0.1.
+        for _ in 0..5 {
+            let mut client = TcpStream::connect(("127.0.0.1", port))
+                .await
+                .expect("connect");
+            assert_eq!(
+                socks5_greet_many(&mut client, &[0x02]).await,
+                [0x05, 0x02]
+            );
+            assert_eq!(
+                socks5_auth(&mut client, "user", "wrong").await,
+                [0x01, 0x01]
+            );
+            assert_closed(&mut client).await;
+        }
+        // The IP is now blocked: the next connection closes before any
+        // protocol byte is read.
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_closed(&mut client).await;
+        assert!(
+            sink.events()
+                .iter()
+                .any(|e| matches!(e, Event::AuthFailed(_))),
+            "an AuthFailed event was emitted"
+        );
         engine.stop();
     }
 

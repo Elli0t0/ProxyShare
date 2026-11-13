@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.0.10 — failed-auth throttle (step 0.0.8b)
+
+- New `AuthGuard` in rust/engine/src/auth.rs (verbatim from the spec):
+  after 5 failed attempts within 60 s from one IP, the IP is blocked
+  for 5 minutes; the time is passed in, so tests use fake Instants
+  and never sleep. One guard lives in Engine.
+- A blocked IP is closed in `handle_connection` before any protocol
+  byte is read. A handler reports an auth failure as a
+  `PermissionDenied` error, which the engine records against the
+  connection's client IP; when a block starts, an `AuthFailed` event
+  (type 5) is emitted with the IP only. A blocked IP that tries again
+  also emits `AuthFailed`.
+- Tests: 3 guard unit tests (4 failures do not block, the 5th does,
+  the block ends after 5 minutes, failures older than 60 s do not
+  count) + 1 engine test (5 wrong SOCKS5 logins, then the next
+  connection closes at the door and `AuthFailed` is emitted). The
+  model test now covers the type-5 callback.
+- docs/ENGINE_API.md records the throttle and the type-5 event (and
+  fixes the stale Server line that still said HTTP/SOCKS4 had no
+  handler).
+
 ## 0.0.9 — authentication (step 0.0.8a)
 
 - New rust/engine/src/auth.rs: `ct_eq` and `base64_decode`

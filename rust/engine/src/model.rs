@@ -128,12 +128,16 @@ pub enum Event {
     /// it stays for the callback contract (type 4) — do not renumber.
     #[allow(dead_code)]
     HandlerMissing(ConnInfo),
+    /// An IP failed authentication repeatedly and was blocked, or a
+    /// blocked IP tried to connect again. a = the IP only, b = "".
+    /// Never carries a password or any credential.
+    AuthFailed(IpAddr),
 }
 
 impl Event {
     /// Callback type numbers: 1 = state changed, 2 = connection opened,
-    /// 3 = connection closed, 4 = handler missing. They are part of the
-    /// contract: do not renumber.
+    /// 3 = connection closed, 4 = handler missing, 5 = auth failed.
+    /// They are part of the contract: do not renumber.
     pub fn to_callback(&self) -> (i32, String, String) {
         match self {
             Event::StateChanged(state) => {
@@ -146,6 +150,7 @@ impl Event {
             Event::ConnectionOpened(info) => (2, info.id.to_string(), info.snapshot_line()),
             Event::ConnectionClosed(info) => (3, info.id.to_string(), info.snapshot_line()),
             Event::HandlerMissing(info) => (4, info.id.to_string(), info.snapshot_line()),
+            Event::AuthFailed(ip) => (5, ip.to_string(), String::new()),
         }
     }
 }
@@ -251,5 +256,9 @@ mod tests {
         assert_eq!(t, 4);
         assert_eq!(a, "1");
         assert_eq!(b, conn.snapshot_line());
+        let (t, a, b) =
+            Event::AuthFailed(IpAddr::from_str("127.0.0.1").expect("test IP is valid"))
+                .to_callback();
+        assert_eq!((t, a.as_str(), b.as_str()), (5, "127.0.0.1", ""));
     }
 }

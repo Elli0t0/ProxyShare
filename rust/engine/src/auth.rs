@@ -7,6 +7,11 @@
 //! auth so it is refused. Attempted passwords are never logged or
 //! emitted: failures carry only a generic message.
 
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use crate::config::Config;
 
 /// True when the config requires authentication (both halves set).
@@ -78,6 +83,45 @@ pub fn base64_decode(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Failures count for 60 s; 5 of them block the IP for 5 minutes.
+const WINDOW: Duration = Duration::from_secs(60);
+const BLOCK_FOR: Duration = Duration::from_secs(300);
+const MAX_FAILS: usize = 5;
+
+#[derive(Default)]
+struct Entry {
+    fails: Vec<Instant>,
+    blocked_until: Option<Instant>,
+}
+
+/// Failed-auth throttle: one per engine. The time is passed in so
+/// tests can use fake Instants and never sleep.
+#[derive(Default)]
+pub struct AuthGuard {
+    state: Mutex<HashMap<IpAddr, Entry>>,
+}
+
+impl AuthGuard {
+    pub fn is_blocked(&self, ip: IpAddr, now: Instant) -> bool {
+        let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        s.get(&ip).and_then(|e| e.blocked_until).is_some_and(|t| now < t)
+    }
+
+    /// Returns true when this failure starts a block.
+    pub fn record_failure(&self, ip: IpAddr, now: Instant) -> bool {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let e = s.entry(ip).or_default();
+        e.fails.retain(|t| now.duration_since(*t) < WINDOW);
+        e.fails.push(now);
+        if e.fails.len() >= MAX_FAILS {
+            e.blocked_until = Some(now + BLOCK_FOR);
+            e.fails.clear();
+            return true;
+        }
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +144,50 @@ mod tests {
         assert!(!ct_eq(b"user", b"use"));
         assert!(!ct_eq(b"user", b"users"));
         assert!(ct_eq(b"", b""));
+    }
+
+    #[test]
+    fn guard_blocks_after_five_failures() {
+        let guard = AuthGuard::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let t0 = Instant::now();
+        for i in 0..4 {
+            let now = t0 + Duration::from_secs(i);
+            assert!(!guard.record_failure(ip, now));
+            assert!(!guard.is_blocked(ip, now));
+        }
+        // The 5th failure starts the block.
+        let now = t0 + Duration::from_secs(4);
+        assert!(guard.record_failure(ip, now));
+        assert!(guard.is_blocked(ip, now));
+    }
+
+    #[test]
+    fn guard_block_ends_after_five_minutes() {
+        let guard = AuthGuard::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let t0 = Instant::now();
+        for i in 0..5 {
+            guard.record_failure(ip, t0 + Duration::from_secs(i));
+        }
+        // The block started at the 5th failure (t0 + 4 s) and lasts 300 s.
+        assert!(guard.is_blocked(ip, t0 + Duration::from_secs(303)));
+        assert!(!guard.is_blocked(ip, t0 + Duration::from_secs(304)));
+    }
+
+    #[test]
+    fn guard_old_failures_do_not_count() {
+        let guard = AuthGuard::default();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let t0 = Instant::now();
+        for i in 0..4 {
+            guard.record_failure(ip, t0 + Duration::from_secs(i));
+        }
+        // 61 s later the failures from t0 and t0 + 1 s are outside the
+        // 60 s window, so only 3 count and no block starts.
+        let now = t0 + Duration::from_secs(61);
+        assert!(!guard.record_failure(ip, now));
+        assert!(!guard.is_blocked(ip, now));
     }
 
     #[test]

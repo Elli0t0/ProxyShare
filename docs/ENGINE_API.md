@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.9"`.
+- Returns the engine version string, e.g. `"engine 0.0.10"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -63,12 +63,23 @@ second parameter.
   the byte, so the handler that runs next still sees the whole stream;
   a path where no handler reads the stream consumes the byte first, so
   the close is a clean FIN instead of a reset.
-- SOCKS5 connections are handled (see below): a `ConnectionOpened`
-  event (type 2) is emitted when the connection is registered, and a
-  `ConnectionClosed` event (type 3) with the final byte counts when it
-  ends. HTTP and SOCKS4 have no handler yet: a sniffed connection is
-  registered, its sniffed byte is consumed, it is reported as a
-  `handler_missing` event (type 4), and it is closed cleanly.
+- Each connection is handled by its protocol's handler (see below):
+  a `ConnectionOpened` event (type 2) is emitted when the connection
+  is registered, and a `ConnectionClosed` event (type 3) with the
+  final byte counts when it ends.
+
+## Failed-auth throttle (0.0.10)
+
+- After 5 failed authentication attempts within 60 s from one IP, the
+  IP is blocked for 5 minutes. A blocked IP is closed before any
+  protocol byte is read.
+- When a block starts, and when a blocked IP tries to connect again,
+  an `AuthFailed` event (type 5) is emitted with the IP only (a =
+  the IP, b = ""). It never carries a password or any credential.
+- The guard (`auth::AuthGuard`) takes the time as an argument, so
+  tests use fake Instants and never sleep. One guard lives in Engine;
+  a handler reports an auth failure as a `PermissionDenied` error,
+  which the engine records against the connection's client IP.
 
 ## Authentication (0.0.9)
 
