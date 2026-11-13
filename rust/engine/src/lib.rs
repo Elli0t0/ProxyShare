@@ -41,8 +41,8 @@ use jni::JNIEnv;
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.1.4".
-pub const ENGINE_VERSION: &str = "engine 0.1.4";
+/// The engine version string, e.g. "engine 0.1.5".
+pub const ENGINE_VERSION: &str = "engine 0.1.5";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -59,7 +59,7 @@ fn from_jstring(env: &mut JNIEnv, s: &JString) -> Result<String, String> {
         .map_err(|e| format!("failed to read a string from Java: {e}"))
 }
 
-/// Returns the engine version string, e.g. "engine 0.1.4".
+/// Returns the engine version string, e.g. "engine 0.1.5".
 ///
 /// Never lets a panic or exception cross the FFI boundary: a panic is caught
 /// and a null jstring is returned instead.

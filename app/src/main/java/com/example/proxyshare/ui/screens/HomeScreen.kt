@@ -1,101 +1,395 @@
 package com.example.proxyshare.ui.screens
 
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.proxyshare.R
+import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.NetIf
+import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.NativeEngine
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.service.ProxyService
 
-// Temporary home screen: Start/Stop buttons plus the live state text.
-// Replaced by the real home screen in 0.1.5.
 @Composable
-fun HomeScreen() {
+fun HomeScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val state by ProxyController.state.collectAsState()
+    val snapshot by ProxyController.snapshot.collectAsState()
+    val settings by ProxyController.settings.collectAsState()
+    val netFlow = remember(context) { networkInterfaces(context) }
+    val interfaces by netFlow.collectAsState(initial = emptyList())
     val engineVersion = remember {
         runCatching { NativeEngine.nativeVersion() }.getOrNull()
     }
-    val state by ProxyController.state.collectAsState()
-    val context = LocalContext.current
-    Surface(modifier = Modifier.fillMaxSize()) {
+
+    // Keep the screen on while the proxy runs, when the setting is on.
+    val view = LocalView.current
+    SideEffect {
+        view.keepScreenOn = settings.keepScreenOn && state is EngineState.Running
+    }
+
+    var showNotifExplain by rememberSaveable { false }
+    var notifAsked by rememberSaveable { false }
+    val notifLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        // The proxy must still start when the permission is denied.
+        startProxy(context)
+    }
+    fun onStartClicked() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED &&
+            !notifAsked
+        ) {
+            notifAsked = true
+            showNotifExplain = true
+        } else {
+            startProxy(context)
+        }
+    }
+
+    if (showNotifExplain) {
+        AlertDialog(
+            onDismissRequest = { showNotifExplain = false },
+            title = { Text(stringResource(R.string.notif_explain_title)) },
+            text = { Text(stringResource(R.string.notif_explain_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNotifExplain = false
+                    notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }) {
+                    Text(stringResource(R.string.notif_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showNotifExplain = false
+                    startProxy(context)
+                }) {
+                    Text(stringResource(R.string.notif_skip))
+                }
+            },
+        )
+    }
+
+    val running = state is EngineState.Running
+    val buttonColor by animateColorAsState(
+        targetValue = if (running) MaterialTheme.colorScheme.error
+        else MaterialTheme.colorScheme.primary,
+        label = "startStopColor",
+    )
+
+    Surface(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
                 text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.headlineLarge
+                style = MaterialTheme.typography.headlineMedium,
             )
             Text(
                 text = stringResource(R.string.app_tagline),
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            Text(
-                text = when (val s = state) {
-                    is EngineState.Running -> stringResource(R.string.proxy_running)
-                    is EngineState.Starting -> stringResource(R.string.proxy_starting)
-                    is EngineState.Error -> s.message.ifBlank {
-                        stringResource(R.string.proxy_error)
-                    }
-                    else -> stringResource(R.string.proxy_stopped)
-                },
-                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 24.dp)
+            )
+
+            // Status card.
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = when (val s = state) {
+                            is EngineState.Running -> stringResource(R.string.proxy_running)
+                            is EngineState.Starting -> stringResource(R.string.proxy_starting)
+                            is EngineState.Error -> s.message.ifBlank {
+                                stringResource(R.string.proxy_error)
+                            }
+                            else -> stringResource(R.string.proxy_stopped)
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    if (running) {
+                        Text(
+                            text = stringResource(
+                                R.string.totals,
+                                formatBytes(snapshot.totalUp),
+                                formatBytes(snapshot.totalDown),
+                                snapshot.active,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            }
+
+            // Large animated Start/Stop button.
+            Button(
+                onClick = { if (running) ProxyController.stop() else onStartClicked() },
+                enabled = state !is EngineState.Starting,
+                colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier.fillMaxWidth().height(64.dp),
+            ) {
+                AnimatedContent(
+                    targetState = running,
+                    label = "startStopLabel",
+                ) { isRunning ->
+                    Text(
+                        text = stringResource(
+                            if (isRunning) R.string.proxy_stop else R.string.proxy_start
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
+
+            // Warning banner: open to the network with no auth.
+            if (!settings.authEnabled && !settings.privateOnly) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.warning_open),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+
+            // Address card.
+            AddressCard(
+                interfaces = interfaces.filter { it.kind != IfKind.VPN },
+                vpnInterfaces = interfaces.filter { it.kind == IfKind.VPN },
+                port = settings.port,
+            )
+
+            // Credentials card, only when auth is on.
+            if (settings.authEnabled) {
+                CredentialsCard(user = settings.authUser, password = settings.authPass)
+            }
+
+            // Protocol chips reflecting the settings.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ProtocolChip("HTTP", "http" in settings.protocols)
+                ProtocolChip("SOCKS4", "socks4" in settings.protocols)
+                ProtocolChip("SOCKS5", "socks5" in settings.protocols)
+            }
+
+            Text(
+                text = engineVersion ?: stringResource(R.string.engine_unavailable),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun startProxy(context: Context) {
+    ContextCompat.startForegroundService(
+        context,
+        Intent(context, ProxyService::class.java),
+    )
+}
+
+private fun copyText(context: Context, text: String) {
+    val cm = context.getSystemService(ClipboardManager::class.java)
+    cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
+    bytes < 1024 * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024))
+    else -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
+}
+
+@Composable
+private fun AddressCard(interfaces: List<NetIf>, vpnInterfaces: List<NetIf>, port: Int) {
+    val context = LocalContext.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.addresses_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (interfaces.isEmpty() && vpnInterfaces.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.addresses_none),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            for (nif in interfaces) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "${kindLabel(nif.kind)} (${nif.name}): ${nif.ip}:$port",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { copyText(context, "${nif.ip}:$port") }) {
+                        Text(stringResource(R.string.copy))
+                    }
+                }
+            }
+            for (nif in vpnInterfaces) {
+                Text(
+                    text = "${kindLabel(nif.kind)} (${nif.name}): ${nif.ip}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (vpnInterfaces.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.outbound_only),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun kindLabel(kind: IfKind): String = stringResource(
+    when (kind) {
+        IfKind.WIFI -> R.string.if_wifi
+        IfKind.HOTSPOT -> R.string.if_hotspot
+        IfKind.ETHERNET -> R.string.if_ethernet
+        IfKind.MOBILE -> R.string.if_mobile
+        IfKind.VPN -> R.string.if_vpn
+        IfKind.OTHER -> R.string.if_other
+    }
+)
+
+@Composable
+private fun CredentialsCard(user: String, password: String) {
+    val context = LocalContext.current
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.credentials_title),
+                style = MaterialTheme.typography.titleMedium,
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(top = 16.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Button(
-                    onClick = {
-                        ContextCompat.startForegroundService(
-                            context,
-                            Intent(context, ProxyService::class.java)
-                        )
-                    },
-                    enabled = state is EngineState.Stopped || state is EngineState.Error,
-                ) {
-                    Text(stringResource(R.string.proxy_start))
+                Text(
+                    text = "${stringResource(R.string.user_label)}: $user",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { copyText(context, user) }) {
+                    Text(stringResource(R.string.copy))
                 }
-                OutlinedButton(
-                    onClick = { ProxyController.stop() },
-                    enabled = state !is EngineState.Stopped,
-                ) {
-                    Text(stringResource(R.string.proxy_stop))
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TextButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Text(
+                        text = "${stringResource(R.string.password_label)}: " +
+                            if (passwordVisible) password.ifEmpty { "—" } else "••••••",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                TextButton(onClick = { copyText(context, password) }) {
+                    Text(stringResource(R.string.copy))
                 }
             }
             Text(
-                text = engineVersion ?: stringResource(R.string.engine_unavailable),
-                style = MaterialTheme.typography.bodyMedium,
+                text = stringResource(R.string.password_hint),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp)
             )
         }
+    }
+}
+
+@Composable
+private fun ProtocolChip(label: String, enabled: Boolean) {
+    Surface(
+        color = if (enabled) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (enabled) MaterialTheme.colorScheme.onSecondaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }

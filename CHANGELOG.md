@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.5 — navigation shell + Home screen
+
+- New ui/AppRoot.kt (a composable, not the Application class):
+  Scaffold with a bottom NavigationBar — Home, Connections,
+  Settings — plain rememberSaveable state, no navigation library.
+  Connections and Settings are placeholders until 0.1.8 and 0.1.9
+  (private placeholder composables in AppRoot.kt). Only core
+  Material icons (Home, List, Settings).
+- New data/NetworkInfo.kt: IfKind (WIFI, HOTSPOT, ETHERNET, MOBILE,
+  VPN, OTHER), NetIf, classifyInterface, listIPv4 (up, non-loopback
+  IPv4 only), networkChanges callbackFlow (available/lost/link
+  properties, VPN networks included) and networkInterfaces, which
+  re-lists on every network change and every 5 s (hotspot toggles do
+  not always fire callbacks), debounced 300 ms, on Dispatchers.IO.
+- HomeScreen rewritten, driven by ProxyController state: large
+  animated Start/Stop button (64 dp, 28 dp corners, animated color
+  and label), status card (Stopped / Starting / Running / Error with
+  the message), running totals (up/down bytes, active connections)
+  from the snapshot, address card (one row per non-VPN interface,
+  "label (name): IP:port" with a copy button; the raw interface name
+  is always shown, so wlan1-as-hotspot stays visible; VPN
+  interfaces listed separately, greyed out, "outbound only"),
+  credentials card when auth is on (user + copy, password hidden
+  with tap to reveal + copy), protocol chips (HTTP / SOCKS4 /
+  SOCKS5) reflecting the settings, warning banner when auth is off
+  and private_only is off. API 33+: an explanation dialog, then the
+  POST_NOTIFICATIONS request; the proxy still starts when it is
+  denied. Temporary 0.1.4 buttons removed. settings.keepScreenOn is
+  honored while running. MainActivity now shows AppRoot.
+- Strings in values/ and values-fa/. Unit test for
+  classifyInterface (6 tests: every prefix group + unknown).
+- 3 new files this step (AppRoot, NetworkInfo, NetworkInfoTest) —
+  the placeholders live in AppRoot.kt to stay within the rule.
+
 ## 0.1.4 — service + ProxyController
 
 - CI: `./gradlew testDebugUnitTest` now runs before assembleDebug
