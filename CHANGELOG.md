@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.1.3 — engine/Engine.kt (step 0.0.10b)
+
+- New app/src/main/java/com/example/proxyshare/engine/Engine.kt:
+  Kotlin wrapper that owns the native handle (`nativeCreate` in the
+  constructor). Exposes `state: StateFlow<EngineState>` (sealed
+  interface Stopped/Starting/Running/Error, mirroring the Rust
+  EngineState), `snapshot: StateFlow<Snapshot>` and `events:
+  SharedFlow<EngineEvent>` (extra buffer 256, DROP_OLDEST).
+- `start(settings)` and `stop()` are suspend functions on
+  Dispatchers.IO; `start` maps settings with `toEngineConfig()`,
+  returns "" or the error text, and polls `nativeSnapshot` every 1 s
+  while running; `setFastPolling(true)` switches the poll to 250 ms
+  for the connections screen; `close()` destroys the handle and is
+  safe to call twice. The listener is registered once in init;
+  events arrive on a native thread and are only tryEmit-ted, and a
+  type-1 event also updates the state (with its error message).
+- `parseSnapshot` is verbatim from the spec: null for a missing or
+  short head line, bad head numbers fall back to 0, a malformed
+  connection line is skipped, never a crash.
+- Tests: 7 parser tests in app/src/test/.../EngineTest.kt (good
+  snapshot, empty text, short head, bad head numbers, malformed
+  connection lines skipped, blank lines ignored, state-name mapping).
+- Correction: 0.1.2 was Kotlin-only and left ENGINE_VERSION at
+  "engine 0.1.1", so its home screen showed the old engine version.
+  It is "engine 0.1.3" now, in step with the app version.
+- Step 0.0.10b shipped as 0.1.3: 0.0.10, 0.1.0, 0.1.1 and 0.1.2
+  were taken. The CI workflow still does not run
+  `./gradlew testDebugUnitTest` — run it locally until the workflow
+  gains the step.
+
 ## 0.1.2 — SettingsRepository (step 0.0.10a)
 
 - New app/src/main/java/com/example/proxyshare/data/SettingsRepository.kt:
