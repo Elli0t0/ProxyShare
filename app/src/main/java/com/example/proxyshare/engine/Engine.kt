@@ -140,6 +140,11 @@ class Engine(private val scope: CoroutineScope) {
         fastPolling = enabled
     }
 
+    /** Set the state to Error without starting the engine (e.g. no network for the chosen outbound mode, or the VPN kill switch). */
+    fun setError(message: String) {
+        _state.value = EngineState.Error(message)
+    }
+
     /** Set the Android Network handle for outbound TCP connections (0 = default network). No-op after close. */
     fun setOutboundNetwork(network: Long) {
         if (closed) return

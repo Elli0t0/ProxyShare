@@ -28,6 +28,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,12 +56,16 @@ import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.NativeEngine
+import com.example.proxyshare.service.OutboundMode
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.service.ProxyService
+import com.example.proxyshare.service.toOutboundMode
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsState()
     val snapshot by ProxyController.snapshot.collectAsState()
     val settings by ProxyController.settings.collectAsState()
@@ -66,6 +74,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val engineVersion = remember {
         runCatching { NativeEngine.nativeVersion() }.getOrNull()
     }
+    var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
+    var exitIpChecking by rememberSaveable { mutableStateOf(false) }
 
     // Keep the screen on while the proxy runs, when the setting is on.
     val view = LocalView.current
@@ -232,6 +242,39 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 ProtocolChip("SOCKS5", "socks5" in settings.protocols)
             }
 
+            // Outbound mode + exit-IP check.
+            OutboundCard(
+                mode = settings.outboundMode.toOutboundMode(),
+                enabled = state is EngineState.Stopped,
+                onModeSelected = { mode ->
+                    scope.launch { ProxyController.setOutboundMode(mode) }
+                },
+                checking = exitIpChecking,
+                onCheckExitIp = {
+                    exitIpChecking = true
+                    scope.launch {
+                        val result = ProxyController.checkExitIp()
+                        exitIpText = result.getOrNull()
+                            ?: result.exceptionOrNull()?.message
+                            ?: context.getString(R.string.check_exit_ip_failed)
+                        exitIpChecking = false
+                    }
+                },
+            )
+            if (exitIpChecking || exitIpText != null) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = if (exitIpChecking) {
+                            stringResource(R.string.check_exit_ip_checking)
+                        } else {
+                            exitIpText.orEmpty()
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+
             Text(
                 text = engineVersion ?: stringResource(R.string.engine_unavailable),
                 style = MaterialTheme.typography.bodySmall,
@@ -375,6 +418,56 @@ private fun CredentialsCard(user: String, password: String) {
             )
         }
     }
+}
+
+@Composable
+private fun OutboundCard(
+    mode: OutboundMode,
+    enabled: Boolean,
+    onModeSelected: (OutboundMode) -> Unit,
+    checking: Boolean,
+    onCheckExitIp: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.outbound_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                OutboundMode.entries.forEachIndexed { index, item ->
+                    SegmentedButton(
+                        selected = mode == item,
+                        onClick = { onModeSelected(item) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = OutboundMode.entries.size,
+                        ),
+                        enabled = enabled,
+                    ) {
+                        Text(text = stringResource(modeLabel(item)))
+                    }
+                }
+            }
+            Button(
+                onClick = onCheckExitIp,
+                enabled = !checking,
+            ) {
+                Text(text = stringResource(R.string.check_exit_ip))
+            }
+        }
+    }
+}
+
+@Composable
+private fun modeLabel(mode: OutboundMode): Int = when (mode) {
+    OutboundMode.DEFAULT -> R.string.mode_default
+    OutboundMode.VPN_ONLY -> R.string.mode_vpn_only
+    OutboundMode.WIFI -> R.string.mode_wifi
+    OutboundMode.MOBILE -> R.string.mode_mobile
 }
 
 @Composable

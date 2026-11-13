@@ -28,6 +28,10 @@ data class AppSettings(
     val themeMode: String = "system",
     val language: String = "system",
     val keepScreenOn: Boolean = false,
+    /** Outbound network mode: "default", "vpn_only", "wifi" or "mobile". Kotlin-only: never sent to the engine. */
+    val outboundMode: String = "default",
+    /** URL used for the manual exit-IP check. Kotlin-only: never sent to the engine. */
+    val exitIpUrl: String = "https://api.ipify.org",
 )
 
 /** Map settings to the engine's key=value config text (see docs/ENGINE_API.md). */
@@ -83,6 +87,8 @@ class SettingsRepository(context: Context) {
             themeMode = prefs[Keys.THEME_MODE] ?: defaults.themeMode,
             language = prefs[Keys.LANGUAGE] ?: defaults.language,
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
+            outboundMode = prefs[Keys.OUTBOUND_MODE] ?: defaults.outboundMode,
+            exitIpUrl = prefs[Keys.EXIT_IP_URL] ?: defaults.exitIpUrl,
         )
     }
 
@@ -153,6 +159,14 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.KEEP_SCREEN_ON] = value }
     }
 
+    suspend fun updateOutboundMode(value: String) {
+        dataStore.edit { it[Keys.OUTBOUND_MODE] = value }
+    }
+
+    suspend fun updateExitIpUrl(value: String) {
+        dataStore.edit { it[Keys.EXIT_IP_URL] = value }
+    }
+
     private object Keys {
         val BIND_ADDR = stringPreferencesKey("bind_addr")
         val PORT = intPreferencesKey("port")
@@ -168,5 +182,7 @@ class SettingsRepository(context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val LANGUAGE = stringPreferencesKey("language")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+        val OUTBOUND_MODE = stringPreferencesKey("outbound_mode")
+        val EXIT_IP_URL = stringPreferencesKey("exit_ip_url")
     }
 }

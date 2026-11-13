@@ -36,4 +36,12 @@
     <string name="if_vpn">VPN</string>
     <string name="if_other">سایر</string>
     <string name="engine_unavailable">موتور در دسترس نیست</string>
+    <string name="outbound_title">شبکه خروجی</string>
+    <string name="mode_default">پیش‌فرض</string>
+    <string name="mode_vpn_only">فقط VPN</string>
+    <string name="mode_wifi">وای‌فای</string>
+    <string name="mode_mobile">موبایل</string>
+    <string name="check_exit_ip">بررسی IP خروجی</string>
+    <string name="check_exit_ip_checking">در حال بررسی…</string>
+    <string name="check_exit_ip_failed">بررسی ناموفق بود</string>
 </resources>

@@ -36,4 +36,12 @@
     <string name="if_vpn">VPN</string>
     <string name="if_other">Other</string>
     <string name="engine_unavailable">Engine unavailable</string>
+    <string name="outbound_title">Outbound network</string>
+    <string name="mode_default">Default</string>
+    <string name="mode_vpn_only">VPN only</string>
+    <string name="mode_wifi">Wi-Fi</string>
+    <string name="mode_mobile">Mobile</string>
+    <string name="check_exit_ip">Check exit IP</string>
+    <string name="check_exit_ip_checking">Checking…</string>
+    <string name="check_exit_ip_failed">Check failed</string>
 </resources>

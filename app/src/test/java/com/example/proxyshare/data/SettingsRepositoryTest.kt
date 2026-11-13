@@ -54,6 +54,17 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun outboundSettingsDoNotChangeEngineConfig() {
+        val base = AppSettings(authPass = "secret").toEngineConfig()
+        val changed = AppSettings(
+            authPass = "secret",
+            outboundMode = "vpn_only",
+            exitIpUrl = "https://example.org",
+        ).toEngineConfig()
+        assertEquals(base, changed)
+    }
+
+    @Test
     fun randomPasswordHasLengthAndChars() {
         val password = randomPassword()
         assertEquals(12, password.length)

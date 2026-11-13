@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.7 — outbound mode + kill switch + exit-IP check
+
+- AppSettings gains outboundMode ("default"/"vpn_only"/"wifi"/
+  "mobile") and exitIpUrl (default https://api.ipify.org), both
+  Kotlin-only: toEngineConfig() is unchanged (test proves it).
+- New service/NetworkSelector.kt: OutboundMode + setting-string
+  mapping, one NetworkCallback per mode, checkExitIp (manual only).
+- ProxyController: start waits up to 2 s for the mode's network
+  (else Error "No <mode> network available"); while running it
+  pushes the network handle to the engine; VPN_ONLY kill switch
+  stops at once on network loss, never falls back.
+- Engine gains setError() for pre-start errors. Home: segmented
+  Default / VPN only / Wi-Fi / Mobile (stopped only) + "Check exit
+  IP" with a result card. Strings en/fa.
+
 ## 0.1.6 — outbound network binding (Rust only, TCP only)
 
 - New rust/engine/src/netbind.rs: bind_socket_to_network calls
