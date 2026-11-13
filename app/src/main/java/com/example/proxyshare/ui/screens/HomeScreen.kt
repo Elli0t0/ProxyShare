@@ -73,8 +73,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         view.keepScreenOn = settings.keepScreenOn && state is EngineState.Running
     }
 
-    var showNotifExplain by rememberSaveable { false }
-    var notifAsked by rememberSaveable { false }
+    var showNotifExplain by rememberSaveable { mutableStateOf(false) }
+    var notifAsked by rememberSaveable { mutableStateOf(false) }
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
