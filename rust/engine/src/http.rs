@@ -1,14 +1,19 @@
-//! Plain HTTP forwarding: every method except CONNECT.
+//! HTTP proxying: CONNECT tunnels and plain HTTP forwarding.
 //!
-//! The request line must carry an absolute URI
-//! (`http://host[:port]/path`); anything else gets a 400. The request
-//! is rewritten to origin-form, the hop-by-hop headers are dropped,
-//! `Connection: close` is added (no keep-alive in this version), the
-//! engine connects to `host:port` (default 80) and sends the rewritten
-//! head plus any body bytes already read, then relays both directions
-//! untouched. A target that cannot be reached gets a 502. Bodies are
-//! never parsed or logged: only the target host/port and the byte
-//! counts are recorded.
+//! A CONNECT request opens a tunnel to `host:port` (the host may be an
+//! IPv6 literal in brackets): the record's target is set as soon as the
+//! target is parsed, the target is dialed (DNS or connect failure gets
+//! a 502), success replies `HTTP/1.1 200 Connection Established`, any
+//! bytes the client already sent after the head are forwarded, then
+//! both directions are relayed untouched. Any other method must carry
+//! an absolute URI (`http://host[:port]/path`); anything else gets a
+//! 400. The request is rewritten to origin-form, the hop-by-hop
+//! headers are dropped, `Connection: close` is added (no keep-alive in
+//! this version), the engine connects to `host:port` (default 80) and
+//! sends the rewritten head plus any body bytes already read, then
+//! relays both directions untouched. A target that cannot be reached
+//! gets a 502. Bodies are never parsed or logged: only the target
+//! host/port and the byte counts are recorded.
 
 use std::io;
 use std::sync::atomic::Ordering;
@@ -25,7 +30,7 @@ use crate::relay;
 /// How long the whole request head may take to arrive.
 const HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 /// Largest request head accepted (headers only, not the body).
-const MAX_HEAD_BYTES: usize = 64 * 1024;
+const MAX_HEAD_BYTES: usize = 16 * 1024;
 
 /// Hop-by-hop headers, dropped by the rewrite (matched case-insensitively).
 const HOP_BY_HOP: [&str; 7] = [
@@ -67,6 +72,17 @@ fn rewrite_head(head: &str) -> Option<(String, u16, String)> {
     }
     out.push_str("Connection: close\r\n\r\n");
     Some((host.to_string(), port, out))
+}
+
+/// Split a CONNECT target `host:port` (the host may be an IPv6 literal
+/// in brackets) into (host without brackets, port).
+fn split_host_port(target: &str) -> Option<(String, u16)> {
+    let (host, port) = target.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    Some((
+        host.trim_start_matches('[').trim_end_matches(']').to_string(),
+        port,
+    ))
 }
 
 /// Index just past the blank line (`\r\n\r\n`) that ends the head, if present.
@@ -116,11 +132,15 @@ async fn send_status(client: &mut TcpStream, code: u16, reason: &str) -> io::Res
         .await
 }
 
-/// Handle one plain HTTP connection: read the request head, rewrite it
-/// to origin-form, dial the target and relay both directions. The
-/// request line must carry an absolute URI; anything else gets a 400.
-/// A target that cannot be reached gets a 502. Bodies are never parsed
-/// or logged: the bytes after the head are sent on untouched, and the
+/// Handle one HTTP connection. A CONNECT request opens a tunnel to
+/// `host:port`: the record's target is set as soon as it is parsed,
+/// the target is dialed (DNS or connect failure gets a 502), success
+/// replies `200 Connection Established`, any bytes the client already
+/// sent after the head are forwarded, then both directions are relayed
+/// untouched. Any other method is plain HTTP forwarding: the request
+/// line must carry an absolute URI; anything else gets a 400. A target
+/// that cannot be reached gets a 502. Bodies are never parsed or
+/// logged: the bytes after the head are sent on untouched, and the
 /// relay only counts them.
 ///
 /// The connection record's target is set as soon as the request is
@@ -145,6 +165,51 @@ pub async fn handle(
                 ));
             }
         };
+    let mut first_parts = head.split(' ');
+    if first_parts.next().unwrap_or("") == "CONNECT" {
+        let target = first_parts.next().unwrap_or("");
+        let (host, port) = match split_host_port(target) {
+            Some(v) => v,
+            None => {
+                let _ = send_status(&mut client, 400, "Bad Request").await;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "CONNECT target is not host:port",
+                ));
+            }
+        };
+        record.set_target(host.clone(), port);
+        let mut upstream = match outbound
+            .connect(&host, port, Duration::from_secs(config.connect_timeout_s))
+            .await
+        {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = send_status(&mut client, 502, "Bad Gateway").await;
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    format!("could not reach {host}:{port}: {e}"),
+                ));
+            }
+        };
+        upstream
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await?;
+        if !body_prefix.is_empty() {
+            upstream.write_all(&body_prefix).await?;
+            record
+                .up
+                .fetch_add(body_prefix.len() as u64, Ordering::Relaxed);
+        }
+        return relay::relay(
+            client,
+            upstream,
+            &record.up,
+            &record.down,
+            Duration::from_secs(config.idle_timeout_s),
+        )
+        .await;
+    }
     let (host, port, rewritten) = match rewrite_head(&head) {
         Some(v) => v,
         None => {
@@ -238,6 +303,25 @@ mod tests {
             rewrite_head("GET http://example.com:abc/ HTTP/1.1\r\nHost: x\r\n\r\n").is_none()
         );
         assert!(rewrite_head("garbage").is_none());
+    }
+
+    #[test]
+    fn split_host_port_parses() {
+        assert_eq!(
+            split_host_port("example.com:443"),
+            Some(("example.com".to_string(), 443))
+        );
+        assert_eq!(
+            split_host_port("[::1]:8080"),
+            Some(("::1".to_string(), 8080))
+        );
+        assert_eq!(
+            split_host_port("127.0.0.1:1080"),
+            Some(("127.0.0.1".to_string(), 1080))
+        );
+        assert_eq!(split_host_port("example.com"), None);
+        assert_eq!(split_host_port("example.com:abc"), None);
+        assert_eq!(split_host_port("example.com:"), None);
     }
 
     #[test]

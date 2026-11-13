@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.7 — HTTP CONNECT tunnels (step 0.0.6a)
+
+- CONNECT tunnels in rust/engine/src/http.rs: `split_host_port` (host
+  may be an IPv6 literal in brackets), target set as soon as parsed,
+  502 for DNS or connect failure, `200 Connection Established` on
+  success, bytes already sent after the head forwarded, then relayed
+  untouched. The head cap is 16 KiB for both CONNECT and plain HTTP
+  (was 64 KiB in 0.0.6). Plain HTTP still forwards GET/POST: the 501
+  in the 0.0.6a spec assumed 0.0.6a landed before 0.0.6b, which is
+  already green.
+- Tests: `split_host_port` unit test; CONNECT to a local echo server
+  (200, echo works, 5 up / 5 down), CONNECT to a closed port gives
+  502, invalid-UTF-8 garbage gives 400.
+- docs/ENGINE_API.md records the CONNECT contract.
+
 ## 0.0.6 — plain HTTP forwarding (step 0.0.6b)
 
 - New rust/engine/src/http.rs: `rewrite_head` (pure function, the

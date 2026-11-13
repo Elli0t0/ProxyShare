@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.6"`.
+- Returns the engine version string, e.g. `"engine 0.0.7"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -90,11 +90,18 @@ second parameter.
 - The greeting and the request must arrive within 10 s of the first
   byte, or the connection is closed.
 
-## HTTP (0.0.6)
+## HTTP (0.0.6–0.0.7)
 
-- Plain HTTP forwarding, every method except CONNECT: the request line
-  must carry an absolute URI (`http://host[:port]/path`); anything else
-  gets a 400. A CONNECT request (authority-form) gets a 400 too.
+- CONNECT (0.0.7) opens a tunnel to `host:port` (the host may be an
+  IPv6 literal in brackets): the record's target is set as soon as the
+  target is parsed, DNS or connect failure gets a 502, success replies
+  `HTTP/1.1 200 Connection Established` and any bytes the client
+  already sent after the head are forwarded, then both directions are
+  relayed untouched with the same counters as SOCKS5.
+- Plain HTTP forwarding, every method other than CONNECT: the request
+  line must carry an absolute URI (`http://host[:port]/path`); anything
+  else gets a 400. A CONNECT request (authority-form) is a tunnel, not
+  a 400.
 - The request is rewritten to origin-form, the hop-by-hop headers are
   dropped (`Proxy-Connection`, `Proxy-Authorization`, `Connection`,
   `Keep-Alive`, `TE`, `Trailer`, `Upgrade`), and `Connection: close`

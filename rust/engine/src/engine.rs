@@ -783,6 +783,24 @@ mod tests {
         buf
     }
 
+    /// Read a response head (up to the blank line) without waiting for
+    /// the connection to close; used for CONNECT replies.
+    async fn read_head_response(client: &mut TcpStream) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 256];
+        loop {
+            let n = tokio::time::timeout(Duration::from_secs(5), client.read(&mut chunk))
+                .await
+                .expect("response read timed out")
+                .expect("response read failed");
+            assert!(n > 0, "connection closed before the response head");
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).position(|w| w == b"\r\n\r\n").is_some() {
+                return buf;
+            }
+        }
+    }
+
     /// A local HTTP server that records the raw request it received and
     /// answers `ok`. Returns (port, recorded bytes).
     async fn start_recording_server() -> (u16, std::sync::Arc<Mutex<Vec<u8>>>) {
@@ -966,6 +984,108 @@ mod tests {
         assert!(
             response.starts_with(b"HTTP/1.1 502"),
             "expected a 502 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_connect_relays_to_echo_server() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "CONNECT 127.0.0.1:{echo_port} HTTP/1.1\r\nHost: 127.0.0.1:{echo_port}\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert_eq!(
+            response,
+            b"HTTP/1.1 200 Connection Established\r\n\r\n",
+            "expected a 200 reply, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        // Payload through the tunnel: the echo server sends it back.
+        client.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        // Close our side and wait for the engine to close the connection.
+        drop(client);
+        let closed = {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            loop {
+                let events = sink.events();
+                if let Some(Event::ConnectionClosed(info)) = events
+                    .iter()
+                    .find(|e| matches!(e, Event::ConnectionClosed(_)))
+                {
+                    break info.clone();
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "no ConnectionClosed, got: {events:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        assert_eq!(closed.port, echo_port);
+        assert_eq!(closed.protocol, Protocol::Http);
+        assert_eq!(closed.up, 5, "5 bytes relayed client -> target");
+        assert_eq!(closed.down, 5, "5 bytes relayed target -> client");
+        assert!(sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, Event::ConnectionOpened(_))));
+        // The snapshot totals kept the bytes after the connection closed.
+        assert!(
+            engine.snapshot().starts_with("running\t5\t5\t0"),
+            "{}",
+            engine.snapshot()
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_connect_to_closed_port_is_502() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        // A port that is free right now, so nothing listens on it.
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe bind");
+        let target_port = probe.local_addr().expect("probe addr").port();
+        drop(probe);
+        let request = format!(
+            "CONNECT 127.0.0.1:{target_port} HTTP/1.1\r\nHost: 127.0.0.1:{target_port}\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 502"),
+            "expected a 502 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_garbage_is_400() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        // Not valid UTF-8: the head reader rejects it with a 400.
+        client
+            .write_all(b"\xff\xfe not http\r\n\r\n")
+            .await
+            .expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 400"),
+            "expected a 400 response, got: {}",
             String::from_utf8_lossy(&response)
         );
         engine.stop();
