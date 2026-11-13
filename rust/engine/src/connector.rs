@@ -60,63 +60,67 @@ impl From<ConnectError> for io::Error {
 /// without changing the handler.
 pub trait Outbound: Send + Sync {
     /// Connect to `host:port` within `timeout` (the timeout bounds the
-    /// DNS lookup and each connect attempt).
-    async fn connect(
+    /// DNS lookup and each connect attempt). Written as a plain `fn`
+    /// returning `impl Future` rather than `async fn`: clippy's
+    /// `async_fn_in_trait` lint forbids the latter, because an `async
+    /// fn` in a trait cannot state the `Send` bound its future needs.
+    fn connect(
         &self,
         host: &str,
         port: u16,
         timeout: Duration,
-    ) -> Result<TcpStream, ConnectError>;
+    ) -> impl std::future::Future<Output = Result<TcpStream, ConnectError>> + Send;
 }
 
 /// The plain outbound: the system resolver and a normal TCP connect.
 pub struct TcpOutbound;
 
 impl Outbound for TcpOutbound {
-    async fn connect(
+    fn connect(
         &self,
         host: &str,
         port: u16,
         timeout: Duration,
-    ) -> Result<TcpStream, ConnectError> {
-        let addrs: Vec<SocketAddr> = match tokio::time::timeout(timeout, lookup_host((host, port)))
-            .await
-        {
-            Ok(Ok(addrs)) => addrs.collect(),
-            Ok(Err(e)) => return Err(ConnectError::Dns(e)),
-            Err(_) => {
+    ) -> impl std::future::Future<Output = Result<TcpStream, ConnectError>> + Send {
+        async move {
+            let addrs: Vec<SocketAddr> =
+                match tokio::time::timeout(timeout, lookup_host((host, port))).await {
+                    Ok(Ok(addrs)) => addrs.collect(),
+                    Ok(Err(e)) => return Err(ConnectError::Dns(e)),
+                    Err(_) => {
+                        return Err(ConnectError::Dns(io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            format!("DNS lookup for {host} timed out"),
+                        )))
+                    }
+                };
+            if addrs.is_empty() {
                 return Err(ConnectError::Dns(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    format!("DNS lookup for {host} timed out"),
-                )))
+                    io::ErrorKind::NotFound,
+                    format!("{host} resolved to no addresses"),
+                )));
             }
-        };
-        if addrs.is_empty() {
-            return Err(ConnectError::Dns(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("{host} resolved to no addresses"),
-            )));
-        }
-        let mut last_err =
-            io::Error::new(io::ErrorKind::AddrNotAvailable, "no address was tried");
-        for addr in addrs {
-            match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
-                Ok(Ok(stream)) => {
-                    stream
-                        .set_nodelay(true)
-                        .map_err(ConnectError::Connect)?;
-                    return Ok(stream);
-                }
-                Ok(Err(e)) => last_err = e,
-                Err(_) => {
-                    last_err = io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("connect to {addr} timed out"),
-                    )
+            let mut last_err =
+                io::Error::new(io::ErrorKind::AddrNotAvailable, "no address was tried");
+            for addr in addrs {
+                match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
+                    Ok(Ok(stream)) => {
+                        stream
+                            .set_nodelay(true)
+                            .map_err(ConnectError::Connect)?;
+                        return Ok(stream);
+                    }
+                    Ok(Err(e)) => last_err = e,
+                    Err(_) => {
+                        last_err = io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            format!("connect to {addr} timed out"),
+                        )
+                    }
                 }
             }
+            Err(ConnectError::Connect(last_err))
         }
-        Err(ConnectError::Connect(last_err))
     }
 }
 

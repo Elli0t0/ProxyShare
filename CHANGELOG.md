@@ -42,6 +42,14 @@
   one arm can also be read by the other — the plain version was
   correct. Both arms are back to plain `async`. Lesson: never apply a
   speculative fix the compiler never asked for.
+- FIX (same version, run #20 red): cargo test passed (33 passed), but
+  clippy failed with one lint — `async_fn_in_trait` on
+  `Outbound::connect` (an `async fn` in a trait cannot state the
+  `Send` bound its future needs). The trait and the `TcpOutbound`
+  impl are now a plain `fn` returning `impl Future<Output =
+  Result<TcpStream, ConnectError>> + Send`, with the body wrapped in
+  `async move`; the call site (socks5) and the tests await it the
+  same way, so nothing else changed.
 - docs/ENGINE_API.md records the SOCKS5, outbound and relay contracts.
 
 ## 0.0.4 — server shell + JNI lifecycle
