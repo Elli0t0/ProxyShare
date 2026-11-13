@@ -84,6 +84,6 @@
     <string name="laptop_firefox_title">Firefox</string>
     <string name="laptop_firefox_steps">Settings → Network Settings → Manual proxy. Choose SOCKS v5, enter the host and port, and tick "Proxy DNS when using SOCKS v5".</string>
     <string name="auth_no_password">No password</string>
-    <string name="auth_no_password_note">Anyone who can reach this port can use your connection. Keep 'Private networks only' on.</string>
+    <string name="auth_no_password_note">Anyone who can reach this port can use your connection. Keep \'Private networks only\' on.</string>
     <string name="no_password_private">No password · private networks only</string>
 </resources>
