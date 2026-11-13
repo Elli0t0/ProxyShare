@@ -192,7 +192,7 @@ pub async fn handle(
                 ));
             }
         };
-        upstream
+        client
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             .await?;
         if !body_prefix.is_empty() {
