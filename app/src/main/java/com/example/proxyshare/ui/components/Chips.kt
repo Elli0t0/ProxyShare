@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -64,18 +62,12 @@ fun CopyChip(text: String, modifier: Modifier = Modifier) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = FontFamily.Monospace,
-            )
-            Icon(
-                Icons.Filled.ContentCopy,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
             )
         }
     }
