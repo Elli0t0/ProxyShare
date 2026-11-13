@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.8 — fix crash on open (native lib failed to load)
+
+- Root cause, found in the shipped 0.1.7 APK: libproxyshare_engine.so
+  references android_setsocknetwork but has NO libandroid DT_NEEDED,
+  so System.loadLibrary fails and the app dies in Application.onCreate.
+  cargo-ndk defaulted to platform 21, whose libandroid stub lacks the
+  symbol (API 23+), so the linker dropped the dependency.
+- Fix: cargo ndk --platform 26 (== minSdk) in both cargoBuild tasks,
+  so the stub exports the symbol and the .so records the DT_NEEDED.
+- No code changed; engine version bumped to 0.1.8 to match the app.
+
 ## 0.1.7 — outbound mode + kill switch + exit-IP check
 
 - AppSettings gains outboundMode ("default"/"vpn_only"/"wifi"/

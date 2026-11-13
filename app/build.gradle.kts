@@ -112,6 +112,13 @@ base {
 // build it into app/src/main/jniLibs before the Android build packages it.
 // Debug builds arm64-v8a + x86_64 only, for speed; release builds all ABIs.
 //
+// --platform 26 (== minSdk): cargo-ndk defaults to platform 21, whose
+// libandroid stub does NOT export android_setsocknetwork (API 23+). The
+// linker then drops the libandroid DT_NEEDED and leaves an unresolvable
+// undefined reference, so System.loadLibrary fails on the phone and the
+// app crashes on open (0.1.6-0.1.7). Platform 26 makes the stub export
+// the symbol, so the .so records the DT_NEEDED and loads.
+//
 // The cargo/cargo-ndk presence check runs inside the shell command itself:
 // a doFirst { checkCargoToolchain() } call breaks the configuration cache,
 // because the task action then references the build script object, which
@@ -128,7 +135,7 @@ val cargoBuild = tasks.register<Exec>("cargoBuild") {
     commandLine(
         "sh", "-c",
         cargoToolchainCheck +
-            "exec cargo ndk -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build"
+            "exec cargo ndk --platform 26 -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build"
     )
 }
 
@@ -138,7 +145,7 @@ val cargoBuildRelease = tasks.register<Exec>("cargoBuildRelease") {
     commandLine(
         "sh", "-c",
         cargoToolchainCheck +
-            "exec cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release"
+            "exec cargo ndk --platform 26 -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../app/src/main/jniLibs build --release"
     )
 }
 
