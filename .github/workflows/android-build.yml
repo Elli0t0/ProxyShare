@@ -91,6 +91,8 @@ jobs:
             echo "key_generated=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Kotlin unit tests
+        run: ./gradlew testDebugUnitTest
       - name: Build debug APK
         run: ./gradlew assembleDebug -PVERSION_CODE=$GITHUB_RUN_NUMBER
 
