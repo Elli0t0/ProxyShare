@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0 — SOCKS5 UDP header, pure functions (step 0.0.9a)
+
+- New rust/engine/src/udp.rs: `parse_udp_header` and
+  `build_udp_header` (verbatim from the spec). Datagram layout is
+  RSV(2) = 0, FRAG(1) = 0, ATYP, DST.ADDR, DST.PORT, DATA; FRAG != 0
+  means drop. No sockets in this step.
+- `Target` in socks5.rs is now `pub(crate)` (plus `Debug` /
+  `PartialEq` derives so the tests can compare it) so udp.rs can use
+  it; lib.rs has `pub mod udp`.
+- Tests: v4, domain and v6 round trips, truncated input returns None,
+  FRAG != 0 returns None. Total tests now 71 (66 + 5).
+- docs/ENGINE_API.md records the UDP header functions.
+- Step 0.0.9a shipped as 0.1.0: 0.0.9 and 0.0.10 were both taken.
+
 ## 0.0.10 — failed-auth throttle (step 0.0.8b)
 
 - New `AuthGuard` in rust/engine/src/auth.rs (verbatim from the spec):

@@ -36,7 +36,8 @@ const REP_ADDRESS_NOT_SUPPORTED: u8 = 0x08;
 const REP_NO_ACCEPTABLE_METHOD: u8 = 0xFF;
 
 /// The target a CONNECT request asks for.
-enum Target {
+#[derive(Debug, PartialEq)]
+pub(crate) enum Target {
     Ip(IpAddr),
     Domain(String),
 }

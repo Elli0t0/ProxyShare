@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.10"`.
+- Returns the engine version string, e.g. `"engine 0.1.0"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -129,6 +129,14 @@ second parameter.
   reply code by then.
 - The greeting and the request must arrive within 10 s of the first
   byte, or the connection is closed.
+
+## SOCKS5 UDP (0.1.0)
+
+- Pure header functions only, no sockets yet: `parse_udp_header`
+  and `build_udp_header` in rust/engine/src/udp.rs. A datagram is
+  RSV(2) = 0, FRAG(1) = 0, ATYP, DST.ADDR, DST.PORT, DATA. FRAG != 0
+  means drop the datagram. `Target` in socks5.rs is `pub(crate)` so
+  udp.rs can use it.
 
 ## HTTP (0.0.6–0.0.7)
 
