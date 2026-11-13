@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.2.1"`.
+- Returns the engine version string, e.g. `"engine 0.2.2"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -41,7 +41,7 @@ second parameter.
 | --- | --- | --- |
 | `nativeCreate(): Long` | creates an `Engine`, stores it in the global handle table | Returns the handle. |
 | `nativeStart(h: Long, cfg: String): String` | `Engine::start` | Parses the config and starts listening. Returns `""` on success, an error text on failure. Starting an already starting or running engine is a no-op returning `""`. |
-| `nativeStop(h: Long)` | `Engine::stop` | Stops listening, cancels the accept task and closes the sockets (within 2 s). Safe on a stopped engine. |
+| `nativeStop(h: Long)` | `Engine::stop` | Stops listening, cancels the accept tasks and closes the sockets, waiting for all of them (at most 2 s each). Safe on a stopped engine. |
 | `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
@@ -49,9 +49,16 @@ second parameter.
 
 ## Server (0.0.4, extended in 0.0.5)
 
-- `start` binds one `TcpListener` through socket2 (`SO_REUSEADDR`,
-  backlog 128) and runs an accept loop on the global tokio runtime
-  (`Builder::new_multi_thread`, 2 worker threads named "ps-worker").
+- `start` binds one `TcpListener` per listener spec through socket2
+  (`SO_REUSEADDR`, backlog 128) and runs one accept loop per listener
+  on the global tokio runtime (`Builder::new_multi_thread`, 2 worker
+  threads named "ps-worker"). Single mode (neither `http_port` nor
+  `socks_port` set) binds one listener on `port` serving every enabled
+  protocol; split mode binds one listener per configured port, each
+  serving only its own protocols (see Config). All listeners are bound
+  before the engine goes Running; if any bind fails, the ones already
+  bound are released and the engine goes to Error naming the failing
+  port.
 - A client is accepted only when it passes the config's client filter
   (`allowed_clients` list, `private_only`); others are dropped with no
   event. The accept loop also enforces `max_connections` (counting every
@@ -59,8 +66,8 @@ second parameter.
   connections are dropped with no event.
 - Each accepted connection is handled by its own tokio task: the first
   byte is peeked (up to 5 s) and classified — `0x04` SOCKS4, `0x05`
-  SOCKS5, anything else HTTP. A sniffed protocol that is not enabled in
-  the config closes the connection quietly. The peek does not consume
+  SOCKS5, anything else HTTP. A sniffed protocol that this listener
+  does not serve closes the connection quietly. The peek does not consume
   the byte, so the handler that runs next still sees the whole stream;
   a path where no handler reads the stream consumes the byte first, so
   the close is a clean FIN instead of a reset.
@@ -212,7 +219,9 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `bind_addr` | IP address | `0.0.0.0` | Address the proxy listens on. |
-| `port` | 1–65535 | `1080` | Port the proxy listens on. |
+| `port` | 1–65535 | `1080` | Port the proxy listens on. Ignored in split mode. |
+| `http_port` | 1–65535 | — (none) | Optional HTTP-only port. When set, split mode: `port` is ignored. |
+| `socks_port` | 1–65535 | — (none) | Optional SOCKS4/SOCKS5 port. When set, split mode: `port` is ignored. |
 | `protocols` | comma list of `http`, `socks4`, `socks5` | `http,socks4,socks5` | At least one. |
 | `auth_user` | string | — (none) | Needs `auth_pass` too. |
 | `auth_pass` | string | — (none) | Needs `auth_user` too. |
@@ -241,6 +250,14 @@ Parsing rules:
 - A bad value is an error naming the line, the key and the value, e.g.
   `config line 2: invalid value for 'port': 'abc' (expected a port 1-65535)`.
 - `auth_user` without `auth_pass` (or the reverse) is an error.
+- Split mode: when `http_port` or `socks_port` is set, `port` is
+  ignored. The HTTP listener exists only when `http_port` is set and
+  `http` is in `protocols`; the SOCKS listener exists only when
+  `socks_port` is set and at least one of `socks4` / `socks5` is in
+  `protocols`. A listener serves only its own protocols; any other
+  sniffed protocol on it is closed without an event.
+  `http_port == socks_port` is an error, and so is a split config with
+  no listener at all.
 
 ## Snapshot
 

@@ -1,4 +1,4 @@
-//! The proxy engine: a tokio runtime, a listening socket, an accept loop,
+//! The proxy engine: a tokio runtime, listening sockets, accept loops,
 //! a connection registry and an event sink.
 //!
 //! Each engine lives in the global handle table (see `create_engine` /
@@ -10,7 +10,7 @@
 //! Events go out through the `EventSink` the JNI listener registers;
 //! the sink is never called while the engine lock is held.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
@@ -88,7 +88,7 @@ struct EngineInner {
     config: Option<Config>,
     sink: Option<std::sync::Arc<dyn EventSink>>,
     state: EngineState,
-    accept_task: Option<JoinHandle<()>>,
+    accept_tasks: Vec<JoinHandle<()>>,
     shutdown_tx: Option<watch::Sender<bool>>,
     connections: HashMap<u64, std::sync::Arc<ConnRecord>>,
     next_conn_id: u64,
@@ -159,7 +159,7 @@ impl Engine {
                 config: None,
                 sink: None,
                 state: EngineState::Stopped,
-                accept_task: None,
+                accept_tasks: Vec::new(),
                 shutdown_tx: None,
                 connections: HashMap::new(),
                 next_conn_id: 1,
@@ -212,9 +212,9 @@ impl Engine {
     /// Returns the plain std listener: turning it into a tokio listener
     /// (from_std) needs a runtime context, so that happens inside the
     /// accept task, not here on the caller's thread.
-    fn bind_listener(config: &Config) -> Result<std::net::TcpListener, String> {
-        let addr = SocketAddr::new(config.bind_addr, config.port);
-        let domain = if config.bind_addr.is_ipv4() {
+    fn bind_listener(bind_addr: IpAddr, port: u16) -> Result<std::net::TcpListener, String> {
+        let addr = SocketAddr::new(bind_addr, port);
+        let domain = if bind_addr.is_ipv4() {
             Domain::IPV4
         } else {
             Domain::IPV6
@@ -258,6 +258,13 @@ impl Engine {
         }
         self.emit(Event::StateChanged(EngineState::Starting));
 
+        let specs = match listener_specs(&config) {
+            Ok(specs) => specs,
+            Err(e) => {
+                self.transition_to_error(e.clone());
+                return Err(e);
+            }
+        };
         let rt = match runtime() {
             Ok(rt) => rt,
             Err(e) => {
@@ -265,38 +272,49 @@ impl Engine {
                 return Err(e);
             }
         };
-        let std_listener = match Self::bind_listener(&config) {
-            Ok(listener) => listener,
-            Err(e) => {
-                self.transition_to_error(e.clone());
-                return Err(e);
+        // Bind every listener before going Running. A failure releases
+        // the ones already bound (the Vec drops) and names the port:
+        // bind_listener's error carries the full address.
+        let mut std_listeners = Vec::new();
+        for spec in &specs {
+            match Self::bind_listener(config.bind_addr, spec.port) {
+                Ok(listener) => std_listeners.push(listener),
+                Err(e) => {
+                    self.transition_to_error(e.clone());
+                    return Err(e);
+                }
             }
-        };
+        }
 
         let mut inner = lock_inner(&self.inner);
         if inner.state != EngineState::Starting {
-            // A stop() ran while we were binding: drop the listener and
+            // A stop() ran while we were binding: drop the listeners and
             // stay stopped instead of starting behind the caller's back.
             return Ok(());
         }
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let engine = std::sync::Arc::clone(self);
-        let task_config = config.clone();
-        // The std listener becomes a tokio listener inside this task, where
-        // a runtime context exists. If that fails, the engine reports an
-        // error instead of listening.
-        let accept = rt.spawn(async move {
-            match TcpListener::from_std(std_listener) {
-                Ok(listener) => {
-                    accept_loop(engine, std::sync::Arc::new(listener), task_config, shutdown_rx)
-                        .await;
+        let mut accept_tasks = Vec::new();
+        for (std_listener, spec) in std_listeners.into_iter().zip(specs) {
+            let engine = std::sync::Arc::clone(self);
+            let task_config = config.clone();
+            let shutdown = shutdown_rx.clone();
+            let allowed = std::sync::Arc::new(spec.allowed);
+            // The std listener becomes a tokio listener inside this task,
+            // where a runtime context exists. If that fails, the engine
+            // reports an error instead of listening.
+            accept_tasks.push(rt.spawn(async move {
+                match TcpListener::from_std(std_listener) {
+                    Ok(listener) => {
+                        accept_loop(engine, std::sync::Arc::new(listener), task_config, allowed, shutdown)
+                            .await;
+                    }
+                    Err(e) => {
+                        engine.transition_to_error(format!("failed to wrap listener: {e}"));
+                    }
                 }
-                Err(e) => {
-                    engine.transition_to_error(format!("failed to wrap listener: {e}"));
-                }
-            }
-        });
-        inner.accept_task = Some(accept);
+            }));
+        }
+        inner.accept_tasks = accept_tasks;
         inner.shutdown_tx = Some(shutdown_tx);
         inner.config = Some(config);
         inner.state = EngineState::Running;
@@ -305,23 +323,24 @@ impl Engine {
         Ok(())
     }
 
-    /// Stop listening, cancel the accept task and close the sockets.
+    /// Stop listening, cancel the accept tasks and close the sockets.
     /// Idempotent: stopping an already stopped engine is a no-op. A
     /// connection task stuck waiting for a first byte is woken by the
-    /// shutdown signal. The accept task is waited for (at most 2 s) so
-    /// its listener socket is closed before this returns: aborting alone
-    /// leaves the socket bound until the task is dropped, and a restart
-    /// on the same port would fail with "Address already in use".
+    /// shutdown signal. Every accept task is waited for (at most 2 s
+    /// each) so its listener socket is closed before this returns:
+    /// aborting alone leaves the socket bound until the task is dropped,
+    /// and a restart on the same port would fail with
+    /// "Address already in use".
     pub fn stop(&self) {
-        let (accept_task, was_running);
+        let (accept_tasks, was_running);
         {
             let mut inner = lock_inner(&self.inner);
             was_running = inner.state != EngineState::Stopped;
             if let Some(tx) = inner.shutdown_tx.take() {
                 let _ = tx.send(true);
             }
-            accept_task = inner.accept_task.take();
-            if let Some(task) = &accept_task {
+            accept_tasks = std::mem::take(&mut inner.accept_tasks);
+            for task in &accept_tasks {
                 task.abort();
             }
             // Drain first, then add the counters: iterating the drain
@@ -333,7 +352,7 @@ impl Engine {
             }
             inner.state = EngineState::Stopped;
         }
-        if let Some(task) = accept_task {
+        for task in accept_tasks {
             wait_for_task(task);
         }
         if was_running {
@@ -367,6 +386,7 @@ impl Engine {
         stream: TcpStream,
         peer: SocketAddr,
         config: &Config,
+        allowed: std::sync::Arc<HashSet<Protocol>>,
         shutdown: watch::Receiver<bool>,
     ) {
         if !client_allowed(config, &peer.ip()) {
@@ -378,7 +398,7 @@ impl Engine {
         }
         let engine = std::sync::Arc::clone(self);
         tokio::task::spawn(async move {
-            handle_connection(engine, stream, peer, shutdown).await;
+            handle_connection(engine, stream, peer, allowed, shutdown).await;
         });
     }
 
@@ -422,6 +442,58 @@ impl Engine {
     }
 }
 
+/// One listener: the port it binds and the protocols it serves.
+struct ListenerSpec {
+    port: u16,
+    allowed: HashSet<Protocol>,
+}
+
+/// The listeners for a config. Neither `http_port` nor `socks_port` set:
+/// single mode, one listener on `port` serving every enabled protocol.
+/// At least one set: split mode, `port` is ignored; the HTTP listener
+/// exists only when http_port is set and http is enabled, the SOCKS
+/// listener only when socks_port is set and a SOCKS protocol is enabled.
+fn listener_specs(config: &Config) -> Result<Vec<ListenerSpec>, String> {
+    let socks: HashSet<Protocol> = config
+        .protocols
+        .iter()
+        .copied()
+        .filter(|p| matches!(p, Protocol::Socks4 | Protocol::Socks5))
+        .collect();
+    match (config.http_port, config.socks_port) {
+        (None, None) => Ok(vec![ListenerSpec {
+            port: config.port,
+            allowed: config.protocols.clone(),
+        }]),
+        (h, s) => {
+            if h.is_some() && h == s {
+                return Err("http_port and socks_port must differ".to_string());
+            }
+            let mut v = Vec::new();
+            if let Some(port) = h {
+                if config.protocols.contains(&Protocol::Http) {
+                    v.push(ListenerSpec {
+                        port,
+                        allowed: HashSet::from([Protocol::Http]),
+                    });
+                }
+            }
+            if let Some(port) = s {
+                if !socks.is_empty() {
+                    v.push(ListenerSpec { port, allowed: socks });
+                }
+            }
+            if v.is_empty() {
+                return Err(
+                    "no listener: enabled protocols do not match the configured ports"
+                        .to_string(),
+                );
+            }
+            Ok(v)
+        }
+    }
+}
+
 /// Wait for a cancelled task to finish unwinding (at most 2 s), so its
 /// sockets are closed. Only blocks when called outside a runtime:
 /// block_on panics inside one, and the engine is never stopped from a
@@ -454,6 +526,7 @@ async fn accept_loop(
     engine: std::sync::Arc<Engine>,
     listener: std::sync::Arc<TcpListener>,
     config: Config,
+    allowed: std::sync::Arc<HashSet<Protocol>>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     loop {
@@ -462,7 +535,7 @@ async fn accept_loop(
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, peer)) => {
-                        engine.try_spawn_connection(stream, peer, &config, shutdown.clone());
+                        engine.try_spawn_connection(stream, peer, &config, allowed.clone(), shutdown.clone());
                     }
                     Err(_) => {
                         if *shutdown.borrow() {
@@ -492,6 +565,7 @@ async fn handle_connection(
     engine: std::sync::Arc<Engine>,
     mut stream: TcpStream,
     peer: SocketAddr,
+    allowed: std::sync::Arc<HashSet<Protocol>>,
     mut shutdown: watch::Receiver<bool>,
 ) {
     let _guard = ActiveGuard(std::sync::Arc::clone(&engine));
@@ -511,9 +585,9 @@ async fn handle_connection(
         Some(config) => config,
         None => return, // engine stopped while the sniff was running
     };
-    if !config.protocols.contains(&protocol) {
+    if !allowed.contains(&protocol) {
         consume_one(&mut stream).await;
-        return; // sniffed protocol is disabled: close, no event
+        return; // sniffed protocol is not served on this listener: close, no event
     }
     let record = engine.register(peer.ip(), protocol);
     match protocol {
@@ -826,6 +900,27 @@ mod tests {
     /// Start an engine that requires auth ("user" / "pass").
     fn start_auth_engine() -> (std::sync::Arc<Engine>, std::sync::Arc<CollectingSink>, u16) {
         start_test_engine("auth_user = user\nauth_pass = pass")
+    }
+
+    /// Start an engine in split mode: HTTP on one free port, SOCKS on
+    /// another. Returns (engine, sink, http_port, socks_port).
+    fn start_split_engine(
+        extra_config: &str,
+    ) -> (std::sync::Arc<Engine>, std::sync::Arc<CollectingSink>, u16, u16) {
+        let engine = std::sync::Arc::new(Engine::new());
+        let sink = CollectingSink::new();
+        engine.set_sink(sink.clone());
+        let http_port = free_port();
+        let mut socks_port = free_port();
+        while socks_port == http_port {
+            socks_port = free_port();
+        }
+        engine
+            .start(&format!(
+                "http_port = {http_port}\nsocks_port = {socks_port}\n{extra_config}"
+            ))
+            .expect("start split");
+        (engine, sink, http_port, socks_port)
     }
 
     /// Send a SOCKS5 greeting offering the given methods and return the 2-byte reply.
@@ -1839,6 +1934,200 @@ mod tests {
         let reply = socks5_request_reply(&mut client, &req).await;
         assert_eq!(reply[1], 0x04, "host unreachable, got {reply:?}");
         assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn split_mode_http_and_socks_work_and_snapshot_counts_both() {
+        let (engine, sink, http_port, socks_port) = start_split_engine("");
+        let (server_port, _recorded) = start_recording_server().await;
+        // HTTP on the HTTP port.
+        let mut http_client = TcpStream::connect(("127.0.0.1", http_port))
+            .await
+            .expect("connect http");
+        let request = format!(
+            "GET http://127.0.0.1:{server_port}/hello HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\n\r\n"
+        );
+        http_client
+            .write_all(request.as_bytes())
+            .await
+            .expect("write");
+        let response = read_response(&mut http_client).await;
+        assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(response.ends_with(b"ok"));
+        drop(http_client);
+        // SOCKS5 on the SOCKS port.
+        let echo_port = start_echo_server().await;
+        let mut socks_client = TcpStream::connect(("127.0.0.1", socks_port))
+            .await
+            .expect("connect socks");
+        assert_eq!(socks5_greet(&mut socks_client, 0x00).await, [0x05, 0x00]);
+        let mut req = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
+        req.extend_from_slice(&echo_port.to_be_bytes());
+        let reply = socks5_request_reply(&mut socks_client, &req).await;
+        assert_eq!(reply[1], 0x00, "CONNECT succeeded, got {reply:?}");
+        socks_client
+            .write_all(b"hello")
+            .await
+            .expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut socks_client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        drop(socks_client);
+        // Both connections closed: wait for both ConnectionClosed events.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let closed = sink
+                .events()
+                .iter()
+                .filter(|e| matches!(e, Event::ConnectionClosed(_)))
+                .count();
+            if closed >= 2 {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "only {closed} connections closed, got: {:?}",
+                sink.events()
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // HTTP: up 0 (no body), down 59 (whole response). SOCKS5: 5 up, 5 down.
+        assert!(
+            engine.snapshot().starts_with("running\t5\t64\t0"),
+            "snapshot: {}",
+            engine.snapshot()
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn split_mode_wrong_protocol_is_closed() {
+        let (engine, sink, http_port, socks_port) = start_split_engine("");
+        // SOCKS5 greeting on the HTTP port: closed, no event.
+        let mut client = TcpStream::connect(("127.0.0.1", http_port))
+            .await
+            .expect("connect");
+        client
+            .write_all(&[0x05, 0x01, 0x00])
+            .await
+            .expect("write greeting");
+        assert_closed(&mut client).await;
+        // HTTP on the SOCKS port: closed, no event.
+        let mut client = TcpStream::connect(("127.0.0.1", socks_port))
+            .await
+            .expect("connect");
+        client
+            .write_all(b"GET http://127.0.0.1:1/ HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .expect("write");
+        assert_closed(&mut client).await;
+        assert!(
+            !sink
+                .events()
+                .iter()
+                .any(|e| matches!(e, Event::ConnectionOpened(_))),
+            "wrong-protocol connections must not emit an event"
+        );
+        engine.stop();
+    }
+
+    #[test]
+    fn split_mode_equal_ports_is_error() {
+        let engine = std::sync::Arc::new(Engine::new());
+        let err = engine
+            .start("http_port = 9000\nsocks_port = 9000")
+            .expect_err("equal ports is an error");
+        assert!(err.contains("must differ"), "{err}");
+        assert!(matches!(engine.state(), EngineState::Error(_)));
+    }
+
+    #[test]
+    fn split_mode_no_matching_listener_is_error() {
+        let engine = std::sync::Arc::new(Engine::new());
+        let err = engine
+            .start("protocols = socks5\nhttp_port = 9000")
+            .expect_err("no matching listener is an error");
+        assert!(err.contains("no listener"), "{err}");
+        assert!(matches!(engine.state(), EngineState::Error(_)));
+    }
+
+    #[test]
+    fn split_mode_second_bind_failing_releases_first() {
+        // Hold the SOCKS port so the second bind fails.
+        let held = std::net::TcpListener::bind("127.0.0.1:0").expect("hold");
+        let socks_port = held.local_addr().expect("held addr").port();
+        let http_port = free_port();
+        let engine = std::sync::Arc::new(Engine::new());
+        let err = engine
+            .start(&format!(
+                "http_port = {http_port}\nsocks_port = {socks_port}"
+            ))
+            .expect_err("second bind fails");
+        assert!(err.contains(&socks_port.to_string()), "{err}");
+        assert!(matches!(engine.state(), EngineState::Error(_)));
+        // The first port was released: it can be bound again right away.
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", http_port)).is_ok(),
+            "http port was not released after the failed start"
+        );
+    }
+
+    #[test]
+    fn split_mode_start_stop_start() {
+        let engine = std::sync::Arc::new(Engine::new());
+        let sink = CollectingSink::new();
+        engine.set_sink(sink.clone());
+        let http_port = free_port();
+        let mut socks_port = free_port();
+        while socks_port == http_port {
+            socks_port = free_port();
+        }
+        let config = format!("http_port = {http_port}\nsocks_port = {socks_port}");
+        engine.start(&config).expect("first start");
+        assert!(matches!(engine.state(), EngineState::Running));
+        engine.stop();
+        assert!(matches!(engine.state(), EngineState::Stopped));
+        engine.start(&config).expect("second start");
+        assert!(matches!(engine.state(), EngineState::Running));
+        // HTTP still works on http_port after the restart.
+        runtime().expect("runtime").block_on(async {
+            let (server_port, _recorded) = start_recording_server().await;
+            let mut client = TcpStream::connect(("127.0.0.1", http_port))
+                .await
+                .expect("connect");
+            let request = format!(
+                "GET http://127.0.0.1:{server_port}/hello HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\n\r\n"
+            );
+            client.write_all(request.as_bytes()).await.expect("write");
+            let response = read_response(&mut client).await;
+            assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+        });
+        engine.stop();
+    }
+
+    #[test]
+    fn split_mode_ignores_port() {
+        let ignored = free_port();
+        let mut http_port = free_port();
+        while http_port == ignored {
+            http_port = free_port();
+        }
+        let mut socks_port = free_port();
+        while socks_port == http_port || socks_port == ignored {
+            socks_port = free_port();
+        }
+        let engine = std::sync::Arc::new(Engine::new());
+        engine
+            .start(&format!(
+                "port = {ignored}\nhttp_port = {http_port}\nsocks_port = {socks_port}"
+            ))
+            .expect("start");
+        // Nothing listens on `port` in split mode.
+        assert!(
+            std::net::TcpStream::connect(("127.0.0.1", ignored)).is_err(),
+            "port must be ignored in split mode"
+        );
         engine.stop();
     }
 }

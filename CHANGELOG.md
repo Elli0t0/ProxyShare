@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 — separate ports per protocol (Rust only)
+
+- Config gains optional `http_port` and `socks_port`. Neither set:
+  single mode, unchanged. At least one set: split mode, `port` is
+  ignored; the HTTP listener exists only with http_port + http
+  enabled, the SOCKS listener only with socks_port + a SOCKS protocol
+  enabled; each listener serves only its own protocols, anything else
+  sniffed on it is closed without an event. Equal ports and a split
+  config with no listener are errors.
+- start() binds ALL listeners before going Running; a bind failure
+  releases the ones already bound and names the failing port. stop()
+  waits for ALL accept loops, so an immediate restart can rebind.
+- Tests: split HTTP + SOCKS5 work with the snapshot counting both
+  (5 up / 64 down), wrong protocols closed with no event, equal ports
+  and no-listener errors, second-bind failure releasing the first
+  port, start/stop/start in split mode, `port` ignored, config
+  parsing (bad value, 0, last-wins). Existing tests untouched.
+
 ## 0.2.1 — security presets: Password / No password
 
 - Settings > Security: the bare auth switch is now a Password | No

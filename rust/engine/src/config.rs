@@ -20,6 +20,12 @@ pub struct Config {
     pub bind_addr: IpAddr,
     /// Port the proxy listens on.
     pub port: u16,
+    /// Optional HTTP-only port. When set (with or without socks_port),
+    /// split mode replaces the single `port`.
+    pub http_port: Option<u16>,
+    /// Optional SOCKS4/SOCKS5 port. When set (with or without http_port),
+    /// split mode replaces the single `port`.
+    pub socks_port: Option<u16>,
     /// Protocols to accept.
     pub protocols: HashSet<Protocol>,
     /// Optional proxy auth user name (needs auth_pass too).
@@ -44,6 +50,8 @@ impl Default for Config {
         Self {
             bind_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             port: 1080,
+            http_port: None,
+            socks_port: None,
             protocols: HashSet::from([Protocol::Http, Protocol::Socks4, Protocol::Socks5]),
             auth_user: None,
             auth_pass: None,
@@ -75,6 +83,8 @@ impl Config {
             match key {
                 "bind_addr" => config.bind_addr = parse_ip(value, line_no, key)?,
                 "port" => config.port = parse_port(value, line_no, key)?,
+                "http_port" => config.http_port = Some(parse_port(value, line_no, key)?),
+                "socks_port" => config.socks_port = Some(parse_port(value, line_no, key)?),
                 "protocols" => config.protocols = parse_protocols(value, line_no, key)?,
                 "auth_user" => config.auth_user = opt_string(value),
                 "auth_pass" => config.auth_pass = opt_string(value),
@@ -229,6 +239,24 @@ connect_timeout_s = 5
     fn empty_text_gives_defaults() {
         let config = Config::parse("").expect("empty config parses");
         assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn split_ports_parse() {
+        let config = Config::parse("http_port = 8080\nsocks_port = 1080")
+            .expect("split ports parse");
+        assert_eq!(config.http_port, Some(8080));
+        assert_eq!(config.socks_port, Some(1080));
+        let config = Config::parse("").expect("empty config parses");
+        assert_eq!(config.http_port, None);
+        assert_eq!(config.socks_port, None);
+        let err = Config::parse("http_port = abc").expect_err("bad http_port is an error");
+        assert!(err.contains("'http_port'"), "{err}");
+        let err = Config::parse("socks_port = 0").expect_err("socks_port 0 is an error");
+        assert!(err.contains("1-65535"), "{err}");
+        let config = Config::parse("http_port = 8080\nhttp_port = 9090")
+            .expect("last http_port wins");
+        assert_eq!(config.http_port, Some(9090));
     }
 
     #[test]
