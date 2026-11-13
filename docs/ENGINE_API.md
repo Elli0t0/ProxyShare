@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.0.7"`.
+- Returns the engine version string, e.g. `"engine 0.0.8"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -69,6 +69,18 @@ second parameter.
   ends. HTTP and SOCKS4 have no handler yet: a sniffed connection is
   registered, its sniffed byte is consumed, it is reported as a
   `handler_missing` event (type 4), and it is closed cleanly.
+
+## SOCKS4/4a (0.0.8)
+
+- CONNECT only (CD = 1); anything else gets a 0x5B reply. Request:
+  VN = 4, CD, DSTPORT, DSTIP, USERID (null-terminated), and for 4a
+  (DSTIP is 0.0.0.x with x != 0) a null-terminated hostname after the
+  USERID. USERID is read and ignored. Reply is [0x00, 0x5A, 0, 0, 0, 0,
+  0, 0] on success and [0x00, 0x5B, ...] on failure. Every read has a
+  10 s timeout, like SOCKS5.
+- Every protocol now has a handler, so no connection reports
+  `handler_missing` (type 4) anymore. The `HandlerMissing` event stays
+  in the contract (type 4, do not renumber) for backward compatibility.
 
 ## SOCKS5 (0.0.5)
 

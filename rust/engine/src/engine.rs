@@ -503,11 +503,11 @@ async fn handle_connection(
             engine.unregister(record.id);
             engine.emit(Event::ConnectionClosed(record.to_conn_info()));
         }
-        _ => {
-            // SOCKS4 has no handler yet.
-            consume_one(&mut stream).await;
-            engine.emit(Event::HandlerMissing(record.to_conn_info()));
+        Protocol::Socks4 => {
+            engine.emit(Event::ConnectionOpened(record.to_conn_info()));
+            let _ = crate::socks4::handle(stream, &engine.outbound, &config, &record).await;
             engine.unregister(record.id);
+            engine.emit(Event::ConnectionClosed(record.to_conn_info()));
         }
     }
 }
@@ -636,46 +636,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sniffed_connection_reports_handler_missing() {
-        // SOCKS4 has no handler yet: it reports handler_missing and closes.
-        // (SOCKS5 is covered by socks5_connect_relays_to_echo_server.)
-        let engine = std::sync::Arc::new(Engine::new());
-        let sink = CollectingSink::new();
-        engine.set_sink(sink.clone());
-        let port = free_port();
-        engine
-            .start(&format!("port = {port}"))
-            .expect("start");
-        let mut client = TcpStream::connect(("127.0.0.1", port))
-            .await
-            .expect("connect");
-        client.write_all(&[0x04]).await.expect("write");
-        // Wait up to 2 s for the handler_missing event.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-        loop {
-            let events = sink.events();
-            if events
-                .iter()
-                .any(|e| matches!(e, Event::HandlerMissing(_)))
-            {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "no handler_missing event, got: {events:?}"
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        // The engine closed the connection: a read gives EOF.
-        let mut buf = [0u8; 1];
-        let n = client.read(&mut buf).await.expect("read");
-        assert_eq!(n, 0, "engine closed the connection");
-        // No connection is left registered, and the engine still runs.
-        assert!(engine.snapshot().starts_with("running\t0\t0\t0"));
-        engine.stop();
-    }
-
-    #[tokio::test]
     async fn disabled_protocol_is_closed_quietly() {
         let engine = std::sync::Arc::new(Engine::new());
         let sink = CollectingSink::new();
@@ -770,6 +730,49 @@ mod tests {
             Ok(Ok(0)) => {}
             Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
             other => panic!("expected the engine to close the connection, got {other:?}"),
+        }
+    }
+
+    /// Send a SOCKS4 request and return the 8-byte reply.
+    async fn socks4_request_reply(
+        client: &mut TcpStream,
+        cd: u8,
+        ip: [u8; 4],
+        port: u16,
+        userid: &str,
+        hostname: Option<&str>,
+    ) -> [u8; 8] {
+        let mut req = vec![0x04, cd];
+        req.extend_from_slice(&port.to_be_bytes());
+        req.extend_from_slice(&ip);
+        req.extend_from_slice(userid.as_bytes());
+        req.push(0);
+        if let Some(host) = hostname {
+            req.extend_from_slice(host.as_bytes());
+            req.push(0);
+        }
+        client.write_all(&req).await.expect("write request");
+        let mut reply = [0u8; 8];
+        read_exact(client, &mut reply).await;
+        reply
+    }
+
+    /// Wait up to 2 s for a ConnectionClosed event and return its info.
+    async fn wait_closed(sink: &std::sync::Arc<CollectingSink>) -> crate::model::ConnInfo {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let events = sink.events();
+            if let Some(Event::ConnectionClosed(info)) = events
+                .iter()
+                .find(|e| matches!(e, Event::ConnectionClosed(_)))
+            {
+                return info.clone();
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no ConnectionClosed, got: {events:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -1087,6 +1090,166 @@ mod tests {
             response.starts_with(b"HTTP/1.1 400"),
             "expected a 400 response, got: {}",
             String::from_utf8_lossy(&response)
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks4_connect_relays_to_echo_server() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let reply =
+            socks4_request_reply(&mut client, 0x01, [127, 0, 0, 1], echo_port, "user", None)
+                .await;
+        assert_eq!(reply[0], 0x00);
+        assert_eq!(reply[1], 0x5A, "CONNECT succeeded, got {reply:?}");
+        // Payload through the relay: the echo server sends it back.
+        client.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        // Close our side and wait for the engine to close the connection.
+        drop(client);
+        let closed = wait_closed(&sink).await;
+        assert_eq!(closed.port, echo_port);
+        assert_eq!(closed.protocol, Protocol::Socks4);
+        assert_eq!(closed.up, 5, "5 bytes relayed client -> target");
+        assert_eq!(closed.down, 5, "5 bytes relayed target -> client");
+        assert!(sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, Event::ConnectionOpened(_))));
+        // The snapshot totals kept the bytes after the connection closed.
+        assert!(
+            engine.snapshot().starts_with("running\t5\t5\t0"),
+            "{}",
+            engine.snapshot()
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks4a_connect_relays_to_echo_server() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        // 4a: DSTIP 0.0.0.1 + hostname after the USERID.
+        let reply = socks4_request_reply(
+            &mut client,
+            0x01,
+            [0, 0, 0, 1],
+            echo_port,
+            "user",
+            Some("localhost"),
+        )
+        .await;
+        assert_eq!(reply[0], 0x00);
+        assert_eq!(reply[1], 0x5A, "CONNECT succeeded, got {reply:?}");
+        client.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        drop(client);
+        let closed = wait_closed(&sink).await;
+        assert_eq!(closed.port, echo_port);
+        assert_eq!(closed.protocol, Protocol::Socks4);
+        assert_eq!(closed.up, 5, "5 bytes relayed client -> target");
+        assert_eq!(closed.down, 5, "5 bytes relayed target -> client");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks4_rejects_bind() {
+        let (engine, _sink, port) = start_test_engine("");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let reply =
+            socks4_request_reply(&mut client, 0x02, [127, 0, 0, 1], 80, "user", None).await;
+        assert_eq!(reply[0], 0x00);
+        assert_eq!(reply[1], 0x5B, "BIND rejected, got {reply:?}");
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn mixed_http_socks4_socks5_on_one_port() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let (server_port, recorded) = start_recording_server().await;
+        // 1. HTTP GET.
+        let mut http = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "GET http://127.0.0.1:{server_port}/hello HTTP/1.1\r\nHost: 127.0.0.1:{server_port}\r\n\r\n"
+        );
+        http.write_all(request.as_bytes()).await.expect("write");
+        let response = read_response(&mut http).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 200 OK"),
+            "expected a 200 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        let received = recorded.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        assert!(
+            received.starts_with(b"GET /hello HTTP/1.1\r\n"),
+            "server got the rewritten request"
+        );
+        drop(http);
+        // 2. SOCKS4 CONNECT.
+        let mut s4 = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let reply =
+            socks4_request_reply(&mut s4, 0x01, [127, 0, 0, 1], echo_port, "user", None).await;
+        assert_eq!(reply[1], 0x5A, "SOCKS4 CONNECT succeeded, got {reply:?}");
+        s4.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut s4, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        drop(s4);
+        // 3. SOCKS5 CONNECT.
+        let mut s5 = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut s5, 0x00).await, [0x05, 0x00]);
+        let mut req = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
+        req.extend_from_slice(&echo_port.to_be_bytes());
+        let reply = socks5_request_reply(&mut s5, &req).await;
+        assert_eq!(reply[1], 0x00, "SOCKS5 CONNECT succeeded, got {reply:?}");
+        s5.write_all(b"hello").await.expect("write payload");
+        let mut echo = [0u8; 5];
+        read_exact(&mut s5, &mut echo).await;
+        assert_eq!(&echo, b"hello");
+        drop(s5);
+        // All three connections closed: HTTP 0 up / 2 down ("ok"),
+        // SOCKS4 5/5, SOCKS5 5/5.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let closed = sink
+                .events()
+                .iter()
+                .filter(|e| matches!(e, Event::ConnectionClosed(_)))
+                .count();
+            if closed == 3 {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "only {closed} of 3 connections closed"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            engine.snapshot().starts_with("running\t10\t12\t0"),
+            "{}",
+            engine.snapshot()
         );
         engine.stop();
     }

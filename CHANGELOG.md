@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.8 — SOCKS4/4a
+
+- New rust/engine/src/socks4.rs: `handle` (same signature as
+  socks5::handle), CONNECT only, 10 s timeout on every read,
+  `read_cstring` for USERID and the 4a hostname, 0x5A on success and
+  0x5B on failure (wrong command, DNS or connect failure).
+- Engine: explicit `Protocol::Socks4` arm copied from the Socks5 arm;
+  every protocol now has a handler, so the placeholder arm and its
+  `handler_missing` emission are gone. `Event::HandlerMissing` stays
+  in the contract (type 4) with `#[allow(dead_code)]`. The old
+  handler_missing test is deleted; the disabled-protocol test still
+  asserts no event is emitted for a disabled protocol.
+- Tests: plain SOCKS4 and SOCKS4a through the engine to a local echo
+  server (0x5A, echo works, 5 up / 5 down), BIND gets 0x5B, and a
+  mixed test (HTTP, SOCKS4, SOCKS5 one after another on the same port,
+  snapshot totals 10 up / 12 down).
+- docs/ENGINE_API.md records the SOCKS4 contract.
+
 ## 0.0.7 — HTTP CONNECT tunnels (step 0.0.6a)
 
 - CONNECT tunnels in rust/engine/src/http.rs: `split_host_port` (host

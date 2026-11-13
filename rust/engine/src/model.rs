@@ -124,6 +124,9 @@ pub enum Event {
     /// A connection was accepted and sniffed, but no handler is implemented
     /// for its protocol yet (server shell): it was closed, and this event
     /// records it. a = connection id, b = its snapshot line.
+    /// Every protocol has a handler now, so nothing emits this anymore;
+    /// it stays for the callback contract (type 4) — do not renumber.
+    #[allow(dead_code)]
     HandlerMissing(ConnInfo),
 }
 
