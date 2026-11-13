@@ -55,6 +55,10 @@
   one implementation with nothing needing it before 0.1.1, so it is
   deleted: `Connector` is now a plain struct with an inherent async
   `connect`, and the SOCKS5 handler takes `&Connector` directly.
+- FIX (same version, run #22 red): cargo test passed (33 passed), but
+  clippy failed with one lint — `explicit_auto_deref` on `&*engine.
+  outbound`: the parameter is now a concrete `&Connector`, so the
+  explicit deref is redundant (auto-deref does it). One line.
 - docs/ENGINE_API.md records the SOCKS5, outbound and relay contracts.
 
 ## 0.0.4 — server shell + JNI lifecycle

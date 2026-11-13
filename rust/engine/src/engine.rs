@@ -491,7 +491,7 @@ async fn handle_connection(
     match protocol {
         Protocol::Socks5 => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let _ = crate::socks5::handle(stream, &*engine.outbound, &config, &record).await;
+            let _ = crate::socks5::handle(stream, &engine.outbound, &config, &record).await;
             engine.unregister(record.id);
             // Unregistered first, so the snapshot already carries the
             // final totals when the close is reported.
