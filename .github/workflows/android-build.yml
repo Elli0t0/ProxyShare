@@ -156,5 +156,6 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: ProxyShare ${{ steps.version.outputs.version }}
-          prerelease: true
+          prerelease: false
+          make_latest: true
           files: app/build/outputs/apk/release/*.apk
