@@ -3,6 +3,7 @@ package com.example.proxyshare.service
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.SystemClock
 import com.example.proxyshare.data.AppSettings
 import com.example.proxyshare.data.SettingsRepository
 import com.example.proxyshare.engine.Engine
@@ -13,16 +14,50 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+
+/** Live speed sample, in bytes per second. */
+data class SpeedSample(val upBps: Long, val downBps: Long)
+
+/**
+ * One speed step: raw bytes-per-second from the delta over the actual
+ * elapsed time, smoothed with EMA (alpha 0.5). A direction with no new
+ * bytes snaps to exactly 0 instead of decaying forever.
+ */
+fun smoothSpeed(
+    prevUp: Long,
+    prevDown: Long,
+    nowUp: Long,
+    nowDown: Long,
+    elapsedMs: Long,
+    prev: SpeedSample,
+): SpeedSample {
+    val seconds = elapsedMs.coerceAtLeast(1) / 1000.0
+    val upDelta = nowUp - prevUp
+    val downDelta = nowDown - prevDown
+    val upBps = if (upDelta <= 0) {
+        0
+    } else {
+        (0.5 * (upDelta / seconds) + 0.5 * prev.upBps).toLong()
+    }
+    val downBps = if (downDelta <= 0) {
+        0
+    } else {
+        (0.5 * (downDelta / seconds) + 0.5 * prev.downBps).toLong()
+    }
+    return SpeedSample(upBps, downBps)
+}
 
 /**
  * App-scoped singleton that owns the one [Engine], the settings and
@@ -42,6 +77,7 @@ object ProxyController {
     private var selector: NetworkSelector? = null
     private var started = false
     private var networkJob: Job? = null
+    private var speedJob: Job? = null
 
     private val _settings = MutableStateFlow(AppSettings())
     /** The current settings (defaults until the DataStore read lands). */
@@ -51,9 +87,47 @@ object ProxyController {
     /** The network matching the chosen outbound mode, if any. */
     val network: StateFlow<Network?> = _network.asStateFlow()
 
+    private val _speed = MutableStateFlow(SpeedSample(0, 0))
+    /** Live upload/download speed, sampled once per second while running. 0 when stopped. */
+    val speed: StateFlow<SpeedSample> = _speed.asStateFlow()
+
     val state: StateFlow<EngineState> = engine.state
     val snapshot: StateFlow<Snapshot> = engine.snapshot
     val events: SharedFlow<EngineEvent> = engine.events
+
+    /**
+     * Sample the live totals once per second while running, even when
+     * the snapshot itself is unchanged. Ticks on delay(), not on
+     * snapshot emissions, so idle traffic still reports 0.
+     */
+    private fun startSpeedSampler() {
+        speedJob?.cancel()
+        speedJob = scope.launch {
+            var prevUp = engine.snapshot.value.liveUp
+            var prevDown = engine.snapshot.value.liveDown
+            var prevTime = SystemClock.elapsedRealtime()
+            var prev = SpeedSample(0, 0)
+            while (isActive) {
+                delay(1000)
+                val now = SystemClock.elapsedRealtime()
+                val snap = engine.snapshot.value
+                val sample = smoothSpeed(
+                    prevUp, prevDown, snap.liveUp, snap.liveDown, now - prevTime, prev
+                )
+                _speed.value = sample
+                prevUp = snap.liveUp
+                prevDown = snap.liveDown
+                prevTime = now
+                prev = sample
+            }
+        }
+    }
+
+    private fun stopSpeedSampler() {
+        speedJob?.cancel()
+        speedJob = null
+        _speed.value = SpeedSample(0, 0)
+    }
 
     /** Called once from ProxyShareApp.onCreate. Safe to call twice. */
     fun init(context: Context) {
@@ -88,6 +162,7 @@ object ProxyController {
                 runCatching { engine.stop() }
                 networkJob?.cancel()
                 networkJob = null
+                stopSpeedSampler()
                 started = false
                 startLocked()
             }
@@ -122,6 +197,7 @@ object ProxyController {
                         // Kill switch: never fall back to the default network.
                         started = false
                         runCatching { engine.stop() }
+                        stopSpeedSampler()
                         engine.setError("VPN lost — proxy stopped")
                         networkJob?.cancel()
                         return@collect
@@ -134,11 +210,15 @@ object ProxyController {
                 started = false
                 networkJob?.cancel()
                 networkJob = null
+                stopSpeedSampler()
+            } else {
+                startSpeedSampler()
             }
         } catch (_: Exception) {
             started = false
             networkJob?.cancel()
             networkJob = null
+            stopSpeedSampler()
             runCatching { engine.stop() }
         }
     }
@@ -149,6 +229,7 @@ object ProxyController {
             startMutex.withLock {
                 networkJob?.cancel()
                 networkJob = null
+                stopSpeedSampler()
                 selector?.select(OutboundMode.DEFAULT)
                 if (started) {
                     started = false

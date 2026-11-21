@@ -70,8 +70,6 @@
     <string name="stat_upload">آپلود</string>
     <string name="stat_download">دانلود</string>
     <string name="stat_active">فعال</string>
-    <string name="stat_upload_speed">سرعت آپلود</string>
-    <string name="stat_download_speed">سرعت دانلود</string>
     <string name="connections_empty_hint">پروکسی لپ‌تاپ را روی %1$s تنظیم کنید</string>
     <string name="separate_ports_subtitle">برای HTTP و SOCKS از پورت‌های متفاوت استفاده کنید</string>
     <string name="private_only_subtitle">فقط به کلاینت‌های شبکه‌های خصوصی اجازه بدهید</string>

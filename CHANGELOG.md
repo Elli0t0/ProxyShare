@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.6 — fix releases, speed flicker, counters and misleading hint
+
+- Releases: the workflow now publishes real releases (prerelease: false,
+  make_latest: true) and flips all existing prereleases to normal. (The
+  workflow edit lands right after this build goes green.)
+- Real totals: Snapshot gains liveUp/liveDown (closed totals + active
+  connections' bytes, monotonic). Home tiles and the Connections totals
+  line use them. The native counters are cumulative across restarts, so
+  Engine keeps a start baseline and the totals display resets each
+  session (sessionTotals, unit-tested).
+- Stable speed: ProxyController samples the live totals once per second
+  with delay() + SystemClock.elapsedRealtime() and exposes
+  StateFlow<SpeedSample>; EMA alpha 0.5, snaps to exactly 0 on a tick
+  with no new bytes, resets to 0 when stopped. It keeps ticking while
+  idle (the old LaunchedEffect(snapshot) never reran). The header tiles
+  read it; per-connection rows keep their own computeSpeeds.
+- No flicker: StatTile gains animate = false (speed tiles use it, plain
+  Text, no AnimatedContent); changing numbers use tabular digits
+  ("tnum"), maxLines = 1, softWrap = false; the three header tiles
+  share one height (IntrinsicSize.Min + fillMaxHeight); labels
+  shortened to "Active", "Upload", "Download" (fa too).
+- Misleading hint fixed: a mobile carrier address is never advertised
+  — Connections empty state and the Home hero show the mobile-only hint
+  instead of the unreachable address (advertiseAddress, unit-tested).
+
 ## 0.2.5 — Connections + Settings polish, shared components, new launcher icon
 
 - New shared components in ui/components: SectionCard, StatTile, InfoChip,

@@ -1,5 +1,7 @@
 package com.example.proxyshare.ui.screens
 
+import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.engine.ConnInfo
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -64,5 +66,35 @@ class ConnectionsLogicTest {
         assertEquals("12s", formatDuration(12_000))
         assertEquals("3m 12s", formatDuration(192_000))
         assertEquals("1h 1m", formatDuration(3_660_000))
+    }
+
+    @Test
+    fun advertiseAddressSkipsMobileOnly() {
+        val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
+        assertEquals(null, advertiseAddress(listOf(mobile), 8080, 1080))
+    }
+
+    @Test
+    fun advertiseAddressUsesPrimaryWithHttpPort() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        assertEquals("192.168.1.2:8080", advertiseAddress(listOf(wifi), 8080, 1080))
+    }
+
+    @Test
+    fun advertiseAddressFallsBackToSocksPort() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        assertEquals("192.168.1.2:1080", advertiseAddress(listOf(wifi), null, 1080))
+    }
+
+    @Test
+    fun advertiseAddressEmptyIsNull() {
+        assertEquals(null, advertiseAddress(emptyList(), 8080, 1080))
+    }
+
+    @Test
+    fun advertiseAddressPrefersRankedPrimary() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
+        assertEquals("192.168.1.2:8080", advertiseAddress(listOf(wifi, mobile), 8080, null))
     }
 }

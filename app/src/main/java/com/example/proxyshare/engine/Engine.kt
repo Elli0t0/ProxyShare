@@ -36,7 +36,24 @@ data class Snapshot(
     val totalDown: Long,
     val active: Int,
     val connections: List<ConnInfo>,
-)
+) {
+    /**
+     * Totals including active connections. The engine reports totalUp/
+     * totalDown for closed connections only, so the live total is the
+     * closed total plus what the active connections moved so far.
+     * Monotonic: bytes just move from active to closed.
+     */
+    val liveUp: Long get() = totalUp + connections.sumOf { it.up }
+    val liveDown: Long get() = totalDown + connections.sumOf { it.down }
+}
+
+/**
+ * Session totals: the native counters are cumulative across restarts
+ * in one process, so the totals seen at start are the baseline and
+ * the display shows only what this session moved.
+ */
+fun sessionTotals(rawUp: Long, rawDown: Long, baselineUp: Long, baselineDown: Long): Pair<Long, Long> =
+    (rawUp - baselineUp).coerceAtLeast(0) to (rawDown - baselineDown).coerceAtLeast(0)
 
 /** The engine's lifecycle state, mirroring the Rust EngineState. */
 sealed interface EngineState {
@@ -131,6 +148,13 @@ class Engine(private val scope: CoroutineScope) {
     private var pollJob: Job? = null
     private var closed = false
 
+    // The native totals are cumulative across restarts: the totals seen
+    // at start are the baseline, so the display resets each session.
+    private var baselineUp = 0L
+    private var baselineDown = 0L
+    private var lastRawUp = 0L
+    private var lastRawDown = 0L
+
     init {
         NativeEngine.nativeSetListener(handle, listener)
     }
@@ -164,6 +188,8 @@ class Engine(private val scope: CoroutineScope) {
             _state.value = EngineState.Error(error)
             return error
         }
+        baselineUp = lastRawUp
+        baselineDown = lastRawDown
         _state.value = EngineState.Running
         pollJob?.cancel()
         pollJob = scope.launch {
@@ -200,8 +226,12 @@ class Engine(private val scope: CoroutineScope) {
             NativeEngine.nativeSnapshot(handle)
         }
         parseSnapshot(text)?.let { snap ->
-            _snapshot.value = snap
-            _state.value = engineStateFromName(snap.state)
+            lastRawUp = snap.totalUp
+            lastRawDown = snap.totalDown
+            val (up, down) = sessionTotals(snap.totalUp, snap.totalDown, baselineUp, baselineDown)
+            val adjusted = snap.copy(totalUp = up, totalDown = down)
+            _snapshot.value = adjusted
+            _state.value = engineStateFromName(adjusted.state)
         }
     }
 }

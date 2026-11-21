@@ -15,9 +15,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -143,10 +146,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val ranked = rankInterfaces(interfaces)
     val primary = ranked.firstOrNull()
     val (httpPort, socksPort) = settings.enabledPorts()
-    val heroAddress = primary?.let { nif ->
-        val port = httpPort ?: socksPort
-        if (port != null) "${nif.ip}:$port" else nif.ip
-    }
+    val heroAddress = advertiseAddress(ranked, httpPort, socksPort)
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -220,6 +220,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    } else if (primary?.kind == IfKind.MOBILE) {
+                        Text(
+                            text = stringResource(R.string.mobile_only_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -228,22 +234,22 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             AnimatedVisibility(visible = running) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 ) {
                     StatTile(
                         label = stringResource(R.string.stat_clients),
                         value = snapshot.active.toString(),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                     StatTile(
                         label = stringResource(R.string.stat_upload),
-                        value = formatBytes(snapshot.totalUp),
-                        modifier = Modifier.weight(1f),
+                        value = formatBytes(snapshot.liveUp),
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                     StatTile(
                         label = stringResource(R.string.stat_download),
-                        value = formatBytes(snapshot.totalDown),
-                        modifier = Modifier.weight(1f),
+                        value = formatBytes(snapshot.liveDown),
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
             }

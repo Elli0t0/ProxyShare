@@ -7,9 +7,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -44,6 +47,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.proxyshare.R
+import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.enabledPorts
 import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.rankInterfaces
@@ -66,12 +70,11 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
     val settings by ProxyController.settings.collectAsState()
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
-    val primary = rankInterfaces(interfaces).firstOrNull()
+    val ranked = rankInterfaces(interfaces)
+    val primary = ranked.firstOrNull()
     val (httpPort, socksPort) = settings.enabledPorts()
-    val primaryAddress = primary?.let { nif ->
-        val port = httpPort ?: socksPort
-        if (port != null) "${nif.ip}:$port" else nif.ip
-    }
+    val advertise = advertiseAddress(ranked, httpPort, socksPort)
+    val speed by ProxyController.speed.collectAsState()
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -89,8 +92,6 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
         prevTimeMs = now
     }
 
-    val totalUpSpeed = speeds.values.sumOf { it.upBps }
-    val totalDownSpeed = speeds.values.sumOf { it.downBps }
     val groups = remember(snapshot.connections) { groupByClient(snapshot.connections) }
 
     Surface(modifier = modifier.fillMaxSize()) {
@@ -104,32 +105,34 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
             // Header: three stat tiles plus a small totals line.
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
             ) {
                 StatTile(
                     label = stringResource(R.string.stat_active),
                     value = snapshot.active.toString(),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 StatTile(
-                    label = stringResource(R.string.stat_upload_speed),
-                    value = "${formatBytes(totalUpSpeed)}/s",
-                    modifier = Modifier.weight(1f),
+                    label = stringResource(R.string.stat_upload),
+                    value = "${formatBytes(speed.upBps)}/s",
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    animate = false,
                 )
                 StatTile(
-                    label = stringResource(R.string.stat_download_speed),
-                    value = "${formatBytes(totalDownSpeed)}/s",
-                    modifier = Modifier.weight(1f),
+                    label = stringResource(R.string.stat_download),
+                    value = "${formatBytes(speed.downBps)}/s",
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    animate = false,
                 )
             }
             Text(
                 text = stringResource(
                     R.string.totals,
-                    formatBytes(snapshot.totalUp),
-                    formatBytes(snapshot.totalDown),
+                    formatBytes(snapshot.liveUp),
+                    formatBytes(snapshot.liveDown),
                     snapshot.active,
                 ),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
@@ -150,11 +153,17 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
                             text = stringResource(R.string.connections_empty),
                             style = MaterialTheme.typography.titleMedium,
                         )
-                        if (primaryAddress != null) {
+                        if (primary?.kind == IfKind.MOBILE) {
+                            Text(
+                                text = stringResource(R.string.mobile_only_hint),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else if (advertise != null) {
                             Text(
                                 text = stringResource(
                                     R.string.connections_empty_hint,
-                                    primaryAddress,
+                                    advertise,
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -234,7 +243,9 @@ private fun ClientCard(group: ClientGroup, speeds: Map<Long, Speed>) {
                 }
                 Text(
                     text = formatBytes(group.totalUp + group.totalDown),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFeatureSettings = "tnum",
+                    ),
                 )
             }
             AnimatedVisibility(visible = expanded) {
@@ -272,12 +283,12 @@ private fun ConnectionRow(conn: ConnInfo, speed: Speed?) {
         ) {
             Text(
                 text = "↑ ${formatBytes(speed?.upBps ?: 0)}/s ↓ ${formatBytes(speed?.downBps ?: 0)}/s",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = formatDuration(System.currentTimeMillis() - conn.startedMs),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

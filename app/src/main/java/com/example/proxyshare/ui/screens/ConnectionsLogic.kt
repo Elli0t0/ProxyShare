@@ -1,5 +1,7 @@
 package com.example.proxyshare.ui.screens
 
+import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.engine.ConnInfo
 import java.util.Locale
 
@@ -59,4 +61,19 @@ fun formatDuration(ms: Long): String {
         minutes > 0 -> "${minutes}m ${secs.toString().padStart(2, '0')}s"
         else -> "${secs}s"
     }
+}
+
+/**
+ * The address to advertise in the Connections empty state and on the
+ * Home hero card, or null when there is no reachable address. A mobile
+ * carrier address (CGNAT) is never advertised: rankInterfaces sorts
+ * mobile last, so when the primary interface is mobile every
+ * interface is mobile and the caller shows the mobile-only hint
+ * instead.
+ */
+fun advertiseAddress(ranked: List<NetIf>, httpPort: Int?, socksPort: Int?): String? {
+    val primary = ranked.firstOrNull() ?: return null
+    if (primary.kind == IfKind.MOBILE) return null
+    val port = httpPort ?: socksPort ?: return primary.ip
+    return "${primary.ip}:$port"
 }

@@ -40,7 +40,7 @@ fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composab
 
 /** A small tonal tile with a label and a value that animates when it changes. */
 @Composable
-fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+fun StatTile(label: String, value: String, modifier: Modifier = Modifier, animate: Boolean = true) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -54,10 +54,25 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            AnimatedContent(targetState = value, label = "statValue") { animatedValue ->
+            if (animate) {
+                AnimatedContent(targetState = value, label = "statValue") { animatedValue ->
+                    Text(
+                        text = animatedValue,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFeatureSettings = "tnum",
+                        ),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            } else {
                 Text(
-                    text = animatedValue,
-                    style = MaterialTheme.typography.titleMedium,
+                    text = value,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFeatureSettings = "tnum",
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }

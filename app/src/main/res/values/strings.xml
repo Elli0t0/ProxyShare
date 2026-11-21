@@ -70,8 +70,6 @@
     <string name="stat_upload">Upload</string>
     <string name="stat_download">Download</string>
     <string name="stat_active">Active</string>
-    <string name="stat_upload_speed">Upload speed</string>
-    <string name="stat_download_speed">Download speed</string>
     <string name="connections_empty_hint">Set your laptop\'s proxy to %1$s</string>
     <string name="separate_ports_subtitle">Use different ports for HTTP and SOCKS</string>
     <string name="private_only_subtitle">Only allow clients on private networks</string>

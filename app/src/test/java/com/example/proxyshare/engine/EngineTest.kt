@@ -75,6 +75,23 @@ class EngineTest {
     }
 
     @Test
+    fun liveTotalsIncludeActiveConnections() {
+        val text = "running\t100\t200\t2\n" +
+            "1\t10.0.0.2\thost\t80\thttp\t100\t10\t20\n" +
+            "2\t10.0.0.3\thost\t443\tsocks5\t100\t30\t40\n"
+        val snap = parseSnapshot(text)!!
+        assertEquals(140L, snap.liveUp)
+        assertEquals(260L, snap.liveDown)
+    }
+
+    @Test
+    fun sessionTotalsSubtractBaseline() {
+        assertEquals(150L to 250L, sessionTotals(1000L, 2000L, 850L, 1750L))
+        assertEquals(0L to 0L, sessionTotals(100L, 100L, 200L, 200L))
+        assertEquals(0L to 0L, sessionTotals(0L, 0L, 0L, 0L))
+    }
+
+    @Test
     fun stateNameMapsToEngineState() {
         assertEquals(EngineState.Stopped, engineStateFromName("stopped"))
         assertEquals(EngineState.Starting, engineStateFromName("starting"))
