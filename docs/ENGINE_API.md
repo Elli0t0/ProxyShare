@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.2.5"`.
+- Returns the engine version string, e.g. `"engine 0.3.0"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -193,10 +193,19 @@ second parameter.
   each outbound TCP socket with `TcpSocket` (v4 or v6 by address) and
   binds it with `netbind::bind_socket_to_network` (0.1.6), which calls
   `android_setsocknetwork` (libandroid) on Android and does nothing on
-  other targets. The DNS lookup, per-address loop, connect timeout,
-  `TCP_NODELAY` and the `Dns`/`Connect` error mapping are unchanged.
-- **Known limitation:** UDP ASSOCIATE sockets and DNS lookups are NOT
-  bound to the network yet — only outbound TCP connections are.
+  other targets. Resolved addresses are tried IPv4 first (stable sort;
+  a VPN is often IPv4-only) and each connect attempt is capped at
+  5 s, even when the configured timeout is longer.
+- **DNS uses the outbound network too (0.3.0):** when a network is set
+  and the device is API 29+, `Connector::resolve` runs
+  `android_getaddrinfofornetwork` (libandroid, loaded with dlsym at
+  runtime) inside `spawn_blocking`, converts the addrinfo list to
+  `SocketAddr`s and always calls `freeaddrinfo`. Network == 0, API <
+  29, or a missing symbol all fall back to `lookup_host`, so DNS never
+  leaks through the default network in Wi-Fi/Mobile outbound mode.
+  Non-Android builds always use `lookup_host`, so host tests pass.
+- **Known limitation:** UDP ASSOCIATE sockets are NOT bound to the
+  network yet — only outbound TCP connections and DNS are.
 - A connect failure is one of two kinds: the name did not resolve
   (`Dns`) or no address accepted the connection (`Connect`). The
   SOCKS5 handler maps them to the reply codes 0x04 and 0x05.

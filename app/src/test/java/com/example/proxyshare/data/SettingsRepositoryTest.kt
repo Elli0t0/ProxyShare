@@ -114,6 +114,13 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun startOnBootDoesNotChangeEngineConfig() {
+        val base = AppSettings(authPass = "secret").toEngineConfig()
+        val changed = AppSettings(authPass = "secret", startOnBoot = true).toEngineConfig()
+        assertEquals(base, changed)
+    }
+
+    @Test
     fun randomPasswordHasLengthAndChars() {
         val password = randomPassword()
         assertEquals(12, password.length)

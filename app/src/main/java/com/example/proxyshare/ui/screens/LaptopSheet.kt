@@ -69,6 +69,40 @@ fun laptopCommands(
             "curl (SOCKS5)",
             "curl --socks5-hostname $auth$host:$socksPort https://ifconfig.me",
         )
+        cmds += Cmd(
+            "curl (SOCKS5 quick test)",
+            "curl --proxy socks5h://$auth$host:$socksPort https://ifconfig.me",
+        )
+        cmds += Cmd(
+            "Chromium / Chrome",
+            "chromium --proxy-server=\"socks5://$host:$socksPort\"",
+        )
+    }
+    if (httpPort != null || socksPort != null) {
+        val lines = mutableListOf(
+            "gsettings set org.gnome.system.proxy mode 'manual'",
+        )
+        if (socksPort != null) {
+            lines += "gsettings set org.gnome.system.proxy.socks host '$host'"
+            lines += "gsettings set org.gnome.system.proxy.socks port $socksPort"
+            if (user != null && pass != null) {
+                lines += "gsettings set org.gnome.system.proxy.socks authentication-user '$user'"
+                lines += "gsettings set org.gnome.system.proxy.socks authentication-password '$pass'"
+            }
+        }
+        if (httpPort != null) {
+            lines += "gsettings set org.gnome.system.proxy.http host '$host'"
+            lines += "gsettings set org.gnome.system.proxy.http port $httpPort"
+            lines += "gsettings set org.gnome.system.proxy.https host '$host'"
+            lines += "gsettings set org.gnome.system.proxy.https port $httpPort"
+            if (user != null && pass != null) {
+                lines += "gsettings set org.gnome.system.proxy.http authentication-user '$user'"
+                lines += "gsettings set org.gnome.system.proxy.http authentication-password '$pass'"
+                lines += "gsettings set org.gnome.system.proxy.https authentication-user '$user'"
+                lines += "gsettings set org.gnome.system.proxy.https authentication-password '$pass'"
+            }
+        }
+        cmds += Cmd("GNOME proxy settings", lines.joinToString("\n"))
     }
     return cmds
 }

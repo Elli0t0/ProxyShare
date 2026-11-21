@@ -118,4 +118,57 @@ class ConnectionsLogicTest {
     fun mobileOnlyIsFalseForEmptyList() {
         assertFalse(isMobileOnly(emptyList()))
     }
+
+    private fun conn() = ConnInfo(
+        id = 1, client = "192.168.1.10", host = "example.com", port = 443,
+        proto = "https", startedMs = 1000, up = 500, down = 4000,
+    )
+
+    @Test
+    fun sessionLogEntryComputesDuration() {
+        val entry = sessionLogEntry(conn(), closedAtMs = 4000)
+        assertEquals("192.168.1.10", entry.client)
+        assertEquals("example.com", entry.host)
+        assertEquals(443, entry.port)
+        assertEquals("https", entry.proto)
+        assertEquals(500L, entry.up)
+        assertEquals(4000L, entry.down)
+        assertEquals(3000L, entry.durationMs)
+        assertEquals(4000L, entry.closedAtMs)
+    }
+
+    @Test
+    fun sessionLogEntryClampsNegativeDuration() {
+        assertEquals(0L, sessionLogEntry(conn(), closedAtMs = 500).durationMs)
+    }
+
+    @Test
+    fun pushLogEntryCapsAt500() {
+        val log = (1..500).map { sessionLogEntry(conn().copy(host = "h$it"), closedAtMs = 1000L) }
+        val capped = pushLogEntry(log, sessionLogEntry(conn().copy(host = "h501"), closedAtMs = 1000L))
+        assertEquals(500, capped.size)
+        assertEquals("h2", capped.first().host) // oldest entry (h1) dropped
+        assertEquals("h501", capped.last().host)
+    }
+
+    @Test
+    fun sessionLogJsonIsAnArrayOfObjects() {
+        val json = sessionLogJson(
+            listOf(
+                sessionLogEntry(conn(), closedAtMs = 4000),
+                sessionLogEntry(conn().copy(host = "exa\"mple", port = 80), closedAtMs = 5000),
+            )
+        )
+        assertTrue(json.startsWith("[{\"client\":\"192.168.1.10\",\"host\":\"example.com\""))
+        assertTrue(json.contains("\"port\":443"))
+        assertTrue(json.contains("\"durationMs\":3000"))
+        // Quotes in a host are escaped, not raw.
+        assertTrue(json.contains("exa\\\"mple"))
+        assertTrue(json.endsWith("}]"))
+    }
+
+    @Test
+    fun sessionLogJsonEmptyIsEmptyArray() {
+        assertEquals("[]", sessionLogJson(emptyList()))
+    }
 }

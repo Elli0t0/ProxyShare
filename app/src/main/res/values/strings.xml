@@ -80,7 +80,13 @@
     <string name="battery_optimization_label">Battery optimization</string>
     <string name="battery_optimization_note">The foreground service keeps running either way — this only affects how Android wakes the app.</string>
     <string name="battery_optimization_open">Open</string>
+    <string name="start_on_boot_label">Start on boot</string>
+    <string name="start_on_boot_subtitle">Start the proxy automatically when the phone boots</string>
     <string name="connections_stopped_hint">Proxy stopped — start it from Home</string>
+    <string name="connections_menu">More options</string>
+    <string name="export_log">Export log (JSON)</string>
+    <string name="clear_log">Clear</string>
+    <string name="session_log_note">Session log holds only connection metadata — host, port, protocol, bytes, duration. No packet inspection.</string>
     <string name="go_home">Go to Home</string>
     <string name="open_hotspot_settings">Open hotspot settings</string>
     <string name="stat_active">Active</string>

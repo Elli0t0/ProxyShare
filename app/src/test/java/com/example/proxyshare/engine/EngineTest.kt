@@ -75,6 +75,24 @@ class EngineTest {
     }
 
     @Test
+    fun parseConnLineRoundTripsSnapshotLine() {
+        val conn = parseConnLine("7\t192.168.1.10\texample.com\t443\thttps\t1700000000000\t500\t4000")
+        assertEquals(
+            ConnInfo(
+                id = 7, client = "192.168.1.10", host = "example.com", port = 443,
+                proto = "https", startedMs = 1700000000000L, up = 500, down = 4000,
+            ),
+            conn,
+        )
+    }
+
+    @Test
+    fun parseConnLineRejectsShortAndBadLines() {
+        assertEquals(null, parseConnLine("7\t192.168.1.10\texample.com"))
+        assertEquals(null, parseConnLine("x\t192.168.1.10\texample.com\t443\thttps\t1\t2\t3"))
+        assertEquals(null, parseConnLine(""))
+    }
+    @Test
     fun liveTotalsIncludeActiveConnections() {
         val text = "running\t100\t200\t2\n" +
             "1\t10.0.0.2\thost\t80\thttp\t100\t10\t20\n" +

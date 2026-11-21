@@ -273,6 +273,17 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // Start on boot applies live (no restart banner).
+                SettingRow(
+                    title = stringResource(R.string.start_on_boot_label),
+                    subtitle = stringResource(R.string.start_on_boot_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = settings.startOnBoot,
+                            onCheckedChange = { saveLive { updateStartOnBoot(it) } },
+                        )
+                    },
+                )
             }
 
             // Protocols.

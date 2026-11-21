@@ -80,7 +80,13 @@
     <string name="battery_optimization_label">بهینه‌سازی باتری</string>
     <string name="battery_optimization_note">سرویس پیش‌زمینه در هر صورت ادامه می‌دهد — این فقط روی بیدار شدن برنامه توسط اندروید اثر می‌گذارد.</string>
     <string name="battery_optimization_open">باز کردن</string>
+    <string name="start_on_boot_label">شروع با روشن شدن گوشی</string>
+    <string name="start_on_boot_subtitle">پروکسی به‌طور خودکار با روشن شدن گوشی شروع شود</string>
     <string name="connections_stopped_hint">پروکسی متوقف است — از صفحه خانه آن را روشن کنید</string>
+    <string name="connections_menu">گزینه‌های بیشتر</string>
+    <string name="export_log">خروجی گرفتن از گزارش (JSON)</string>
+    <string name="clear_log">پاک کردن</string>
+    <string name="session_log_note">گزارش نشست فقط فرادادهٔ اتصال را نگه می‌دارد — میزبان، پورت، پروتکل، بایت‌ها، مدت. هیچ بازرسی بسته‌ای انجام نمی‌شود.</string>
     <string name="go_home">رفتن به خانه</string>
     <string name="open_hotspot_settings">باز کردن تنظیمات هات‌اسپات</string>
     <string name="stat_active">فعال</string>

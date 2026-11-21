@@ -14,7 +14,14 @@ phone's active VPN. No root.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill
   switch, and an exit-IP check.
 - "Connect your laptop" sheet with copyable curl/terminal commands and
-  plain-text Windows and Firefox setup steps.
+  plain-text Windows and Firefox setup steps; Linux/macOS adds a
+  SOCKS5 quick test, Chromium/Chrome `--proxy-server`, and GNOME
+  gsettings.
+- Quick Settings tile to start/stop the proxy from the shade; session
+  log (last 500 closed connections, metadata only) with JSON export;
+  optional "Start on boot".
+- Outbound DNS runs on the selected network (API 29+), addresses are
+  tried IPv4 first with each attempt capped at 5 s.
 
 ## How to use
 

@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.0 — correctness + features
+
+- Connector (Rust): resolved addresses are tried IPv4 first (stable
+  sort; a VPN is often IPv4-only) and each connect attempt is capped
+  at 5 s, so a dead AAAA can't stall a page load (pure order_addrs /
+  attempt_timeout helpers, unit-tested). DNS now uses the outbound
+  network too: on API 29+ with a network set, resolution runs
+  android_getaddrinfofornetwork (libandroid, dlsym at runtime) inside
+  spawn_blocking, converts the addrinfo list and always calls
+  freeaddrinfo; network == 0, API < 29, or a missing symbol all fall
+  back to lookup_host. Non-Android builds always use lookup_host, so
+  host tests pass. Documented in docs/ENGINE_API.md; UDP ASSOCIATE
+  sockets are still not bound to the network.
+- Quick Settings tile: new ProxyTileService (start/stop from the
+  notification shade, state follows the engine). Add it from the tile
+  editor. Tapping Start from the shade falls back to opening the app
+  when a background foreground-service start is blocked.
+- Laptop sheet (Linux/macOS): added `curl --proxy socks5h://…` quick
+  test, Chromium/Chrome `--proxy-server="socks5://…"`, and GNOME
+  gsettings (mode + socks/http/https host/port, with auth lines when
+  enabled). The existing `export http_proxy=… https_proxy=…` line
+  already covered the spec's two-export form, so it was not duplicated.
+  LaptopCommandsTest updated (6 commands with credentials).
+- Session log: the last 500 closed connections are kept in memory
+  (host, port, proto, client, bytes up/down, duration) from the
+  ConnectionClosed events (type 3 payload parsed with the shared
+  parseConnLine). Connections overflow menu: "Export log (JSON)" via
+  ShareCompat/FileProvider and "Clear". Privacy note in the UI: the
+  log holds only connection metadata, no packet inspection.
+- Optional, default OFF: "Start on boot" (Settings > Server, applies
+  live) + BOOT_COMPLETED receiver that starts ProxyService only when
+  enabled.
+
 ## 0.2.9 — battery optimization
 
 - Poll only while visible: ProxyController gains uiVisible (MainActivity

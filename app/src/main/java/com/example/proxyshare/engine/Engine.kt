@@ -72,6 +72,21 @@ fun engineStateFromName(name: String, message: String = ""): EngineState = when 
     else -> EngineState.Stopped
 }
 
+/** Parse one connection line: the 8 tab-separated fields of a snapshot line, or the payload (b) of a type 2/3/4 event. Null when malformed. */
+fun parseConnLine(line: String): ConnInfo? {
+    val f = line.split('\t')
+    if (f.size < 8) return null
+    return ConnInfo(
+        id = f[0].toLongOrNull() ?: return null,
+        client = f[1], host = f[2],
+        port = f[3].toIntOrNull() ?: return null,
+        proto = f[4],
+        startedMs = f[5].toLongOrNull() ?: return null,
+        up = f[6].toLongOrNull() ?: return null,
+        down = f[7].toLongOrNull() ?: return null,
+    )
+}
+
 /**
  * Parse the snapshot text from nativeSnapshot (see docs/ENGINE_API.md):
  * first line "state<TAB>total_up<TAB>total_down<TAB>active", then one
@@ -83,19 +98,7 @@ fun parseSnapshot(text: String): Snapshot? {
     val lines = text.lineSequence().filter { it.isNotEmpty() }.toList()
     val head = lines.firstOrNull()?.split('\t') ?: return null
     if (head.size < 4) return null
-    val conns = lines.drop(1).mapNotNull { line ->
-        val f = line.split('\t')
-        if (f.size < 8) return@mapNotNull null
-        ConnInfo(
-            id = f[0].toLongOrNull() ?: return@mapNotNull null,
-            client = f[1], host = f[2],
-            port = f[3].toIntOrNull() ?: return@mapNotNull null,
-            proto = f[4],
-            startedMs = f[5].toLongOrNull() ?: return@mapNotNull null,
-            up = f[6].toLongOrNull() ?: return@mapNotNull null,
-            down = f[7].toLongOrNull() ?: return@mapNotNull null,
-        )
-    }
+    val conns = lines.drop(1).mapNotNull { parseConnLine(it) }
     return Snapshot(
         state = head[0],
         totalUp = head[1].toLongOrNull() ?: 0L,

@@ -34,6 +34,8 @@ data class AppSettings(
     val keepScreenOn: Boolean = false,
     /** Release the CPU wake lock when no client is connected (default ON). Kotlin-only: never sent to the engine. */
     val batterySaver: Boolean = true,
+    /** Start the proxy automatically after boot (default OFF). Kotlin-only: never sent to the engine. */
+    val startOnBoot: Boolean = false,
     /** Outbound network mode: "default", "vpn_only", "wifi" or "mobile". Kotlin-only: never sent to the engine. */
     val outboundMode: String = "default",
     /** URL used for the manual exit-IP check. Kotlin-only: never sent to the engine. */
@@ -123,6 +125,7 @@ class SettingsRepository(context: Context) {
             language = prefs[Keys.LANGUAGE] ?: defaults.language,
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
             batterySaver = prefs[Keys.BATTERY_SAVER] ?: defaults.batterySaver,
+            startOnBoot = prefs[Keys.START_ON_BOOT] ?: defaults.startOnBoot,
             outboundMode = prefs[Keys.OUTBOUND_MODE] ?: defaults.outboundMode,
             exitIpUrl = prefs[Keys.EXIT_IP_URL] ?: defaults.exitIpUrl,
         )
@@ -211,6 +214,10 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.BATTERY_SAVER] = value }
     }
 
+    suspend fun updateStartOnBoot(value: Boolean) {
+        dataStore.edit { it[Keys.START_ON_BOOT] = value }
+    }
+
     suspend fun updateOutboundMode(value: String) {
         dataStore.edit { it[Keys.OUTBOUND_MODE] = value }
     }
@@ -238,6 +245,7 @@ class SettingsRepository(context: Context) {
         val LANGUAGE = stringPreferencesKey("language")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val BATTERY_SAVER = booleanPreferencesKey("battery_saver")
+        val START_ON_BOOT = booleanPreferencesKey("start_on_boot")
         val OUTBOUND_MODE = stringPreferencesKey("outbound_mode")
         val EXIT_IP_URL = stringPreferencesKey("exit_ip_url")
     }

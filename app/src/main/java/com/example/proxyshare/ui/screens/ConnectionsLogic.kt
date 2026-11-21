@@ -81,3 +81,56 @@ fun advertiseAddress(ranked: List<NetIf>, httpPort: Int?, socksPort: Int?): Stri
 /** True when every ranked interface is a mobile carrier address (nothing reachable). */
 fun isMobileOnly(ranked: List<NetIf>): Boolean =
     ranked.isNotEmpty() && ranked.all { it.kind == IfKind.MOBILE }
+
+/** One closed connection in the session log: metadata only, never payloads. */
+data class SessionLogEntry(
+    val client: String,
+    val host: String,
+    val port: Int,
+    val proto: String,
+    val up: Long,
+    val down: Long,
+    val durationMs: Long,
+    val closedAtMs: Long,
+)
+
+/** Build a log entry from a closed connection (type 3 event payload, parsed as a connection line). */
+fun sessionLogEntry(conn: ConnInfo, closedAtMs: Long): SessionLogEntry =
+    SessionLogEntry(
+        client = conn.client,
+        host = conn.host,
+        port = conn.port,
+        proto = conn.proto,
+        up = conn.up,
+        down = conn.down,
+        durationMs = (closedAtMs - conn.startedMs).coerceAtLeast(0),
+        closedAtMs = closedAtMs,
+    )
+
+/** Append an entry, keeping only the last `max` (500) entries. */
+fun pushLogEntry(
+    log: List<SessionLogEntry>,
+    entry: SessionLogEntry,
+    max: Int = 500,
+): List<SessionLogEntry> =
+    (log + entry).takeLast(max.coerceAtLeast(1))
+
+/** The session log as a JSON array (hand-built: no serialization library). */
+fun sessionLogJson(log: List<SessionLogEntry>): String = buildString {
+    append('[')
+    log.forEachIndexed { i, e ->
+        if (i > 0) append(',')
+        append("{\"client\":${jsonString(e.client)},")
+        append("\"host\":${jsonString(e.host)},")
+        append("\"port\":${e.port},")
+        append("\"proto\":${jsonString(e.proto)},")
+        append("\"up\":${e.up},")
+        append("\"down\":${e.down},")
+        append("\"durationMs\":${e.durationMs},")
+        append("\"closedAtMs\":${e.closedAtMs}}")
+    }
+    append(']')
+}
+
+private fun jsonString(s: String): String =
+    "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""

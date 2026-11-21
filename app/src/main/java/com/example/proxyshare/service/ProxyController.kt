@@ -10,6 +10,10 @@ import com.example.proxyshare.engine.Engine
 import com.example.proxyshare.engine.EngineEvent
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.Snapshot
+import com.example.proxyshare.engine.parseConnLine
+import com.example.proxyshare.ui.screens.SessionLogEntry
+import com.example.proxyshare.ui.screens.pushLogEntry
+import com.example.proxyshare.ui.screens.sessionLogEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -125,6 +129,15 @@ object ProxyController {
     /** Active connections, tracked from engine events (type 2 opened, 3 closed). */
     val activeConns: StateFlow<Int> = _activeConns.asStateFlow()
 
+    private val _sessionLog = MutableStateFlow<List<SessionLogEntry>>(emptyList())
+    /** Last 500 closed connections (metadata only). In-memory only, never persisted. */
+    val sessionLog: StateFlow<List<SessionLogEntry>> = _sessionLog.asStateFlow()
+
+    /** Clear the session log (Connections overflow menu). */
+    fun clearSessionLog() {
+        _sessionLog.value = emptyList()
+    }
+
     private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
     /** Rolling 2-minute speed history (120 samples at 1 Hz), cleared on every start. */
     val history: StateFlow<List<SpeedSample>> = _history.asStateFlow()
@@ -207,7 +220,17 @@ object ProxyController {
             events.collect { e ->
                 when (e.type) {
                     2 -> _activeConns.update { it + 1 }
-                    3 -> _activeConns.update { (it - 1).coerceAtLeast(0) }
+                    3 -> {
+                        _activeConns.update { (it - 1).coerceAtLeast(0) }
+                        // Type 3 payload (b) is the connection's snapshot
+                        // line: id, client, host, port, proto, started_ms,
+                        // up, down. Only metadata, never payloads.
+                        parseConnLine(e.b)?.let { conn ->
+                            _sessionLog.update { log ->
+                                pushLogEntry(log, sessionLogEntry(conn, System.currentTimeMillis()))
+                            }
+                        }
+                    }
                 }
             }
         }

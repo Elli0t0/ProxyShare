@@ -1,5 +1,6 @@
 package com.example.proxyshare.ui.screens
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -20,8 +21,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,12 +46,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ShareCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.io.File
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetworkWatcher
@@ -81,6 +90,9 @@ fun ConnectionsScreen(
     val advertise = advertiseAddress(ranked, httpPort, socksPort)
     val speed by ProxyController.speed.collectAsStateWithLifecycle()
     val history by ProxyController.history.collectAsStateWithLifecycle()
+    val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showMenu by remember { mutableStateOf(false) }
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -106,10 +118,40 @@ fun ConnectionsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = stringResource(R.string.nav_connections),
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.nav_connections),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = stringResource(R.string.connections_menu),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.export_log)) },
+                        onClick = {
+                            showMenu = false
+                            exportSessionLog(context, sessionLog)
+                        },
+                        enabled = sessionLog.isNotEmpty(),
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.clear_log)) },
+                        onClick = {
+                            showMenu = false
+                            ProxyController.clearSessionLog()
+                        },
+                        enabled = sessionLog.isNotEmpty(),
+                    )
+                }
+            }
 
             // Header: active clients and this session's totals.
             // Speeds live only in the chart legend (single source).
@@ -236,8 +278,29 @@ fun ConnectionsScreen(
                     }
                 }
             }
+            Text(
+                text = stringResource(R.string.session_log_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
+}
+
+/** Write the session log as JSON into the cache dir and share it via FileProvider. */
+private fun exportSessionLog(context: Context, log: List<SessionLogEntry>) {
+    val file = File(context.cacheDir, "proxyshare-session-log.json")
+    file.writeText(sessionLogJson(log))
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file,
+    )
+    ShareCompat.IntentBuilder(context)
+        .setType("application/json")
+        .setStream(uri)
+        .setChooserTitle(R.string.export_log)
+        .startChooser()
 }
 
 @Composable
