@@ -149,8 +149,7 @@ impl Connector {
                 Ok(Ok(NetworkDns::Done(result))) => return result.map_err(ConnectError::Dns),
                 Ok(Ok(NetworkDns::Fallback)) => { /* fall through to the default lookup */ }
                 Ok(Err(_)) => {
-                    return Err(ConnectError::Dns(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Err(ConnectError::Dns(io::Error::other(
                         "DNS resolver task failed",
                     )))
                 }
@@ -203,6 +202,8 @@ pub(crate) enum NetworkDns {
     /// android_getaddrinfofornetwork symbol is missing).
     Fallback,
     /// The network resolver ran; this result is authoritative.
+    /// (Constructed only on Android; host builds always fall back.)
+    #[allow(dead_code)]
     Done(io::Result<Vec<SocketAddr>>),
 }
 
@@ -245,10 +246,9 @@ pub(crate) fn resolve_on_network(host: &str, port: u16, network: u64) -> Network
     // valid out-pointer.
     let rc = unsafe { func(network, host_c.as_ptr(), service_c.as_ptr(), &hints, &mut res) };
     if rc != 0 {
-        return NetworkDns::Done(Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("android_getaddrinfofornetwork failed ({rc})"),
-        )));
+        return NetworkDns::Done(Err(io::Error::other(format!(
+            "android_getaddrinfofornetwork failed ({rc})"
+        ))));
     }
     let mut out = Vec::new();
     let mut cur = res;
