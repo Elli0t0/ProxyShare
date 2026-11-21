@@ -19,7 +19,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -50,7 +54,7 @@ class ProxyService : Service() {
             this, NOTIF_ID, buildNotification(notificationText(ProxyController.settings.value)),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
-        acquireWakeLock()
+        observeWakeLock()
         observeState()
         ProxyController.start()
         return START_STICKY
@@ -61,6 +65,29 @@ class ProxyService : Service() {
         serviceScope.cancel()
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    /**
+     * Hold the wake lock only while a client is connected (or while
+     * battery saver is off). With no clients and battery saver on, the
+     * lock is released after a 60 s grace period; collectLatest cancels
+     * that wait the moment a client connects.
+     */
+    private fun observeWakeLock() {
+        serviceScope.launch {
+            combine(
+                ProxyController.activeConns,
+                ProxyController.settings.map { it.batterySaver },
+            ) { n, saver -> n to saver }
+                .collectLatest { (n, saver) ->
+                    if (!saver || n > 0) {
+                        acquireWakeLock()
+                    } else {
+                        delay(60_000)
+                        releaseWakeLock()
+                    }
+                }
+        }
     }
 
     /**

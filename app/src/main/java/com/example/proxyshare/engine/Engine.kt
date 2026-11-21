@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -111,12 +112,16 @@ data class EngineEvent(val type: Int, val a: String, val b: String)
  * Kotlin wrapper that owns the native engine handle.
  *
  * start(settings) and stop() run on Dispatchers.IO; close() destroys
- * the handle. While running, nativeSnapshot is polled every 1 s (250 ms
- * when the connections screen asks via setFastPolling). Events arrive
- * on a native thread: they are only tryEmit-ted here, never blocking,
- * and never touch the UI.
+ * the handle. While running, nativeSnapshot is polled every 1 s, but
+ * only while the UI is visible ([uiVisible]): the poll loop suspends
+ * with zero wakeups while hidden. Events arrive on a native thread:
+ * they are only tryEmit-ted here, never blocking, and never touch
+ * the UI.
  */
-class Engine(private val scope: CoroutineScope) {
+class Engine(
+    private val scope: CoroutineScope,
+    private val uiVisible: StateFlow<Boolean> = MutableStateFlow(true),
+) {
 
     private val handle: Long = NativeEngine.nativeCreate()
 
@@ -143,8 +148,6 @@ class Engine(private val scope: CoroutineScope) {
         }
     }
 
-    @Volatile
-    private var fastPolling = false
     private var pollJob: Job? = null
     private var closed = false
 
@@ -157,11 +160,6 @@ class Engine(private val scope: CoroutineScope) {
 
     init {
         NativeEngine.nativeSetListener(handle, listener)
-    }
-
-    /** Poll faster (250 ms) while the connections screen is visible. */
-    fun setFastPolling(enabled: Boolean) {
-        fastPolling = enabled
     }
 
     /** Set the state to Error without starting the engine (e.g. no network for the chosen outbound mode, or the VPN kill switch). */
@@ -194,8 +192,10 @@ class Engine(private val scope: CoroutineScope) {
         pollJob?.cancel()
         pollJob = scope.launch {
             while (isActive) {
+                // Suspends with zero wakeups while the UI is hidden.
+                uiVisible.first { it }
                 pollOnce()
-                delay(if (fastPolling) 250L else 1000L)
+                delay(1000)
             }
         }
         return ""
@@ -210,6 +210,11 @@ class Engine(private val scope: CoroutineScope) {
         }
         pollOnce()
         _state.value = EngineState.Stopped
+    }
+
+    /** Poll the snapshot once right now (e.g. when the UI becomes visible again). */
+    suspend fun pollNow() {
+        pollOnce()
     }
 
     /** Destroy the native handle. Safe to call more than once. */

@@ -26,4 +26,14 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        ProxyController.setUiVisible(true)
+    }
+
+    override fun onStop() {
+        ProxyController.setUiVisible(false)
+        super.onStop()
+    }
 }

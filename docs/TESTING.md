@@ -56,6 +56,18 @@ the version number, not a silent retry.
 - [ ] Wi-Fi / Mobile mode: the proxy starts only when that network is
       available; otherwise it shows "No <mode> network available".
 
+## Battery
+
+- [ ] Screen off + hotspot on, idle 5 min, then load a page from the
+      laptop — it must still work. If the first request is slow, note
+      it (the 60 s wake-lock grace may need adjusting).
+- [ ] After the grace period with no clients, check the wake lock is
+      released: `adb shell dumpsys power | grep ProxyShare` shows
+      nothing.
+- [ ] With a client connected, the wake lock stays held; disconnecting
+      the client releases it after the grace period.
+- [ ] Battery saver off keeps the wake lock held even with no clients.
+
 ## Upgrade
 
 - [ ] Installing over the previous version keeps settings, password and

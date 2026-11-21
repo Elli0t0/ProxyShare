@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -66,6 +67,23 @@ fun pushSample(
     max: Int = 120,
 ): List<SpeedSample> = (history + sample).takeLast(max.coerceAtLeast(1))
 
+/** Sampler state carried between 1 Hz ticks. */
+data class SamplerState(
+    val prevUp: Long,
+    val prevDown: Long,
+    val prevTimeMs: Long,
+    val prev: SpeedSample,
+)
+
+/**
+ * Fresh baseline after the UI comes back: totals from the current
+ * snapshot, clock now, sample zeroed — so the first tick after a
+ * hidden period cannot report a fake spike from bytes that moved
+ * while the UI was hidden.
+ */
+fun rebaseline(liveUp: Long, liveDown: Long, nowMs: Long): SamplerState =
+    SamplerState(liveUp, liveDown, nowMs, SpeedSample(0, 0))
+
 /**
  * App-scoped singleton that owns the one [Engine], the settings and
  * their coroutine scope. No Hilt. The service and the UI both talk to
@@ -77,7 +95,12 @@ fun pushSample(
 object ProxyController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val engine = Engine(scope)
+
+    private val _uiVisible = MutableStateFlow(false)
+    /** True while an activity is in the foreground (MainActivity onStart/onStop). */
+    val uiVisible: StateFlow<Boolean> = _uiVisible.asStateFlow()
+
+    private val engine = Engine(scope, _uiVisible.asStateFlow())
     private val startMutex = Mutex()
 
     private var repository: SettingsRepository? = null
@@ -98,6 +121,10 @@ object ProxyController {
     /** Live upload/download speed, sampled once per second while running. 0 when stopped. */
     val speed: StateFlow<SpeedSample> = _speed.asStateFlow()
 
+    private val _activeConns = MutableStateFlow(0)
+    /** Active connections, tracked from engine events (type 2 opened, 3 closed). */
+    val activeConns: StateFlow<Int> = _activeConns.asStateFlow()
+
     private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
     /** Rolling 2-minute speed history (120 samples at 1 Hz), cleared on every start. */
     val history: StateFlow<List<SpeedSample>> = _history.asStateFlow()
@@ -107,31 +134,41 @@ object ProxyController {
     val events: SharedFlow<EngineEvent> = engine.events
 
     /**
-     * Sample the live totals once per second while running, even when
-     * the snapshot itself is unchanged. Ticks on delay(), not on
-     * snapshot emissions, so idle traffic still reports 0.
+     * Sample the live totals once per second while running AND the UI
+     * is visible. While hidden the loop suspends at uiVisible.first
+     * (zero wakeups) and pushes no samples; on return it polls once
+     * and re-baselines so the first tick cannot spike.
      */
     private fun startSpeedSampler() {
         speedJob?.cancel()
         _history.value = emptyList()
         speedJob = scope.launch {
-            var prevUp = engine.snapshot.value.liveUp
-            var prevDown = engine.snapshot.value.liveDown
-            var prevTime = SystemClock.elapsedRealtime()
-            var prev = SpeedSample(0, 0)
+            var state = SamplerState(
+                engine.snapshot.value.liveUp,
+                engine.snapshot.value.liveDown,
+                SystemClock.elapsedRealtime(),
+                SpeedSample(0, 0),
+            )
             while (isActive) {
-                delay(1000)
-                val now = SystemClock.elapsedRealtime()
-                val snap = engine.snapshot.value
-                val sample = smoothSpeed(
-                    prevUp, prevDown, snap.liveUp, snap.liveDown, now - prevTime, prev
+                uiVisible.first { it }
+                engine.pollNow()
+                state = rebaseline(
+                    engine.snapshot.value.liveUp,
+                    engine.snapshot.value.liveDown,
+                    SystemClock.elapsedRealtime(),
                 )
-                _speed.value = sample
-                _history.value = pushSample(_history.value, sample)
-                prevUp = snap.liveUp
-                prevDown = snap.liveDown
-                prevTime = now
-                prev = sample
+                while (isActive && uiVisible.value) {
+                    delay(1000)
+                    val now = SystemClock.elapsedRealtime()
+                    val snap = engine.snapshot.value
+                    val sample = smoothSpeed(
+                        state.prevUp, state.prevDown, snap.liveUp, snap.liveDown,
+                        now - state.prevTimeMs, state.prev,
+                    )
+                    _speed.value = sample
+                    _history.value = pushSample(_history.value, sample)
+                    state = SamplerState(snap.liveUp, snap.liveDown, now, sample)
+                }
             }
         }
     }
@@ -140,6 +177,11 @@ object ProxyController {
         speedJob?.cancel()
         speedJob = null
         _speed.value = SpeedSample(0, 0)
+    }
+
+    /** Called by MainActivity onStart/onStop. */
+    fun setUiVisible(v: Boolean) {
+        _uiVisible.value = v
     }
 
     /** Called once from ProxyShareApp.onCreate. Safe to call twice. */
@@ -157,6 +199,22 @@ object ProxyController {
         }
         scope.launch {
             selector.network.collect { _network.value = it }
+        }
+        // Active connections from engine events (no polling). The
+        // SharedFlow drops old events, so resync from the snapshot
+        // whenever the UI becomes visible.
+        scope.launch {
+            events.collect { e ->
+                when (e.type) {
+                    2 -> _activeConns.update { it + 1 }
+                    3 -> _activeConns.update { (it - 1).coerceAtLeast(0) }
+                }
+            }
+        }
+        scope.launch {
+            uiVisible.collect { visible ->
+                if (visible) _activeConns.value = engine.snapshot.value.active
+            }
         }
     }
 
@@ -187,6 +245,7 @@ object ProxyController {
         val repo = repository ?: return
         val selector = selector ?: return
         started = true
+        _activeConns.value = 0
         try {
             repo.ensurePassword()
             val settings = repo.settings.first()
@@ -209,6 +268,7 @@ object ProxyController {
                     if (mode == OutboundMode.VPN_ONLY && net == null) {
                         // Kill switch: never fall back to the default network.
                         started = false
+                        _activeConns.value = 0
                         runCatching { engine.stop() }
                         stopSpeedSampler()
                         engine.setError("VPN lost — proxy stopped")
@@ -243,6 +303,7 @@ object ProxyController {
                 networkJob?.cancel()
                 networkJob = null
                 stopSpeedSampler()
+                _activeConns.value = 0
                 selector?.select(OutboundMode.DEFAULT)
                 if (started) {
                     started = false
@@ -252,11 +313,6 @@ object ProxyController {
                 }
             }
         }
-    }
-
-    /** Poll faster (250 ms) while the connections screen is visible. */
-    fun setFastPolling(enabled: Boolean) {
-        engine.setFastPolling(enabled)
     }
 
     /** Change the outbound mode. Only used while stopped (the UI enforces it). */

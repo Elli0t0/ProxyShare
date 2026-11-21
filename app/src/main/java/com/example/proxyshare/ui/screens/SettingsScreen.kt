@@ -1,7 +1,9 @@
 package com.example.proxyshare.ui.screens
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,6 +47,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.SettingsRepository
@@ -67,8 +70,8 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by ProxyController.state.collectAsState()
-    val settings by ProxyController.settings.collectAsState()
+    val state by ProxyController.state.collectAsStateWithLifecycle()
+    val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
     var changedWhileRunning by rememberSaveable { mutableStateOf(false) }
@@ -240,6 +243,36 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         Text(text = label, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+                // Battery saver applies live (no restart banner).
+                SettingRow(
+                    title = stringResource(R.string.battery_saver_label),
+                    subtitle = stringResource(R.string.battery_saver_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = settings.batterySaver,
+                            onCheckedChange = { saveLive { updateBatterySaver(it) } },
+                        )
+                    },
+                )
+                SettingRow(
+                    title = stringResource(R.string.battery_optimization_label),
+                    trailing = {
+                        TextButton(
+                            onClick = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                )
+                            }
+                        ) {
+                            Text(stringResource(R.string.battery_optimization_open))
+                        }
+                    },
+                )
+                Text(
+                    text = stringResource(R.string.battery_optimization_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             // Protocols.

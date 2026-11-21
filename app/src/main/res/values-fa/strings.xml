@@ -75,6 +75,11 @@
     <string name="traffic_title">ترافیک زنده</string>
     <string name="traffic_chart_desc">نمودار ترافیک زنده، آپلود %1$s در ثانیه، دانلود %2$s در ثانیه</string>
     <string name="traffic_peak">اوج ↑ %1$s در ثانیه · ↓ %2$s در ثانیه</string>
+    <string name="battery_saver_label">صرفه‌جویی در باتری</string>
+    <string name="battery_saver_subtitle">وقتی کلاینتی وصل نیست قفل CPU را آزاد کن</string>
+    <string name="battery_optimization_label">بهینه‌سازی باتری</string>
+    <string name="battery_optimization_note">سرویس پیش‌زمینه در هر صورت ادامه می‌دهد — این فقط روی بیدار شدن برنامه توسط اندروید اثر می‌گذارد.</string>
+    <string name="battery_optimization_open">باز کردن</string>
     <string name="connections_stopped_hint">پروکسی متوقف است — از صفحه خانه آن را روشن کنید</string>
     <string name="go_home">رفتن به خانه</string>
     <string name="open_hotspot_settings">باز کردن تنظیمات هات‌اسپات</string>

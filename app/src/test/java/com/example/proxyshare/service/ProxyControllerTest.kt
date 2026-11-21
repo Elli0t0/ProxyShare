@@ -66,4 +66,23 @@ class ProxyControllerTest {
             pushSample(history, SpeedSample(4, 0), max = 3)
         )
     }
+
+    @Test
+    fun rebaselineTakesFreshTotalsAndZeroesSample() {
+        assertEquals(
+            SamplerState(9000, 8000, 12345, SpeedSample(0, 0)),
+            rebaseline(9000, 8000, 12345)
+        )
+    }
+
+    @Test
+    fun firstTickAfterRebaselineCannotSpike() {
+        // Bytes moved while hidden must not appear as speed: the first
+        // tick after a rebaseline sees no delta from the fresh totals.
+        val base = rebaseline(9000, 8000, 1000)
+        assertEquals(
+            SpeedSample(0, 0),
+            smoothSpeed(base.prevUp, base.prevDown, 9000, 8000, 1000, base.prev)
+        )
+    }
 }

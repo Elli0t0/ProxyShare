@@ -117,7 +117,8 @@ fun networkChanges(context: Context): Flow<Unit> = callbackFlow {
 
 /**
  * The current IPv4 interfaces, re-listed on every network change and
- * every 5 s (hotspot toggles do not always fire callbacks).
+ * every 15 s (hotspot toggles do not always fire callbacks; the
+ * NetworkCallback covers real changes, the timer is only a safety net).
  * Debounced 300 ms. The ConnectivityManager is passed through so the
  * hotspot check can tell the Wi-Fi interface from the hotspot one.
  */
@@ -129,7 +130,7 @@ fun networkInterfaces(context: Context): Flow<List<NetIf>> {
         flow {
             while (true) {
                 emit(Unit)
-                delay(5000)
+                delay(15000)
             }
         },
     )

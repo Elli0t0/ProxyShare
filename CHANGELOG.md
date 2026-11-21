@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.9 — battery optimization
+
+- Poll only while visible: ProxyController gains uiVisible (MainActivity
+  onStart/onStop); the Engine poll loop suspends on uiVisible.first
+  (zero wakeups while hidden) and runs at 1 s everywhere — fastPolling
+  and the 250 ms mode are gone. Public suspend pollNow() for the resume
+  case. The speed sampler uses the same gating; on return it polls once
+  and re-baselines (pure rebaseline helper, unit-tested) so no fake
+  spike is reported, and pushes no samples while hidden.
+- Wake lock only with clients: activeConns is tracked from engine events
+  (type 2 opened, 3 closed, no polling), reset on start/stop, resynced
+  from snapshot.active when the UI becomes visible. New "Battery saver"
+  setting (default ON, Settings > Server, applies live): ProxyService
+  holds the wake lock while a client is connected or saver is off, and
+  releases it 60 s after the last client disconnects (collectLatest
+  cancels the grace wait when a client connects). Settings also has a
+  "Battery optimization" row opening the system page, with a note that
+  the foreground service keeps running either way.
+- Lifecycle-aware collection: Home, Connections and Settings read
+  ProxyController/engine flows with collectAsStateWithLifecycle().
+  One shared NetworkWatcher object (stateIn, WhileSubscribed 5 s) feeds
+  Home and Connections; the safety re-poll in networkInterfaces() went
+  from 5 s to 15 s (the NetworkCallback covers real changes).
+- Rust relay buffer 16 KB -> 32 KB (fewer syscalls, better throughput).
+- docs/TESTING.md gains the battery manual-test notes (screen off +
+  hotspot, idle 5 min, laptop page load; dumpsys power wake-lock check).
+
 ## 0.2.8 — UI/bug polish
 
 - Centered hints: the mobile-only hint on Home and the empty-state hints

@@ -43,10 +43,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -59,11 +57,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxyshare.R
+import com.example.proxyshare.data.NetworkWatcher
 import com.example.proxyshare.data.enabledPorts
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetIf
-import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.service.OutboundMode
@@ -82,11 +81,10 @@ import kotlinx.coroutines.launch
 fun HomeScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by ProxyController.state.collectAsState()
-    val snapshot by ProxyController.snapshot.collectAsState()
-    val settings by ProxyController.settings.collectAsState()
-    val netFlow = remember(context) { networkInterfaces(context) }
-    val interfaces by netFlow.collectAsState(initial = emptyList())
+    val state by ProxyController.state.collectAsStateWithLifecycle()
+    val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
+    val settings by ProxyController.settings.collectAsStateWithLifecycle()
+    val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
     var exitIpOk by rememberSaveable { mutableStateOf(false) }
     var exitIpChecking by rememberSaveable { mutableStateOf(false) }

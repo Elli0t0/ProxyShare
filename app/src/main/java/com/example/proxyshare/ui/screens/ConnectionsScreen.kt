@@ -27,9 +27,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,16 +40,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.NetworkWatcher
 import com.example.proxyshare.data.enabledPorts
-import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.ConnInfo
 import com.example.proxyshare.engine.EngineState
@@ -73,26 +70,19 @@ fun ConnectionsScreen(
     modifier: Modifier = Modifier,
     onGoHome: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val state by ProxyController.state.collectAsState()
-    val snapshot by ProxyController.snapshot.collectAsState()
-    val settings by ProxyController.settings.collectAsState()
-    val netFlow = remember(context) { networkInterfaces(context) }
-    val interfaces by netFlow.collectAsState(initial = emptyList())
+    val state by ProxyController.state.collectAsStateWithLifecycle()
+    val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
+    val settings by ProxyController.settings.collectAsStateWithLifecycle()
+    val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     val ranked = rankInterfaces(interfaces)
     val primary = ranked.firstOrNull()
     val (httpPort, socksPort) = settings.enabledPorts()
     val advertise = advertiseAddress(ranked, httpPort, socksPort)
-    val speed by ProxyController.speed.collectAsState()
-    val history by ProxyController.history.collectAsState()
+    val speed by ProxyController.speed.collectAsStateWithLifecycle()
+    val history by ProxyController.history.collectAsStateWithLifecycle()
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
-
-    DisposableEffect(Unit) {
-        ProxyController.setFastPolling(true)
-        onDispose { ProxyController.setFastPolling(false) }
-    }
 
     LaunchedEffect(snapshot) {
         val now = System.currentTimeMillis()

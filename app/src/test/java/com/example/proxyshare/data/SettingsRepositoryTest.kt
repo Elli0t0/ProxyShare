@@ -107,6 +107,13 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun batterySaverDoesNotChangeEngineConfig() {
+        val base = AppSettings(authPass = "secret").toEngineConfig()
+        val changed = AppSettings(authPass = "secret", batterySaver = false).toEngineConfig()
+        assertEquals(base, changed)
+    }
+
+    @Test
     fun randomPasswordHasLengthAndChars() {
         val password = randomPassword()
         assertEquals(12, password.length)

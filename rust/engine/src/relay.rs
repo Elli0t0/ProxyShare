@@ -25,7 +25,7 @@ pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     ctr: &AtomicU64,
     idle: Duration,
 ) -> io::Result<()> {
-    let mut buf = vec![0u8; 16 * 1024];
+    let mut buf = vec![0u8; 32 * 1024];
     loop {
         let n = tokio::time::timeout(idle, r.read(&mut buf))
             .await
