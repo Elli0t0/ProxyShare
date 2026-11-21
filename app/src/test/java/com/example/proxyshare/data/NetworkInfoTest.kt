@@ -21,15 +21,29 @@ class NetworkInfoTest {
     @Test
     fun wifiPrefixes() {
         assertEquals(IfKind.WIFI, classifyInterface("wlan0"))
-        // Some phones use wlan1 for the hotspot; the name still says
-        // Wi-Fi, and the UI always shows the raw interface name.
+        // A wlan* interface that is not the connected Wi-Fi one is the
+        // hotspot (some phones run the hotspot on wlan1).
+        assertEquals(IfKind.HOTSPOT, classifyInterface("wlan1", wifiIface = "wlan0"))
+        assertEquals(IfKind.WIFI, classifyInterface("wlan0", wifiIface = "wlan0"))
+        // Without the Wi-Fi interface known, every wlan* counts as Wi-Fi.
         assertEquals(IfKind.WIFI, classifyInterface("wlan1"))
+    }
+
+    @Test
+    fun aliasSuffixIsStripped() {
+        assertEquals(IfKind.VPN, classifyInterface("tun0:1"))
+        assertEquals(IfKind.WIFI, classifyInterface("wlan0:2"))
+    }
+
+    @Test
+    fun usbTetheringPrefixes() {
+        assertEquals(IfKind.USB, classifyInterface("rndis0"))
+        assertEquals(IfKind.USB, classifyInterface("usb0"))
     }
 
     @Test
     fun ethernetPrefixes() {
         assertEquals(IfKind.ETHERNET, classifyInterface("eth0"))
-        assertEquals(IfKind.ETHERNET, classifyInterface("rndis0"))
     }
 
     @Test
@@ -53,12 +67,13 @@ class NetworkInfoTest {
                 NetIf("tun0", "10.8.0.2", IfKind.VPN),
                 NetIf("wlan0", "192.168.1.5", IfKind.WIFI),
                 NetIf("swlan0", "192.168.43.1", IfKind.HOTSPOT),
+                NetIf("rndis0", "192.168.42.1", IfKind.USB),
                 NetIf("eth0", "192.168.0.9", IfKind.ETHERNET),
                 NetIf("dummy0", "172.16.0.1", IfKind.OTHER),
             )
         )
         assertEquals(
-            listOf("swlan0", "wlan0", "eth0", "dummy0", "rmnet0"),
+            listOf("swlan0", "rndis0", "wlan0", "eth0", "dummy0", "rmnet0"),
             ranked.map { it.name },
         )
     }

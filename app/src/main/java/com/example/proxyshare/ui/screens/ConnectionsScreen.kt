@@ -25,6 +25,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
@@ -45,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
@@ -52,21 +55,26 @@ import com.example.proxyshare.data.enabledPorts
 import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.ConnInfo
+import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.ui.components.InfoChip
 import com.example.proxyshare.ui.components.StatTile
 import com.example.proxyshare.ui.components.TrafficChart
 
 /**
- * Live monitor: header with totals and current speed, then one
+ * Live monitor: header with session totals, traffic chart, then one
  * expandable card per client IP, sorted by total traffic.
  * started_ms is a unix time (see docs/ENGINE_API.md), so duration is
  * now minus startedMs. Fast polling runs only while this screen is
  * visible.
  */
 @Composable
-fun ConnectionsScreen(modifier: Modifier = Modifier) {
+fun ConnectionsScreen(
+    modifier: Modifier = Modifier,
+    onGoHome: () -> Unit = {},
+) {
     val context = LocalContext.current
+    val state by ProxyController.state.collectAsState()
     val snapshot by ProxyController.snapshot.collectAsState()
     val settings by ProxyController.settings.collectAsState()
     val netFlow = remember(context) { networkInterfaces(context) }
@@ -95,6 +103,9 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
     }
 
     val groups = remember(snapshot.connections) { groupByClient(snapshot.connections) }
+    val running = state is EngineState.Running
+    val peakUp = remember(history) { history.maxOfOrNull { it.upBps } ?: 0L }
+    val peakDown = remember(history) { history.maxOfOrNull { it.downBps } ?: 0L }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -104,7 +115,13 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Header: three stat tiles plus a small totals line.
+            Text(
+                text = stringResource(R.string.nav_connections),
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            // Header: active clients and this session's totals.
+            // Speeds live only in the chart legend (single source).
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
@@ -115,31 +132,69 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 StatTile(
-                    label = stringResource(R.string.stat_upload),
-                    value = "${formatBytes(speed.upBps)}/s",
+                    label = stringResource(R.string.stat_session_upload),
+                    value = formatBytes(snapshot.liveUp),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     animate = false,
                 )
                 StatTile(
-                    label = stringResource(R.string.stat_download),
-                    value = "${formatBytes(speed.downBps)}/s",
+                    label = stringResource(R.string.stat_session_download),
+                    value = formatBytes(snapshot.liveDown),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     animate = false,
                 )
             }
-            Text(
-                text = stringResource(
-                    R.string.totals,
-                    formatBytes(snapshot.liveUp),
-                    formatBytes(snapshot.liveDown),
-                    snapshot.active,
-                ),
-                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TrafficChart(history = history, current = speed)
 
-            if (groups.isEmpty()) {
+            if (running) {
+                TrafficChart(history = history, current = speed)
+                Text(
+                    text = stringResource(
+                        R.string.traffic_peak,
+                        formatBytes(peakUp),
+                        formatBytes(peakDown),
+                    ),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFeatureSettings = "tnum",
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                // Stopped: dimmed chart with an overlay, no radar state.
+                Box(contentAlignment = Alignment.Center) {
+                    TrafficChart(history = history, current = speed, modifier = Modifier.alpha(0.4f))
+                    Text(
+                        text = stringResource(R.string.proxy_stopped),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (!running) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(16.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.connections_stopped_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TextButton(onClick = onGoHome) {
+                            Text(stringResource(R.string.go_home))
+                        }
+                    }
+                }
+            } else if (groups.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -161,6 +216,8 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
                                 text = stringResource(R.string.mobile_only_hint),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         } else if (advertise != null) {
                             Text(
@@ -170,6 +227,8 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }

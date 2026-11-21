@@ -4,6 +4,8 @@ import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.engine.ConnInfo
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConnectionsLogicTest {
@@ -96,5 +98,24 @@ class ConnectionsLogicTest {
         val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
         val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
         assertEquals("192.168.1.2:8080", advertiseAddress(listOf(wifi, mobile), 8080, null))
+    }
+
+    @Test
+    fun mobileOnlyIsTrueForAllMobile() {
+        val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
+        assertTrue(isMobileOnly(listOf(mobile, mobile)))
+    }
+
+    @Test
+    fun mobileOnlyIsFalseWhenAnythingElseRanked() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
+        assertFalse(isMobileOnly(listOf(wifi, mobile)))
+        assertFalse(isMobileOnly(listOf(wifi)))
+    }
+
+    @Test
+    fun mobileOnlyIsFalseForEmptyList() {
+        assertFalse(isMobileOnly(emptyList()))
     }
 }

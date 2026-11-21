@@ -240,7 +240,16 @@ fun TrafficChart(
                 val stroke = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
                 drawPath(paths.upLine, color = upColor, style = stroke)
                 drawPath(paths.downLine, color = downColor, style = stroke)
-                drawText(maxLabel, topLeft = Offset(4.dp.toPx(), 2.dp.toPx()))
+                // Max label sits just above the top grid line (y = 25%),
+                // inside the plot's left padding so it stays with the line.
+                drawText(
+                    maxLabel,
+                    topLeft = Offset(
+                        4.dp.toPx(),
+                        (height * 0.25f - maxLabel.size.height.toFloat() - 4.dp.toPx())
+                            .coerceAtLeast(0f),
+                    ),
+                )
             }
         }
     }

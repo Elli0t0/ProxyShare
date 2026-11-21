@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.2.8 — UI/bug polish
+
+- Centered hints: the mobile-only hint on Home and the empty-state hints
+  on Connections are now centered (textAlign Center + fillMaxWidth).
+  The "Turn on the hotspot…" hint appeared twice on Home (hero + Addresses
+  card); it now shows once, in the Addresses card only (hero hint removed).
+- Mobile-only state: when every ranked interface is mobile, Home hides
+  the address rows and copy chips entirely and shows one compact block:
+  the hint + an "Open hotspot settings" button (TetherSettings, falling
+  back to wireless, then settings). Pure isMobileOnly helper, unit-tested.
+- Interface detection (data/NetworkInfo.kt): alias suffixes stripped
+  ("tun0:1" -> "tun0"); rows show the kind label ("Mobile") with the raw
+  name only as a small secondary caption; listIPv4 drops unusable
+  addresses (v4-* interfaces, 192.0.0.0/29, 169.254.0.0/16). Hotspot:
+  a wlan* interface that is not the currently connected Wi-Fi interface
+  is HOTSPOT (connectedWifiIface via allNetworks, @Suppress DEPRECATION).
+  New IfKind.USB for rndis*/usb* ("USB tethering"); ranking is now
+  HOTSPOT, USB, WIFI, ETHERNET, OTHER, MOBILE. NetworkInfoTest updated.
+- Connections cleanup: screen title "Connections" (titleMedium, same as
+  Home); Settings got its title too ("Settings"). Header tiles are now
+  Active | Session ↑ | Session ↓ (liveUp/liveDown totals, animate=false);
+  the old "Up: · Down: · Active:" totals line is gone — speeds appear
+  only in the chart legend. A "Peak ↑ x/s · ↓ y/s" line sits under the
+  chart. When stopped: chart dimmed (alpha 0.4) with a "Proxy stopped"
+  overlay, and the radar empty state is replaced by "Proxy stopped —
+  start it from Home" plus a button that switches to the Home tab.
+  Chart max label now sits just above the top grid line.
+- Security: android:allowBackup="false" in the manifest (the proxy
+  password lives in DataStore). No dataExtractionRules added — lint
+  does not run in CI, and the flag alone covers the backup case.
+
 ## 0.2.7 — live traffic graph on Connections
 
 - Traffic chart: new ui/components/TrafficChart.kt (Canvas only, no chart

@@ -35,6 +35,7 @@
     <string name="if_wifi">وای‌فای</string>
     <string name="if_hotspot">هات‌اسپات</string>
     <string name="if_ethernet">اترنت</string>
+    <string name="if_usb">اشتراک‌گذاری USB</string>
     <string name="if_mobile">موبایل</string>
     <string name="if_vpn">VPN</string>
     <string name="if_other">سایر</string>
@@ -69,8 +70,14 @@
     <string name="stat_clients">کلاینت‌ها</string>
     <string name="stat_upload">آپلود</string>
     <string name="stat_download">دانلود</string>
+    <string name="stat_session_upload">جلسه ↑</string>
+    <string name="stat_session_download">جلسه ↓</string>
     <string name="traffic_title">ترافیک زنده</string>
     <string name="traffic_chart_desc">نمودار ترافیک زنده، آپلود %1$s در ثانیه، دانلود %2$s در ثانیه</string>
+    <string name="traffic_peak">اوج ↑ %1$s در ثانیه · ↓ %2$s در ثانیه</string>
+    <string name="connections_stopped_hint">پروکسی متوقف است — از صفحه خانه آن را روشن کنید</string>
+    <string name="go_home">رفتن به خانه</string>
+    <string name="open_hotspot_settings">باز کردن تنظیمات هات‌اسپات</string>
     <string name="stat_active">فعال</string>
     <string name="connections_empty_hint">پروکسی لپ‌تاپ را روی %1$s تنظیم کنید</string>
     <string name="separate_ports_subtitle">برای HTTP و SOCKS از پورت‌های متفاوت استفاده کنید</string>

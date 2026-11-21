@@ -35,6 +35,7 @@
     <string name="if_wifi">Wi-Fi</string>
     <string name="if_hotspot">Hotspot</string>
     <string name="if_ethernet">Ethernet</string>
+    <string name="if_usb">USB tethering</string>
     <string name="if_mobile">Mobile</string>
     <string name="if_vpn">VPN</string>
     <string name="if_other">Other</string>
@@ -69,8 +70,14 @@
     <string name="stat_clients">Clients</string>
     <string name="stat_upload">Upload</string>
     <string name="stat_download">Download</string>
+    <string name="stat_session_upload">Session ↑</string>
+    <string name="stat_session_download">Session ↓</string>
     <string name="traffic_title">Live traffic</string>
     <string name="traffic_chart_desc">Live traffic chart, upload %1$s per second, download %2$s per second</string>
+    <string name="traffic_peak">Peak ↑ %1$s/s · ↓ %2$s/s</string>
+    <string name="connections_stopped_hint">Proxy stopped — start it from Home</string>
+    <string name="go_home">Go to Home</string>
+    <string name="open_hotspot_settings">Open hotspot settings</string>
     <string name="stat_active">Active</string>
     <string name="connections_empty_hint">Set your laptop\'s proxy to %1$s</string>
     <string name="separate_ports_subtitle">Use different ports for HTTP and SOCKS</string>

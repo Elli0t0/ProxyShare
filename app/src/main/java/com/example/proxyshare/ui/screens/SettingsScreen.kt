@@ -109,6 +109,10 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            Text(
+                text = stringResource(R.string.nav_settings),
+                style = MaterialTheme.typography.titleMedium,
+            )
             // Restart banner.
             if (running && changedWhileRunning) {
                 Card(

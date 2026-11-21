@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -55,6 +56,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.proxyshare.R
@@ -144,7 +146,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
     val running = state is EngineState.Running
     val ranked = rankInterfaces(interfaces)
-    val primary = ranked.firstOrNull()
     val (httpPort, socksPort) = settings.enabledPorts()
     val heroAddress = advertiseAddress(ranked, httpPort, socksPort)
 
@@ -218,12 +219,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                             text = heroAddress,
                             style = MaterialTheme.typography.bodyMedium,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else if (primary?.kind == IfKind.MOBILE) {
-                        Text(
-                            text = stringResource(R.string.mobile_only_hint),
-                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -359,7 +354,24 @@ private fun AddressCard(
     val primary = ranked.firstOrNull()
     val others = ranked.drop(1)
     SectionCard(title = stringResource(R.string.addresses_title)) {
-        if (primary == null && vpnInterfaces.isEmpty()) {
+        if (isMobileOnly(ranked)) {
+            // Carrier address only: no rows or copy chips, just the
+            // hint and a button to open the hotspot settings.
+            Text(
+                text = stringResource(R.string.mobile_only_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            FilledTonalButton(
+                onClick = { openHotspotSettings(context) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.open_hotspot_settings))
+            }
+        } else {
+            if (primary == null && vpnInterfaces.isEmpty()) {
                 Text(
                     text = stringResource(R.string.addresses_none),
                     style = MaterialTheme.typography.bodyMedium,
@@ -369,8 +381,13 @@ private fun AddressCard(
             if (primary != null) {
                 Text(
                     text = "${stringResource(R.string.primary_address)} — " +
-                        "${kindLabel(primary.kind)} (${primary.name})",
+                        kindLabel(primary.kind),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = primary.name,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (httpPort != null) {
@@ -392,13 +409,6 @@ private fun AddressCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (ranked.size == 1 && primary.kind == IfKind.MOBILE) {
-                    Text(
-                        text = stringResource(R.string.mobile_only_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
             if (others.isNotEmpty()) {
                 TextButton(onClick = { showOthers = !showOthers }) {
@@ -414,8 +424,13 @@ private fun AddressCard(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "${kindLabel(nif.kind)} (${nif.name})",
+                                        text = kindLabel(nif.kind),
                                         style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        text = nif.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 CopyChip(text = nif.ip)
@@ -433,8 +448,13 @@ private fun AddressCard(
             }
             for (nif in vpnInterfaces) {
                 Text(
-                    text = "${kindLabel(nif.kind)} (${nif.name}): ${nif.ip}",
+                    text = "${kindLabel(nif.kind)}: ${nif.ip}",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = nif.name,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -445,6 +465,22 @@ private fun AddressCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/** Open the hotspot (tethering) settings, falling back to wider settings pages. */
+fun openHotspotSettings(context: Context) {
+    val intents = listOf(
+        Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings"),
+        Intent(Settings.ACTION_WIRELESS_SETTINGS),
+        Intent(Settings.ACTION_SETTINGS),
+    )
+    for (i in intents) {
+        runCatching {
+            context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
     }
 }
 
@@ -470,6 +506,7 @@ private fun kindLabel(kind: IfKind): String = stringResource(
         IfKind.WIFI -> R.string.if_wifi
         IfKind.HOTSPOT -> R.string.if_hotspot
         IfKind.ETHERNET -> R.string.if_ethernet
+        IfKind.USB -> R.string.if_usb
         IfKind.MOBILE -> R.string.if_mobile
         IfKind.VPN -> R.string.if_vpn
         IfKind.OTHER -> R.string.if_other

@@ -77,3 +77,7 @@ fun advertiseAddress(ranked: List<NetIf>, httpPort: Int?, socksPort: Int?): Stri
     val port = httpPort ?: socksPort ?: return primary.ip
     return "${primary.ip}:$port"
 }
+
+/** True when every ranked interface is a mobile carrier address (nothing reachable). */
+fun isMobileOnly(ranked: List<NetIf>): Boolean =
+    ranked.isNotEmpty() && ranked.all { it.kind == IfKind.MOBILE }

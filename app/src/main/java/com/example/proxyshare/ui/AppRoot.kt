@@ -56,7 +56,10 @@ fun AppRoot() {
     ) { padding ->
         when (tab) {
             0 -> HomeScreen(modifier = Modifier.padding(padding))
-            1 -> ConnectionsScreen(modifier = Modifier.padding(padding))
+            1 -> ConnectionsScreen(
+                modifier = Modifier.padding(padding),
+                onGoHome = { tab = 0 },
+            )
             else -> SettingsScreen(modifier = Modifier.padding(padding))
         }
     }
