@@ -39,4 +39,31 @@ class ProxyControllerTest {
             smoothSpeed(0, 0, 2000, 0, 2000, SpeedSample(0, 0))
         )
     }
+
+    @Test
+    fun pushSampleAppendsAndPreservesOrder() {
+        val history = listOf(SpeedSample(1, 2), SpeedSample(3, 4))
+        assertEquals(
+            listOf(SpeedSample(1, 2), SpeedSample(3, 4), SpeedSample(5, 6)),
+            pushSample(history, SpeedSample(5, 6))
+        )
+    }
+
+    @Test
+    fun pushSampleCapsAtMaxAndDropsOldest() {
+        val history = (1..120).map { SpeedSample(it.toLong(), 0) }
+        val result = pushSample(history, SpeedSample(121, 0))
+        assertEquals(120, result.size)
+        assertEquals(SpeedSample(2, 0), result.first())
+        assertEquals(SpeedSample(121, 0), result.last())
+    }
+
+    @Test
+    fun pushSampleRespectsMaxParam() {
+        val history = listOf(SpeedSample(1, 0), SpeedSample(2, 0), SpeedSample(3, 0))
+        assertEquals(
+            listOf(SpeedSample(2, 0), SpeedSample(3, 0), SpeedSample(4, 0)),
+            pushSample(history, SpeedSample(4, 0), max = 3)
+        )
+    }
 }

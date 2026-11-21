@@ -59,6 +59,13 @@ fun smoothSpeed(
     return SpeedSample(upBps, downBps)
 }
 
+/** Append one sample to the rolling history, capped at [max] newest, order preserved. */
+fun pushSample(
+    history: List<SpeedSample>,
+    sample: SpeedSample,
+    max: Int = 120,
+): List<SpeedSample> = (history + sample).takeLast(max.coerceAtLeast(1))
+
 /**
  * App-scoped singleton that owns the one [Engine], the settings and
  * their coroutine scope. No Hilt. The service and the UI both talk to
@@ -91,6 +98,10 @@ object ProxyController {
     /** Live upload/download speed, sampled once per second while running. 0 when stopped. */
     val speed: StateFlow<SpeedSample> = _speed.asStateFlow()
 
+    private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
+    /** Rolling 2-minute speed history (120 samples at 1 Hz), cleared on every start. */
+    val history: StateFlow<List<SpeedSample>> = _history.asStateFlow()
+
     val state: StateFlow<EngineState> = engine.state
     val snapshot: StateFlow<Snapshot> = engine.snapshot
     val events: SharedFlow<EngineEvent> = engine.events
@@ -102,6 +113,7 @@ object ProxyController {
      */
     private fun startSpeedSampler() {
         speedJob?.cancel()
+        _history.value = emptyList()
         speedJob = scope.launch {
             var prevUp = engine.snapshot.value.liveUp
             var prevDown = engine.snapshot.value.liveDown
@@ -115,6 +127,7 @@ object ProxyController {
                     prevUp, prevDown, snap.liveUp, snap.liveDown, now - prevTime, prev
                 )
                 _speed.value = sample
+                _history.value = pushSample(_history.value, sample)
                 prevUp = snap.liveUp
                 prevDown = snap.liveDown
                 prevTime = now

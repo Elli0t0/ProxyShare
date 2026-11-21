@@ -69,6 +69,8 @@
     <string name="stat_clients">Clients</string>
     <string name="stat_upload">Upload</string>
     <string name="stat_download">Download</string>
+    <string name="traffic_title">Live traffic</string>
+    <string name="traffic_chart_desc">Live traffic chart, upload %1$s per second, download %2$s per second</string>
     <string name="stat_active">Active</string>
     <string name="connections_empty_hint">Set your laptop\'s proxy to %1$s</string>
     <string name="separate_ports_subtitle">Use different ports for HTTP and SOCKS</string>

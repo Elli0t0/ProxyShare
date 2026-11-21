@@ -55,6 +55,7 @@ import com.example.proxyshare.engine.ConnInfo
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.ui.components.InfoChip
 import com.example.proxyshare.ui.components.StatTile
+import com.example.proxyshare.ui.components.TrafficChart
 
 /**
  * Live monitor: header with totals and current speed, then one
@@ -75,6 +76,7 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
     val (httpPort, socksPort) = settings.enabledPorts()
     val advertise = advertiseAddress(ranked, httpPort, socksPort)
     val speed by ProxyController.speed.collectAsState()
+    val history by ProxyController.history.collectAsState()
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -135,6 +137,7 @@ fun ConnectionsScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TrafficChart(history = history, current = speed)
 
             if (groups.isEmpty()) {
                 Box(

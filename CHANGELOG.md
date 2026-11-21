@@ -1,10 +1,34 @@
 # Changelog
 
+## 0.2.7 — live traffic graph on Connections
+
+- Traffic chart: new ui/components/TrafficChart.kt (Canvas only, no chart
+  library) between the header tiles and the client list. Upload line in
+  tertiary, download in primary, 2dp round strokes, cubic-smoothed
+  curves, soft gradient fill under each line (alpha 0.15).
+- Data: ProxyController keeps a rolling history of the last 120
+  SpeedSample (2 minutes at 1 Hz) as StateFlow<List<SpeedSample>>,
+  cleared on every start so it survives tab switches and rotation.
+  Pure helper pushSample(history, sample, max) caps at 120, order
+  preserved (unit-tested).
+- Y axis auto-scales to a nice ceiling (1-2-5-10 x 10^k, e.g. 10, 50,
+  100, 500 KB/s, 1, 5 MB/s); it grows instantly and shrinks 10% per
+  tick so the chart doesn't jump. 3 faint grid lines, max label
+  top-left. Time runs left to right (LTR forced, so RTL doesn't mirror
+  it). Idle (fewer than 2 samples or all zero) draws flat lines at the
+  bottom, not an empty box.
+- Legend row above the chart: colored dot + Upload/Download + current
+  speed (tabular digits, no AnimatedContent). Chart has a content
+  description; paths are remembered per sample list (no per-frame
+  allocations beyond the path). "Upload"/"Download" reuse the existing
+  stat_upload/stat_download strings; new traffic_title and
+  traffic_chart_desc strings in en + fa.
+
 ## 0.2.6 — fix releases, speed flicker, counters and misleading hint
 
 - Releases: the workflow now publishes real releases (prerelease: false,
-  make_latest: true) and flips all existing prereleases to normal. (The
-  workflow edit lands right after this build goes green.)
+  make_latest: true). Old prereleases were left as-is at the user's
+  request. (Workflow edit landed as commit f9d7403; run #61 green.)
 - Real totals: Snapshot gains liveUp/liveDown (closed totals + active
   connections' bytes, monotonic). Home tiles and the Connections totals
   line use them. The native counters are cumulative across restarts, so

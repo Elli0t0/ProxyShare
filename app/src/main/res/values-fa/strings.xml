@@ -69,6 +69,8 @@
     <string name="stat_clients">کلاینت‌ها</string>
     <string name="stat_upload">آپلود</string>
     <string name="stat_download">دانلود</string>
+    <string name="traffic_title">ترافیک زنده</string>
+    <string name="traffic_chart_desc">نمودار ترافیک زنده، آپلود %1$s در ثانیه، دانلود %2$s در ثانیه</string>
     <string name="stat_active">فعال</string>
     <string name="connections_empty_hint">پروکسی لپ‌تاپ را روی %1$s تنظیم کنید</string>
     <string name="separate_ports_subtitle">برای HTTP و SOCKS از پورت‌های متفاوت استفاده کنید</string>
