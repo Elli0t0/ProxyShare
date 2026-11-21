@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.sp
 import com.example.proxyshare.R
 import com.example.proxyshare.service.SpeedSample
 import com.example.proxyshare.ui.screens.formatBytes
-import kotlin.math.maxOf
 
 private val NICE_STEPS = longArrayOf(1L, 2L, 5L, 10L)
 
