@@ -251,6 +251,21 @@ object ProxyController {
         NativeEngine.nativeDiagLog()
     }
 
+    private val _diagLogText = MutableStateFlow("")
+    /** Latest diagnostics log text, refreshed by the Logs screen while it is visible. */
+    val diagLogText: StateFlow<String> = _diagLogText.asStateFlow()
+
+    /** Re-read the engine diagnostics log into [diagLogText]. */
+    suspend fun refreshDiag() {
+        _diagLogText.value = diagLog()
+    }
+
+    /** Clear the engine diagnostics ring buffer and the cached text. */
+    fun clearDiagLog() {
+        NativeEngine.nativeDiagClear()
+        _diagLogText.value = ""
+    }
+
     private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
     /** Rolling 2-minute speed history (120 samples at 1 Hz), cleared on every start. */
     val history: StateFlow<List<SpeedSample>> = _history.asStateFlow()

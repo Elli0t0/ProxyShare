@@ -10,24 +10,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -53,14 +44,15 @@ import com.example.proxyshare.service.ProxyController
 import kotlinx.coroutines.launch
 
 /**
- * Full-screen session log: the last 500 closed connections, newest
- * first. Search filters host/client, "Blocked only" shows refused
- * connections. Tap a row's host to copy it; long-press a hostname to
- * block it (IP literals cannot be blocked: the engine never matches
- * them). Reads ProxyController.sessionLog: no polling.
+ * Session log content for the Logs tab: the last 500 closed
+ * connections, newest first. Search filters host/client, "Blocked
+ * only" shows refused connections. Tap a row's host to copy it;
+ * long-press a hostname to block it (IP literals cannot be blocked:
+ * the engine never matches them). Reads ProxyController.sessionLog:
+ * no polling. The title and the ⋮ menu live in LogsScreen.
  */
 @Composable
-fun SessionLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun SessionLogContent(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
@@ -68,7 +60,6 @@ fun SessionLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
     var search by rememberSaveable { mutableStateOf("") }
     var blockedOnly by rememberSaveable { mutableStateOf(false) }
-    var showMenu by remember { mutableStateOf(false) }
     var blockTarget by rememberSaveable { mutableStateOf<String?>(null) }
     val running = state is EngineState.Running
 
@@ -76,54 +67,10 @@ fun SessionLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         filterSessionLog(sessionLog, search, blockedOnly).reversed()
     }
 
-    Surface(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.back),
-                    )
-                }
-                Text(
-                    text = stringResource(R.string.session_log_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = stringResource(R.string.connections_menu),
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.export_log)) },
-                        onClick = {
-                            showMenu = false
-                            exportSessionLog(context, sessionLog)
-                        },
-                        enabled = sessionLog.isNotEmpty(),
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.clear_log)) },
-                        onClick = {
-                            showMenu = false
-                            ProxyController.clearSessionLog()
-                        },
-                        enabled = sessionLog.isNotEmpty(),
-                    )
-                }
-            }
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
@@ -171,7 +118,6 @@ fun SessionLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 }
             }
         }
-    }
 
     if (blockTarget != null) {
         AlertDialog(

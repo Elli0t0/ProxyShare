@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.4.3"`.
+- Returns the engine version string, e.g. `"engine 0.4.4"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -49,6 +49,7 @@ second parameter.
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
 | `nativeDiagLog(): String` | reads the diagnostics ring buffer | The log text (below), or `""` when empty. Takes no handle: the buffer is global, not per-engine. |
+| `nativeDiagClear()` | clears the diagnostics ring buffer | No handle: the buffer is global, not per-engine. |
 | `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
 
 ## Server (0.0.4, extended in 0.0.5)
@@ -333,18 +334,22 @@ running	1024	2048	1
 1	192.168.1.5	example.com	443	http	1794500000000	1024	2048	0
 ```
 
-## Diagnostics log (0.4.2)
+## Diagnostics log (0.4.2, extended in 0.4.4)
 
-The engine keeps an in-process ring buffer of the last 300 log lines
-(`rust/engine/src/diag.rs`); Kotlin reads it with `nativeDiagLog()`.
-One line per entry, oldest first:
+The engine keeps an in-process ring buffer of the last 1000 log lines
+(`rust/engine/src/diag.rs`); Kotlin reads it with `nativeDiagLog()`
+and clears it with `nativeDiagClear()`. One line per entry, oldest
+first:
 
 ```
-ts_ms<TAB>LEVEL<TAB>message
+ts_ms<TAB>LEVEL<TAB>message<TAB>count
 ```
 
 - `ts_ms` is the unix time in milliseconds, `LEVEL` one of `INFO`,
-  `WARN`, `ERROR`.
+  `WARN`, `ERROR`, `count` how many times this exact line repeated
+  in a row (1 when it did not repeat). A repeat — same level and
+  message within 60 s — bumps the last line's count and timestamp
+  instead of pushing a new line.
 - The message never contains a tab or newline (sanitized on write).
 - Logged: engine start/stop (start carries a config summary: bind
   address, ports, protocols, private-only, max connections, auth

@@ -167,6 +167,10 @@ dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // For repeatOnLifecycle in the Logs screen (1 s engine-log refresh
+    // only while visible): it lives in lifecycle-runtime-ktx, which
+    // lifecycle-runtime-compose does NOT bring in transitively.
+    implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     // Test-only: the real org.json, so parseLatestRelease can run on

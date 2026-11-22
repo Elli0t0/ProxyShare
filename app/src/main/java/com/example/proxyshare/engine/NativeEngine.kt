@@ -52,6 +52,10 @@ object NativeEngine {
     @JvmStatic
     external fun nativeDiagLog(): String
 
+    /** Clear the diagnostics ring buffer (Logs screen "Clear"). */
+    @JvmStatic
+    external fun nativeDiagClear()
+
     /** Register the callback that receives engine events. */
     @JvmStatic
     external fun nativeSetListener(handle: Long, listener: EngineListener)

@@ -7,17 +7,14 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -37,7 +34,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,16 +41,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.app.ShareCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxyshare.R
 import com.example.proxyshare.data.GITHUB_REPO
@@ -67,7 +60,6 @@ import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.randomPassword
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.NativeEngine
-import com.example.proxyshare.engine.redactLog
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.ui.components.OptionRow
 import com.example.proxyshare.ui.components.SectionCard
@@ -93,9 +85,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val restartNeeded by ProxyController.restartNeeded.collectAsStateWithLifecycle()
     var showPasteList by rememberSaveable { mutableStateOf(false) }
     var showIdleDialog by rememberSaveable { mutableStateOf(false) }
-    // Engine diagnostics log: transient, loaded once, refreshed on tap.
-    var diagText by remember { mutableStateOf("") }
-    val diagScrollState = rememberScrollState()
     // Manual update check: transient state, reset on rotation.
     var updateState by remember { mutableStateOf(UpdateCheckState.IDLE) }
     var latestRelease by remember { mutableStateOf<LatestRelease?>(null) }
@@ -125,33 +114,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     /** Save a change that applies live (theme, keep screen on). */
     fun saveLive(block: suspend SettingsRepository.() -> Unit) {
         scope.launch { ProxyController.updateSettings(block) }
-    }
-
-    /** Reload the engine diagnostics log. */
-    fun loadDiag() {
-        scope.launch {
-            diagText = runCatching { ProxyController.diagLog() }.getOrDefault("")
-        }
-    }
-
-    /** Share the diagnostics log as text, with credentials redacted. */
-    fun shareDiag() {
-        val redacted = redactLog(diagText)
-        if (redacted.isBlank()) return
-        ShareCompat.IntentBuilder(context)
-            .setType("text/plain")
-            .setText(redacted)
-            .setChooserTitle(R.string.diag_share)
-            .startChooser()
-    }
-
-    LaunchedEffect(Unit) { loadDiag() }
-
-    // Auto-scroll the log view to the bottom on every load (one frame
-    // so the layout has measured the new text first).
-    LaunchedEffect(diagText) {
-        withFrameNanos { }
-        diagScrollState.scrollTo(diagScrollState.maxValue)
     }
 
     Surface(modifier = modifier.fillMaxSize()) {
@@ -667,43 +629,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         enabled = updateState != UpdateCheckState.CHECKING,
                     ) {
                         Text(stringResource(R.string.check_updates))
-                    }
-                }
-            }
-
-            // Diagnostics: the engine's own log (last 300 lines).
-            SectionCard(title = stringResource(R.string.settings_diagnostics)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = stringResource(R.string.diag_engine_log),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { loadDiag() }) {
-                        Text(stringResource(R.string.diag_refresh))
-                    }
-                    TextButton(onClick = { shareDiag() }) {
-                        Text(stringResource(R.string.diag_share))
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(300.dp)
-                        .verticalScroll(diagScrollState),
-                ) {
-                    SelectionContainer {
-                        Text(
-                            text = diagText.ifEmpty {
-                                stringResource(R.string.diag_empty)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                        )
                     }
                 }
             }

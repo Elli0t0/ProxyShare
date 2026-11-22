@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -30,11 +31,12 @@ import androidx.compose.ui.res.stringResource
 import com.example.proxyshare.R
 import com.example.proxyshare.ui.screens.ConnectionsScreen
 import com.example.proxyshare.ui.screens.HomeScreen
+import com.example.proxyshare.ui.screens.LogsScreen
 import com.example.proxyshare.ui.screens.SettingsScreen
 
 /**
  * The navigation shell: a Scaffold with a bottom NavigationBar —
- * Home, Connections, Settings. Plain state (rememberSaveable), no
+ * Home, Connections, Logs, Settings. Plain state (rememberSaveable), no
  * navigation library.
  */
 @Composable
@@ -66,6 +68,12 @@ fun AppRoot() {
                         icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                         label = { Text(stringResource(R.string.nav_settings)) },
                     )
+                    NavigationBarItem(
+                        selected = tab == 3,
+                        onClick = { tab = 3 },
+                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_logs)) },
+                    )
                 }
             }
         ) { padding ->
@@ -74,8 +82,10 @@ fun AppRoot() {
                 1 -> ConnectionsScreen(
                     modifier = Modifier.padding(padding),
                     onGoHome = { tab = 0 },
+                    onGoLogs = { tab = 3 },
                 )
-                else -> SettingsScreen(modifier = Modifier.padding(padding))
+                2 -> SettingsScreen(modifier = Modifier.padding(padding))
+                else -> LogsScreen(modifier = Modifier.padding(padding))
             }
         }
         // Solid cover over the status-bar area: content scrolls under

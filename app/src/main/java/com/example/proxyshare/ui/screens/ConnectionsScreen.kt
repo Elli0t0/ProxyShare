@@ -87,6 +87,7 @@ import com.example.proxyshare.ui.components.TrafficChart
 fun ConnectionsScreen(
     modifier: Modifier = Modifier,
     onGoHome: () -> Unit = {},
+    onGoLogs: () -> Unit = {},
 ) {
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
@@ -103,7 +104,6 @@ fun ConnectionsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showMenu by remember { mutableStateOf(false) }
-    var showSessionLog by rememberSaveable { mutableStateOf(false) }
     var blockTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
@@ -121,11 +121,6 @@ fun ConnectionsScreen(
     val running = state is EngineState.Running
     val peakUp = remember(history) { history.maxOfOrNull { it.upBps } ?: 0L }
     val peakDown = remember(history) { history.maxOfOrNull { it.downBps } ?: 0L }
-
-    if (showSessionLog) {
-        SessionLogScreen(onBack = { showSessionLog = false }, modifier = modifier)
-        return
-    }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -155,7 +150,7 @@ fun ConnectionsScreen(
                         text = { Text(stringResource(R.string.session_log_title)) },
                         onClick = {
                             showMenu = false
-                            showSessionLog = true
+                            onGoLogs()
                         },
                     )
                     DropdownMenuItem(
@@ -440,8 +435,9 @@ private fun ClientCard(
                         fontFamily = FontFamily.Monospace,
                     )
                     Text(
-                        text = stringResource(
-                            R.string.connections_count,
+                        text = LocalContext.current.resources.getQuantityString(
+                            R.plurals.connections_count,
+                            group.connections.size,
                             group.connections.size,
                         ),
                         style = MaterialTheme.typography.bodySmall,
@@ -454,31 +450,36 @@ private fun ClientCard(
                         fontFeatureSettings = "tnum",
                     ),
                 )
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = stringResource(R.string.connections_menu),
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.disconnect_client)) },
-                        onClick = {
-                            showMenu = false
-                            onDisconnect()
-                        },
-                    )
-                    if (!denied) {
+                // The button and its menu share one Box, so the menu
+                // anchors under the ⋮ button instead of at the card's
+                // left edge (a DropdownMenu anchors to its parent).
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.MoreVert,
+                            contentDescription = stringResource(R.string.connections_menu),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                    ) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.block_client)) },
+                            text = { Text(stringResource(R.string.disconnect_client)) },
                             onClick = {
                                 showMenu = false
-                                onBlock()
+                                onDisconnect()
                             },
                         )
+                        if (!denied) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.block_client)) },
+                                onClick = {
+                                    showMenu = false
+                                    onBlock()
+                                },
+                            )
+                        }
                     }
                 }
             }

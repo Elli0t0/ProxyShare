@@ -20,12 +20,13 @@ phone's active VPN. No root.
 - Quick Settings tile to start/stop the proxy from the shade; session
   log (last 500 closed connections, metadata only) with JSON export;
   optional "Start on boot".
-- In-app session log screen (Connections menu): search, "Blocked only"
+- In-app session log screen (Logs tab): search, "Blocked only"
   filter, tap a host to copy it, long-press a hostname to block it.
-- Engine diagnostics log (Settings > Diagnostics): last 300 lines,
-  monospace, selectable, auto-scrolled, shareable with credentials
-  redacted; optional idle auto-stop (15 min / 30 min / 1 h / 2 h) in
-  "Battery & startup".
+- Engine diagnostics log (Logs tab > Engine): last 1000 lines,
+  level filters, search, Follow toggle, repeat counts (×N),
+  refreshed once a second only while visible, shareable with
+  credentials redacted; optional idle auto-stop (15 min / 30 min /
+  1 h / 2 h) in "Battery & startup".
 - Client control: disconnect one client, or block it until the proxy
   restarts (Connections card menu); per-direction speed limits
   (Settings > Limits), shown as a dashed line on the traffic chart.

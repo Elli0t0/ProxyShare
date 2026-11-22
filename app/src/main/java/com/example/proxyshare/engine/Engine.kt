@@ -114,20 +114,23 @@ fun parseSnapshot(text: String): Snapshot? {
 /** One event from the engine (see docs/ENGINE_API.md for the type numbers). */
 data class EngineEvent(val type: Int, val a: String, val b: String)
 
-/** One diagnostics line from the engine ring buffer. */
-data class DiagLine(val tsMs: Long, val level: String, val msg: String)
+/** One diagnostics line from the engine ring buffer. `count` is how many times this exact line repeated in a row (1 = no repeat). */
+data class DiagLine(val tsMs: Long, val level: String, val msg: String, val count: Int = 1)
 
 /**
  * Parse the diagnostics wire text from nativeDiagLog (see
- * docs/ENGINE_API.md): one `ts_ms<TAB>LEVEL<TAB>message` line each,
- * oldest first. Malformed lines are skipped, never a crash.
+ * docs/ENGINE_API.md): one `ts_ms<TAB>LEVEL<TAB>message<TAB>count` line
+ * each, oldest first. The count field is optional so lines written
+ * before 0.4.4 still parse (they count as 1). Malformed lines are
+ * skipped, never a crash.
  */
 fun parseDiagLog(text: String): List<DiagLine> =
     text.lineSequence().filter { it.isNotEmpty() }.mapNotNull { line ->
         val f = line.split('\t')
-        if (f.size != 3) return@mapNotNull null
+        if (f.size !in 3..4) return@mapNotNull null
         val ts = f[0].toLongOrNull() ?: return@mapNotNull null
-        DiagLine(ts, f[1], f[2])
+        val count = f.getOrNull(3)?.toIntOrNull() ?: 1
+        DiagLine(ts, f[1], f[2], count)
     }.toList()
 
 /**

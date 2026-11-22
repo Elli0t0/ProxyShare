@@ -33,6 +33,13 @@
     <string name="nav_home">Home</string>
     <string name="nav_connections">Connections</string>
     <string name="nav_settings">Settings</string>
+    <string name="nav_logs">Logs</string>
+    <string name="logs_engine">Engine</string>
+    <string name="log_search">Search log</string>
+    <string name="log_filter_all">All</string>
+    <string name="log_filter_warn">Warn+</string>
+    <string name="log_filter_error">Error</string>
+    <string name="log_follow">Follow</string>
     <string name="coming_soon">Coming soon</string>
     <string name="totals">Up: %1$s · Down: %2$s · Active: %3$d</string>
     <string name="addresses_title">Addresses</string>
@@ -70,7 +77,10 @@
     <string name="check_url_label">Check URL (optional)</string>
     <string name="connections_speed">↑ %1$s/s · ↓ %2$s/s</string>
     <string name="connections_empty">No clients yet</string>
-    <string name="connections_count">%1$d connections</string>
+    <plurals name="connections_count">
+        <item quantity="one">%1$d connection</item>
+        <item quantity="other">%1$d connections</item>
+    </plurals>
     <string name="settings_server">Server</string>
     <string name="settings_battery_startup">Battery &amp; startup</string>
     <string name="settings_protocols">Protocols</string>
@@ -195,6 +205,7 @@
     <string name="laptop_button">Connect your laptop</string>
     <string name="laptop_start_first">Start the proxy first, then run these on your laptop.</string>
     <string name="laptop_pick_address">Use this address</string>
+    <string name="laptop_mobile_hint">Turn on the hotspot or join the same Wi-Fi as your laptop</string>
     <string name="laptop_windows_title">Windows</string>
     <string name="laptop_windows_steps">Settings → Network → Proxy → Manual proxy setup. Enter the host and port shown above.</string>
     <string name="laptop_firefox_title">Firefox</string>

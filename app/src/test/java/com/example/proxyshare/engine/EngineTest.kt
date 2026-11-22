@@ -130,19 +130,20 @@ class EngineTest {
 
     @Test
     fun parsesDiagLogLines() {
-        val text = "1794500000000\tINFO\tstarted: bind 0.0.0.0:8080\n" +
-            "1794500001000\tWARN\tblocked ads.example.com from 192.168.1.5\n" +
+        val text = "1794500000000\tINFO\tstarted: bind 0.0.0.0:8080\t1\n" +
+            "1794500001000\tWARN\tblocked ads.example.com from 192.168.1.5\t3\n" +
             "bad line\n" +
             "1794500002000\tERROR\tbind failed: address in use\n"
         val lines = parseDiagLog(text)
         assertEquals(3, lines.size)
-        assertEquals(DiagLine(1794500000000L, "INFO", "started: bind 0.0.0.0:8080"), lines[0])
+        assertEquals(DiagLine(1794500000000L, "INFO", "started: bind 0.0.0.0:8080", 1), lines[0])
         assertEquals(
-            DiagLine(1794500001000L, "WARN", "blocked ads.example.com from 192.168.1.5"),
+            DiagLine(1794500001000L, "WARN", "blocked ads.example.com from 192.168.1.5", 3),
             lines[1],
         )
+        // A pre-0.4.4 line without the count field still parses, as count 1.
         assertEquals(
-            DiagLine(1794500002000L, "ERROR", "bind failed: address in use"),
+            DiagLine(1794500002000L, "ERROR", "bind failed: address in use", 1),
             lines[2],
         )
         assertEquals(emptyList<DiagLine>(), parseDiagLog(""))

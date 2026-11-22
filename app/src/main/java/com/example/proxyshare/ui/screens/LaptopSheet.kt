@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.EngineState
@@ -108,8 +110,27 @@ fun laptopCommands(
 }
 
 /**
+ * Resolve the address the sheet uses: the user's pick when it is still
+ * in the list, else the first ranked interface. Null when there is no
+ * usable address.
+ */
+fun resolveSheetHost(ranked: List<NetIf>, selectedIp: String?): String? =
+    selectedIp?.takeIf { ip -> ranked.any { it.ip == ip } } ?: ranked.firstOrNull()?.ip
+
+/**
+ * The host the commands render with: the real address, or "PHONE_IP"
+ * when the only usable address is the carrier one — the carrier
+ * address is not reachable from the laptop, so it must never be
+ * presented as usable.
+ */
+fun sheetCommandHost(ranked: List<NetIf>, selectedIp: String?): String? {
+    val host = resolveSheetHost(ranked, selectedIp) ?: return null
+    return if (isMobileOnly(ranked)) "PHONE_IP" else host
+}
+
+/**
  * "Connect your laptop" sheet: pick a non-VPN address, then copyable
- * commands plus plain-text Windows and Firefox steps.
+ * commands plus plain-text Windows steps.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,8 +142,9 @@ fun LaptopSheet(onDismiss: () -> Unit) {
     val interfaces by netFlow.collectAsState(initial = emptyList())
     val nonVpn = rankInterfaces(interfaces)
     var selectedIp by rememberSaveable { mutableStateOf<String?>(null) }
-    val host = selectedIp?.takeIf { ip -> nonVpn.any { it.ip == ip } }
-        ?: nonVpn.firstOrNull()?.ip
+    val host = resolveSheetHost(nonVpn, selectedIp)
+    val cmdHost = sheetCommandHost(nonVpn, selectedIp)
+    val mobileOnly = isMobileOnly(nonVpn)
     val user = settings.authUser.takeIf { settings.authEnabled }
     val pass = settings.authPass.takeIf { settings.authEnabled }
     val httpPort = if (settings.separatePorts && "http" in settings.protocols) {
@@ -162,17 +184,34 @@ fun LaptopSheet(onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                text = stringResource(R.string.laptop_pick_address),
-                style = MaterialTheme.typography.titleMedium,
-            )
             if (nonVpn.isEmpty()) {
                 Text(
                     text = stringResource(R.string.addresses_none),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            } else if (mobileOnly) {
+                // The carrier address is not reachable from the laptop:
+                // point at the hotspot instead of offering it.
+                Text(
+                    text = stringResource(R.string.laptop_mobile_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FilledTonalButton(onClick = { openHotspotSettings(context) }) {
+                    Text(stringResource(R.string.open_hotspot_settings))
+                }
+            } else if (nonVpn.size == 1) {
+                // One address: no radio group, just show it.
+                Text(
+                    text = "${nonVpn[0].ip} (${nonVpn[0].name})",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             } else {
+                Text(
+                    text = stringResource(R.string.laptop_pick_address),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 for (nif in nonVpn) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -191,8 +230,8 @@ fun LaptopSheet(onDismiss: () -> Unit) {
                     }
                 }
             }
-            if (host != null) {
-                for (cmd in laptopCommands(host, httpPort, socksPort, user, pass)) {
+            if (cmdHost != null) {
+                for (cmd in laptopCommands(cmdHost, httpPort, socksPort, user, pass)) {
                     CommandCard(cmd = cmd)
                 }
             }
@@ -202,14 +241,6 @@ fun LaptopSheet(onDismiss: () -> Unit) {
             )
             Text(
                 text = stringResource(R.string.laptop_windows_steps),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                text = stringResource(R.string.laptop_firefox_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.laptop_firefox_steps),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

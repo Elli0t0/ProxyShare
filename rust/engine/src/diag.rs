@@ -1,9 +1,9 @@
-//! In-process diagnostics ring buffer: the last 300 engine log lines.
+//! In-process diagnostics ring buffer: the last 1000 engine log lines.
 //!
 //! The engine never logs traffic payloads (no MITM) or credentials:
 //! only metadata (client IPs, target host:port, protocol, byte counts)
-//! and lifecycle events. Lines are `ts_ms<TAB>LEVEL<TAB>message`, read
-//! from Kotlin through the `nativeDiagLog` JNI getter (see
+//! and lifecycle events. Lines are `ts_ms<TAB>LEVEL<TAB>message<TAB>count`,
+//! read from Kotlin through the `nativeDiagLog` JNI getter (see
 //! docs/ENGINE_API.md). The global buffer is a thin wrapper over
 //! [`DiagLog`], which holds the logic and is what the tests exercise
 //! (a global would make parallel tests interfere with each other).
@@ -30,16 +30,18 @@ impl Level {
     }
 }
 
-/// One diagnostics line: unix time in ms, severity, message (no tabs or newlines).
+/// One diagnostics line: unix time in ms, severity, message (no tabs or newlines),
+/// and how many times this exact line repeated in a row (within 60 s).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiagLine {
     pub ts_ms: u64,
     pub level: Level,
     pub msg: String,
+    pub count: u32,
 }
 
 /// How many lines the ring buffer keeps.
-pub const MAX_LINES: usize = 300;
+pub const MAX_LINES: usize = 1000;
 
 /// A bounded log: oldest lines drop off once full. Pure: no globals.
 pub struct DiagLog {
@@ -52,13 +54,23 @@ impl DiagLog {
     }
 
     /// Append a line. Tabs and newlines in the message are replaced with
-    /// spaces so one line stays one line in the wire format.
+    /// spaces so one line stays one line in the wire format. A line that
+    /// repeats the last one (same level and message, within 60 s) bumps
+    /// the last line's count and timestamp instead of pushing a new line.
     pub fn log(&mut self, level: Level, msg: String) {
         let msg = msg.replace(['\t', '\n', '\r'], " ");
+        let ts_ms = now_ms();
+        if let Some(last) = self.lines.back_mut() {
+            if last.level == level && last.msg == msg && ts_ms.saturating_sub(last.ts_ms) < 60_000 {
+                last.count += 1;
+                last.ts_ms = ts_ms;
+                return;
+            }
+        }
         if self.lines.len() >= MAX_LINES {
             self.lines.pop_front();
         }
-        self.lines.push_back(DiagLine { ts_ms: now_ms(), level, msg });
+        self.lines.push_back(DiagLine { ts_ms, level, msg, count: 1 });
     }
 
     pub fn len(&self) -> usize {
@@ -70,11 +82,11 @@ impl DiagLog {
     }
 
     /// All lines, oldest first, as the wire text: one
-    /// `ts_ms<TAB>LEVEL<TAB>message` line each.
+    /// `ts_ms<TAB>LEVEL<TAB>message<TAB>count` line each.
     pub fn snapshot_text(&self) -> String {
         let mut out = String::new();
         for line in &self.lines {
-            out.push_str(&format!("{}\t{}\t{}\n", line.ts_ms, line.level.as_str(), line.msg));
+            out.push_str(&format!("{}\t{}\t{}\t{}\n", line.ts_ms, line.level.as_str(), line.msg, line.count));
         }
         out
     }
@@ -120,6 +132,11 @@ pub fn snapshot_text() -> String {
     LOG.lock().unwrap_or_else(|e| e.into_inner()).snapshot_text()
 }
 
+/// Clear the global buffer (Logs screen "Clear").
+pub fn clear() {
+    LOG.lock().unwrap_or_else(|e| e.into_inner()).lines.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,13 +150,13 @@ mod tests {
         let text = log.snapshot_text();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(3, lines.len());
-        assert!(lines[0].ends_with("\tINFO\tfirst"));
-        assert!(lines[1].ends_with("\tWARN\tsecond"));
-        assert!(lines[2].ends_with("\tERROR\tthird"));
+        assert!(lines[0].ends_with("\tINFO\tfirst\t1"));
+        assert!(lines[1].ends_with("\tWARN\tsecond\t1"));
+        assert!(lines[2].ends_with("\tERROR\tthird\t1"));
     }
 
     #[test]
-    fn buffer_caps_at_300_lines() {
+    fn buffer_caps_at_1000_lines() {
         let mut log = DiagLog::new();
         for i in 0..(MAX_LINES + 1) {
             log.log(Level::Info, format!("line {i}"));
@@ -158,6 +175,33 @@ mod tests {
         let text = log.snapshot_text();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(1, lines.len());
-        assert!(lines[0].ends_with("\tINFO\ta b c"));
+        assert!(lines[0].ends_with("\tINFO\ta b c\t1"));
+    }
+
+    #[test]
+    fn repeats_collapse_into_one_line_with_a_count() {
+        let mut log = DiagLog::new();
+        log.log(Level::Warn, "same".to_string());
+        log.log(Level::Warn, "same".to_string());
+        log.log(Level::Warn, "same".to_string());
+        assert_eq!(1, log.len());
+        let text = log.snapshot_text();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(1, lines.len());
+        assert!(lines[0].ends_with("\tWARN\tsame\t3"));
+    }
+
+    #[test]
+    fn different_lines_do_not_collapse() {
+        let mut log = DiagLog::new();
+        log.log(Level::Warn, "same".to_string());
+        log.log(Level::Warn, "other".to_string());
+        log.log(Level::Error, "same".to_string());
+        assert_eq!(3, log.len());
+        let text = log.snapshot_text();
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].ends_with("\tWARN\tsame\t1"));
+        assert!(lines[1].ends_with("\tWARN\tother\t1"));
+        assert!(lines[2].ends_with("\tERROR\tsame\t1"));
     }
 }

@@ -45,8 +45,8 @@ use jni::JNIEnv;
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.2.4".
-pub const ENGINE_VERSION: &str = "engine 0.4.3";
+/// The engine version string, e.g. "engine 0.4.4".
+pub const ENGINE_VERSION: &str = "engine 0.4.4";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -240,8 +240,8 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSna
 }
 
 /// The diagnostics log text (see docs/ENGINE_API.md): one
-/// `ts_ms<TAB>LEVEL<TAB>message` line per entry, oldest first, or ""
-/// when empty. Never lets a panic or exception cross the FFI boundary.
+/// `ts_ms<TAB>LEVEL<TAB>message<TAB>count` line per entry, oldest first,
+/// or "" when empty. Never lets a panic or exception cross the FFI boundary.
 #[no_mangle]
 pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDiagLog<'local>(
     env: JNIEnv<'local>,
@@ -254,6 +254,19 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDia
             let _ = env.exception_clear();
             std::ptr::null_mut()
         }
+    }
+}
+
+/// Clear the diagnostics ring buffer (Logs screen "Clear"). No handle:
+/// the buffer is global, not per-engine.
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDiagClear<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    let result = catch_unwind(AssertUnwindSafe(|| crate::diag::clear()));
+    if result.is_err() {
+        let _ = env.exception_clear();
     }
 }
 

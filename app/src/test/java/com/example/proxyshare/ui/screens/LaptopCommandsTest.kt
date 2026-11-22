@@ -1,5 +1,7 @@
 package com.example.proxyshare.ui.screens
 
+import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.NetIf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -91,5 +93,27 @@ class LaptopCommandsTest {
     @Test
     fun bothPortsNullGivesNoCommands() {
         assertTrue(laptopCommands("192.168.1.5", null, null, null, null).isEmpty())
+    }
+
+    @Test
+    fun sheetHostPrefersSelectionThenFirst() {
+        val ranked = listOf(
+            NetIf("wlan0", "192.168.1.5", IfKind.WIFI),
+            NetIf("ap0", "192.168.43.1", IfKind.HOTSPOT),
+        )
+        assertEquals("192.168.1.5", resolveSheetHost(ranked, null))
+        assertEquals("192.168.43.1", resolveSheetHost(ranked, "192.168.43.1"))
+        // A stale selection (no longer in the list) falls back to first.
+        assertEquals("192.168.1.5", resolveSheetHost(ranked, "10.0.0.9"))
+        assertEquals(null, resolveSheetHost(emptyList(), null))
+    }
+
+    @Test
+    fun sheetCommandHostUsesPlaceholderForMobileOnly() {
+        val mobile = listOf(NetIf("rmnet0", "10.20.30.40", IfKind.MOBILE))
+        assertEquals("PHONE_IP", sheetCommandHost(mobile, null))
+        val wifi = listOf(NetIf("wlan0", "192.168.1.5", IfKind.WIFI))
+        assertEquals("192.168.1.5", sheetCommandHost(wifi, null))
+        assertEquals(null, sheetCommandHost(emptyList(), null))
     }
 }

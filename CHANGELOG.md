@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.4 — Logs tab + bug fixes
+
+- Logs is now its own screen (4th bottom tab): the session log
+  moved out of the Connections ⋮ menu (the menu item now switches
+  to the Logs tab) and sits next to the engine log under one
+  OptionRow ("Connections" | "Engine"), with a ⋮ menu (Share,
+  Clear) that acts on the shown tab. The Diagnostics card is gone
+  from Settings entirely.
+- Engine log tab: HH:mm:ss timestamps (java.time), one row per
+  line with a level badge (INFO neutral, WARN amber, ERROR red),
+  monospace 12sp message, and "×N" when a line repeated. Filter
+  chips (All / Warn+ / Error), a search field, and a "Follow"
+  toggle that pins the view to the newest visible line. Refreshes
+  once a second ONLY while the screen is visible
+  (repeatOnLifecycle STARTED) — nothing polls in the background.
+  Share uses the existing redaction; Clear calls a new JNI
+  nativeDiagClear(). New dependency: androidx lifecycle-runtime-ktx
+  2.8.7 (same version as the rest of lifecycle; repeatOnLifecycle
+  lives there and lifecycle-runtime-compose does not bring it in —
+  a small addition, R8 strips the unused parts).
+- Engine diagnostics (rust/engine/src/diag.rs): ring buffer 300 ->
+  1000 lines; repeats collapse — a line with the same level and
+  message within 60 s bumps the last line's count and timestamp
+  instead of pushing (DiagLine.count). Wire format is now
+  `ts_ms<TAB>LEVEL<TAB>message<TAB>count`; the count field is
+  optional on the Kotlin side, so lines written before 0.4.4 still
+  parse (as count 1).
+- Client card ⋮ menu: the button and its DropdownMenu now share
+  one Box, so the menu opens under the button instead of at the
+  card's left edge.
+- Pluralization: `connections_count` is a plurals resource now
+  ("1 connection" / "N connections"). Grepped the other "%d" strings:
+  devices/clients/connections notifications were already plurals,
+  "Blocked: N" and "N added, M invalid" carry no noun, ports are
+  numbers — no other fix needed.
+- "Connect your laptop" sheet: when the only non-VPN address is
+  the carrier (mobile) one, it shows "Turn on the hotspot or join
+  the same Wi-Fi as your laptop" + the "Open hotspot settings"
+  button, and the commands render with the placeholder PHONE_IP
+  instead of the carrier address. With exactly one address the
+  "Use this address" radio group is hidden and the address is just
+  shown. The duplicate Firefox text section is deleted (the Firefox
+  command card stays).
+- Tests: Kotlin 115 -> 122 (engine-log filter + timestamp format,
+  sheet address selection). Rust 109 -> 111 (repeat collapsing).
+
 ## 0.4.3 — client control + speed limit
 
 - Disconnect / block one client: the engine keeps an abort handle per
