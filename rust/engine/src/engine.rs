@@ -162,7 +162,12 @@ fn now_ms() -> u64 {
 /// hold many connections, and return the resulting soft limit. None
 /// when the limit cannot be read (then the connection limit is not
 /// capped by fds). Unix only.
+///
+/// The `as u64` casts are no-ops on 64-bit targets (host clippy
+/// flags them) but required on 32-bit Android (armeabi-v7a), where
+/// rlim_t is u32 — hence the allow, not a removal.
 #[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
 pub fn raise_nofile_limit() -> Option<u64> {
     unsafe {
         let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
@@ -173,10 +178,10 @@ pub fn raise_nofile_limit() -> Option<u64> {
         if rl.rlim_cur < target {
             let new = libc::rlimit { rlim_cur: target, rlim_max: rl.rlim_max };
             if libc::setrlimit(libc::RLIMIT_NOFILE, &new) == 0 {
-                return Some(target);
+                return Some(target as u64);
             }
         }
-        Some(rl.rlim_cur)
+        Some(rl.rlim_cur as u64)
     }
 }
 
