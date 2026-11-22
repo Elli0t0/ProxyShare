@@ -3,24 +3,22 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Small centered share mark: three circles joined by two thin
-         lines. Symbol box is x 28..80, y 28..80 (48% of the canvas,
-         26% empty teal margin on every side), so nothing is cropped
-         by any launcher mask — it even fits the 66dp circle. -->
+    <!-- S-route mark from the reference image, traced from its measured
+         geometry and scaled to 50% of the canvas: bottom arm y=63,
+         top arm y=44, one steep S-rise between x=42 and x=54, circles
+         (33,63) and (75,44), r 6, stroke 5. Symbol box x 27..81,
+         y 38..69 — 25%+ empty margin on every side, inside the
+         33-unit circle mask. -->
     <path
-        android:pathData="M 72,36 L 36,54 L 72,72"
+        android:pathData="M 33,63 L 42,63 C 51,63 45,44 54,44 L 75,44"
         android:strokeWidth="5"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
         android:fillColor="#00000000" />
     <path
-        android:pathData="M 44,54 a 8,8 0 1,1 -0.1,0 Z"
+        android:pathData="M 39,63 a 6,6 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
     <path
-        android:pathData="M 80,36 a 8,8 0 1,1 -0.1,0 Z"
-        android:fillColor="#FFFFFF" />
-    <path
-        android:pathData="M 80,72 a 8,8 0 1,1 -0.1,0 Z"
+        android:pathData="M 81,44 a 6,6 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
 </vector>

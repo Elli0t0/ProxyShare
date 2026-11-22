@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.4 — launcher icon: S-route on blue, to spec
+
+- Launcher icon is now the S-route from the reference image:
+  flat #5890B0 blue filling the whole canvas edge to edge, no
+  text; two white circles joined by a thick smooth S-shaped line
+  (bottom arm y=63, top arm y=44, one steep rise between x=42 and
+  x=54, circles (33,63) and (75,44), r 6, stroke 5), traced from
+  the reference's measured geometry and scaled to 50% of the
+  canvas (symbol box x 27..81, y 38..69 — 25%+ empty margin on
+  every side, farthest point 28.8 units from center, inside the
+  33-unit circle mask). Nothing else changed.
+
 ## 0.3.3 — launcher icon rebuilt to spec (small centered share mark)
 
 - Launcher icon rebuilt exactly to the spec: flat #45B5B0 teal
