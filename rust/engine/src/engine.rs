@@ -3220,7 +3220,15 @@ mod tests {
 
     /// Poll until `check` is true or the deadline passes (real time).
     async fn wait_until<F: Fn() -> bool>(what: &str, check: F) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        wait_until_timeout(what, 2, check).await;
+    }
+
+    /// Poll until `check` is true or `secs` pass (real time). The
+    /// sampler and the idle-stop countdown run on the engine's own
+    /// runtime, so a paused test clock cannot drive them: these
+    /// tests run in real time and wait for the real timers instead.
+    async fn wait_until_timeout<F: Fn() -> bool>(what: &str, secs: u64, check: F) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
         loop {
             if check() {
                 return;
@@ -3230,21 +3238,6 @@ mod tests {
                 "timed out waiting for {what}"
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-
-    /// Poll until `check` is true, advancing the paused clock in
-    /// 100 ms steps (a paused test's sleeps never complete on their
-    /// own). Real I/O still runs between advances.
-    async fn wait_until_paused<F: Fn() -> bool>(what: &str, check: F) {
-        let mut waited = 0u64;
-        loop {
-            if check() {
-                return;
-            }
-            assert!(waited < 5000, "timed out waiting for {what}");
-            tokio::time::advance(Duration::from_millis(100)).await;
-            waited += 100;
         }
     }
 
@@ -3349,35 +3342,40 @@ mod tests {
         engine.stop();
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn sampler_samples_while_busy_and_stops_when_idle() {
         let (engine, _sink, port) = start_test_engine("");
         let echo_port = start_echo_server().await;
         // A 10 KB burst: the first 1 s tick sees ~10 KB/s, well over
-        // the 64 B/s snap, so the EMA sample is nonzero.
+        // the 64 B/s snap, so the EMA sample is nonzero. The sampler
+        // ticks in real time on the engine runtime, so this test
+        // waits for the ticks instead of advancing a paused clock
+        // (see wait_until_timeout).
         let payload = vec![7u8; 10 * 1024];
         let client = echo_connection(port, echo_port, &payload).await;
-        // One 1 s tick: the burst is sampled (EMA from 0 halves the
-        // raw rate). All ticks share one real unix second, so the
-        // ring holds a single entry: check it before later ticks
-        // (no new bytes) decay it to 0.
-        tokio::time::advance(Duration::from_secs(1)).await;
-        let head = head_fields(&engine);
-        assert!(head[10].parse::<u64>().expect("speed_up") > 0, "speed_up sampled: {head:?}");
+        // The first tick samples the burst (EMA from 0 halves the
+        // raw rate). The burst entry stays in the 120 s ring even
+        // after later ticks decay to 0.
+        wait_until_timeout("the first sample", 3, || {
+            head_fields(&engine)[10].parse::<u64>().unwrap_or(0) > 0
+        })
+        .await;
         let history = engine.history();
         assert_eq!(history.split(';').count(), 120, "a full 120 s");
         assert!(
             history.split(';').any(|p| p != "0,0"),
             "the burst is in the history: {history}"
         );
-        // Two more ticks with no new bytes: the samples decay to 0.
-        tokio::time::advance(Duration::from_secs(2)).await;
-        assert_eq!(head_fields(&engine)[10], "0", "no new bytes, speed reads 0");
+        // Ticks with no new bytes read exactly 0 (delta 0 snaps to
+        // 0 instead of decaying), so speed is 0 within 2 ticks.
+        wait_until_timeout("speed to decay to 0", 5, || {
+            head_fields(&engine)[10] == "0"
+        })
+        .await;
         // Close the connection: after 2 empty ticks the sampler ends
         // and nothing runs while idle.
         drop(client);
-        tokio::time::advance(Duration::from_secs(5)).await;
-        wait_until_paused("the sampler to end", || {
+        wait_until_timeout("the sampler to end", 5, || {
             lock_inner(&engine.inner).sampler_task.is_none()
         })
         .await;
@@ -3386,40 +3384,44 @@ mod tests {
         engine.stop();
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn idle_stop_fires_after_idle() {
-        let (engine, sink, port) = start_test_engine("idle_stop_secs = 5");
+        let (engine, sink, port) = start_test_engine("idle_stop_secs = 1");
         let echo_port = start_echo_server().await;
         let client = echo_connection(port, echo_port, b"a").await;
         drop(client);
-        wait_until_paused("the Idle edge", || {
+        wait_until("the Idle edge", || {
             sink.events().iter().any(|e| matches!(e, Event::Idle))
         })
         .await;
-        tokio::time::advance(Duration::from_secs(5)).await;
+        wait_until_timeout("IdleStop after 1 s idle", 5, || {
+            sink.events().iter().any(|e| matches!(e, Event::IdleStop))
+        })
+        .await;
         assert!(
             sink.events().iter().any(|e| matches!(e, Event::IdleStop)),
-            "IdleStop fires 5 s after idle: {:?}",
+            "IdleStop fires 1 s after idle: {:?}",
             sink.events()
         );
         engine.stop();
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn idle_stop_is_cancelled_by_busy() {
-        let (engine, sink, port) = start_test_engine("idle_stop_secs = 5");
+        let (engine, sink, port) = start_test_engine("idle_stop_secs = 1");
         let echo_port = start_echo_server().await;
         let client = echo_connection(port, echo_port, b"a").await;
         drop(client);
-        wait_until_paused("the Idle edge", || {
+        wait_until("the Idle edge", || {
             sink.events().iter().any(|e| matches!(e, Event::Idle))
         })
         .await;
-        // Traffic returns 2 s into the countdown: the countdown is
-        // cancelled and no IdleStop ever fires.
-        tokio::time::advance(Duration::from_secs(2)).await;
+        // Traffic returns while the 1 s countdown is armed: the
+        // countdown is cancelled and no IdleStop ever fires. The
+        // 2 s wait past the deadline is the assertion itself: only
+        // waiting it out proves nothing fired.
         let _client2 = echo_connection(port, echo_port, b"b").await;
-        tokio::time::advance(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
         assert!(
             !sink.events().iter().any(|e| matches!(e, Event::IdleStop)),
             "Busy cancelled the countdown: {:?}",
@@ -3428,17 +3430,19 @@ mod tests {
         engine.stop();
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn idle_stop_off_by_default() {
         let (engine, sink, port) = start_test_engine("");
         let echo_port = start_echo_server().await;
         let client = echo_connection(port, echo_port, b"a").await;
         drop(client);
-        wait_until_paused("the Idle edge", || {
+        wait_until("the Idle edge", || {
             sink.events().iter().any(|e| matches!(e, Event::Idle))
         })
         .await;
-        tokio::time::advance(Duration::from_secs(60)).await;
+        // No countdown is ever armed with idle_stop_secs = 0: wait
+        // past the 1 s a countdown would have used, then assert.
+        tokio::time::sleep(Duration::from_secs(2)).await;
         assert!(
             !sink.events().iter().any(|e| matches!(e, Event::IdleStop)),
             "idle_stop_secs = 0 never fires IdleStop"
