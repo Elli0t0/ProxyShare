@@ -808,17 +808,16 @@ impl Engine {
     }
 
     /// Clear the stored sampler handle once the task ended (it ends
-    /// itself after 2 empty ticks). Only clears a finished handle, so
-    /// a newer sampler started in the meantime is never dropped.
+    /// itself after 2 empty ticks). Called from the sampler task
+    /// itself: the slot still holds this task's handle, and clearing
+    /// it cannot drop a newer one — on_busy only spawns a new
+    /// sampler when the stored handle is finished or absent, and
+    /// the check and the store happen under one lock. (The old
+    /// is_finished() guard could never pass here: a task is not
+    /// finished while it is still running its own end, so the slot
+    /// was never cleared and the sampler looked alive forever.)
     fn clear_sampler_task(&self) {
-        let mut inner = lock_inner(&self.inner);
-        if inner
-            .sampler_task
-            .as_ref()
-            .map_or(false, |h| h.is_finished())
-        {
-            inner.sampler_task = None;
-        }
+        lock_inner(&self.inner).sampler_task = None;
     }
 
     /// Clear the stored idle-stop handle once it fired. Only clears
