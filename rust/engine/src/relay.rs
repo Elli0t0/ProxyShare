@@ -73,7 +73,10 @@ impl RateLimiter {
 /// Copy bytes from `r` to `w` until the read side hits EOF, errors, or
 /// sits idle for `idle`. Every copied chunk is counted live into `ctr`.
 /// On EOF the write half is shut down, so the peer sees a clean FIN.
-/// When `limiter` is set, each chunk waits for its tokens first.
+/// When `limiter` is set, each chunk waits for its tokens first. The
+/// buffer starts at 8 KB and doubles up to 64 KB whenever a read fills
+/// it, so idle or tiny connections don't pay for a 32 KB buffer up
+/// front.
 pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     mut r: R,
     mut w: W,
@@ -81,7 +84,7 @@ pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     idle: Duration,
     limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
-    let mut buf = vec![0u8; 32 * 1024];
+    let mut buf = vec![0u8; 8 * 1024];
     loop {
         let n = tokio::time::timeout(idle, r.read(&mut buf))
             .await
@@ -89,6 +92,10 @@ pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         if n == 0 {
             let _ = w.shutdown().await;
             return Ok(());
+        }
+        if n == buf.len() && buf.len() < 64 * 1024 {
+            let new_len = buf.len() * 2;
+            buf.resize(new_len, 0);
         }
         if let Some(limiter) = limiter {
             limiter.take(n).await;
@@ -147,6 +154,30 @@ mod tests {
                 assert_eq!(&buf, b"hello");
                 // The counter moved while the transfer was still running.
                 assert_eq!(ctr.load(Ordering::Relaxed), 5);
+                drop(client_end);
+                drop(server_end);
+            },
+        );
+        result.expect("pump ends cleanly on EOF");
+    }
+
+    #[tokio::test]
+    async fn pump_grows_its_buffer_for_large_chunks() {
+        // A 20 KB write fills the 8 KB start buffer, so the pump must
+        // grow it (to 16 KB, then it drains) instead of stalling.
+        let (mut client_end, relay_in) = tokio::io::duplex(64 * 1024);
+        let (relay_out, mut server_end) = tokio::io::duplex(64 * 1024);
+        let ctr = AtomicU64::new(0);
+        let payload = vec![7u8; 20 * 1024];
+        let expected = payload.clone();
+        let (result, _) = tokio::join!(
+            pump(relay_in, relay_out, &ctr, Duration::from_secs(5), None),
+            async {
+                client_end.write_all(&payload).await.expect("write");
+                let mut buf = vec![0u8; 20 * 1024];
+                server_end.read_exact(&mut buf).await.expect("read");
+                assert_eq!(buf, expected);
+                assert_eq!(ctr.load(Ordering::Relaxed), 20 * 1024);
                 drop(client_end);
                 drop(server_end);
             },

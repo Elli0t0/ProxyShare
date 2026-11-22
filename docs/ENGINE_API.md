@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.4.4"`.
+- Returns the engine version string, e.g. `"engine 0.4.5"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -226,6 +226,30 @@ second parameter.
   other targets. Resolved addresses are tried IPv4 first (stable sort;
   a VPN is often IPv4-only) and each connect attempt is capped at
   5 s, even when the configured timeout is longer.
+- **Staggered attempts (0.4.5, RFC 8305 simplified):** the next
+  address starts 300 ms after the previous one when nothing has
+  connected yet; first success wins and the losers are dropped with
+  the JoinSet. The 5 s cap per attempt and the IPv4-first ordering
+  are unchanged.
+- **IPv6 fail-fast breaker (0.4.5):** a process-wide breaker
+  (`V6_DOWN_UNTIL_MS`): a failed or timed-out IPv6 attempt trips it
+  for 60 s, a successful one clears it. While down, IPv6 addresses
+  are skipped when IPv4 ones exist, and an IPv6-only/literal target
+  is refused immediately with `ConnectError::Unreachable`. The
+  breaker resets when the outbound network handle changes
+  (`set_network`). The pure helpers take the deadline and the clock
+  as parameters (`v6_filter(addrs, down_until_ms, now)`), so tests
+  move time without sleeping.
+- **DNS cache (0.4.5):** resolved addresses are cached per (network
+  handle, lowercase host, port) — 60 s positive TTL, 5 s negative
+  TTL, max 512 entries (expired entries dropped first, then the
+  whole map is cleared). Flushed on engine start and on network
+  change; IP literals are never cached. The port is part of the key
+  because the cached SocketAddrs carry the port they were resolved
+  with.
+- **Client sockets get TCP_NODELAY too (0.4.5):** the accept loop
+  sets it on every accepted client socket, matching the outbound
+  side.
 - **DNS uses the outbound network too (0.3.0):** when a network is set
   and the device is API 29+, `Connector::resolve` runs
   `android_getaddrinfofornetwork` (libandroid, loaded with dlsym at
@@ -236,9 +260,12 @@ second parameter.
   Non-Android builds always use `lookup_host`, so host tests pass.
 - **Known limitation:** UDP ASSOCIATE sockets are NOT bound to the
   network yet — only outbound TCP connections and DNS are.
-- A connect failure is one of two kinds: the name did not resolve
-  (`Dns`) or no address accepted the connection (`Connect`). The
-  SOCKS5 handler maps them to the reply codes 0x04 and 0x05.
+- A connect failure is one of three kinds: the name did not resolve
+  (`Dns`), no address accepted the connection (`Connect`), or the
+  target is IPv6-only while the IPv6 breaker is down
+  (`Unreachable`). The SOCKS5 handler maps them to the reply codes
+  0x04, 0x05 and 0x03; the HTTP handler maps every connect failure
+  to 502, so `Unreachable` needs no code change there.
 - `relay` (`rust/engine/src/relay.rs`) copies bytes both ways with two
   `pump` tasks joined with `tokio::join!`. Each pump counts live into
   the connection record's counters (client -> target is `up`, target ->
@@ -246,7 +273,9 @@ second parameter.
   transfer, not only at the end. A pump ends when its read side hits
   EOF, errors, or sits idle for `idle_timeout_s`; it then shuts down
   its write half, so the peer sees EOF and its own pump ends too. When
-  either pump ends, the pair is closed.
+  either pump ends, the pair is closed. Each pump's buffer starts at
+  8 KB and doubles up to 64 KB whenever a read fills it (0.4.5),
+  instead of allocating 32 KB per direction up front.
 - The counters count relayed payload only, not the SOCKS5 greeting,
   request or reply bytes.
 

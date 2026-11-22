@@ -3,35 +3,42 @@
 //! `Outbound` is the seam a later step uses to bind sockets to an
 //! Android Network: the SOCKS5 handler only ever talks to the trait,
 //! never to a concrete socket. `TcpOutbound` is the plain
-//! implementation: resolve (on the outbound network when one is set),
-//! try the addresses IPv4 first with each attempt capped at 5 s, apply
-//! the connect timeout, set `TCP_NODELAY`.
+//! implementation: resolve (on the outbound network when one is set,
+//! cached per network + host — see `DnsCache`), try the addresses
+//! IPv4 first, staggered 300 ms apart (RFC 8305, simplified), each
+//! attempt capped at 5 s, apply the connect timeout, set
+//! `TCP_NODELAY`.
 //!
-//! A connect failure is one of two kinds, so the handler can answer
+//! A connect failure is one of three kinds, so the handler can answer
 //! with the right SOCKS5 reply code: the name did not resolve (`Dns`,
-//! reply 0x04) or no address accepted the connection (`Connect`,
-//! reply 0x05).
+//! reply 0x04), no address accepted the connection (`Connect`, reply
+//! 0x05), or the target is IPv6-only while the IPv6 breaker is down
+//! (`Unreachable`, reply 0x03).
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "android")]
 use std::ffi::CString;
 #[cfg(target_os = "android")]
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 #[cfg(target_os = "android")]
 use std::os::raw::{c_char, c_int};
 #[cfg(target_os = "android")]
 use std::sync::OnceLock;
 
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
+use tokio::task::JoinSet;
 
-/// Why a connect failed: the name did not resolve, or no address
-/// accepted the connection.
+/// Why a connect failed: the name did not resolve, no address
+/// accepted the connection, or the IPv6 breaker refused an IPv6-only
+/// target at once.
 #[derive(Debug)]
 pub enum ConnectError {
     /// The host name could not be resolved (or resolved to nothing).
@@ -39,6 +46,11 @@ pub enum ConnectError {
     /// Resolution worked (or the target was an IP literal), but every
     /// address refused or timed out.
     Connect(io::Error),
+    /// The target is IPv6-only and IPv6 recently failed (the breaker
+    /// is down), so the attempt is refused immediately instead of
+    /// waiting out the 5 s cap. Handlers map it to SOCKS5 0x03 and
+    /// HTTP 502.
+    Unreachable(io::Error),
 }
 
 impl fmt::Display for ConnectError {
@@ -46,6 +58,9 @@ impl fmt::Display for ConnectError {
         match self {
             ConnectError::Dns(e) => write!(f, "could not resolve the target: {e}"),
             ConnectError::Connect(e) => write!(f, "could not connect to the target: {e}"),
+            ConnectError::Unreachable(e) => {
+                write!(f, "IPv6 is down, target unreachable at once: {e}")
+            }
         }
     }
 }
@@ -53,7 +68,9 @@ impl fmt::Display for ConnectError {
 impl std::error::Error for ConnectError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ConnectError::Dns(e) | ConnectError::Connect(e) => Some(e),
+            ConnectError::Dns(e) | ConnectError::Connect(e) | ConnectError::Unreachable(e) => {
+                Some(e)
+            }
         }
     }
 }
@@ -61,16 +78,17 @@ impl std::error::Error for ConnectError {
 impl From<ConnectError> for io::Error {
     fn from(err: ConnectError) -> io::Error {
         match err {
-            ConnectError::Dns(e) | ConnectError::Connect(e) => e,
+            ConnectError::Dns(e) | ConnectError::Connect(e) | ConnectError::Unreachable(e) => e,
         }
     }
 }
 
 /// Opens outbound TCP connections: resolve (on the outbound network
-/// when one is set), try the addresses IPv4 first with each attempt
-/// capped at 5 s, apply the connect timeout, set `TCP_NODELAY`.
-/// Holds the Android Network handle for outbound sockets (0 = default
-/// network); 0.1.6.
+/// when one is set; results are cached — see `DnsCache`), try the
+/// addresses IPv4 first, staggered 300 ms apart (RFC 8305,
+/// simplified), each attempt capped at 5 s, apply the connect timeout,
+/// set `TCP_NODELAY`. Holds the Android Network handle for outbound
+/// sockets (0 = default network); 0.1.6.
 #[derive(Default)]
 pub struct Connector {
     /// Android net_handle_t for outbound sockets; 0 = default network.
@@ -80,14 +98,25 @@ pub struct Connector {
 impl Connector {
     pub fn set_network(&self, handle: u64) {
         self.network.store(handle, Ordering::Relaxed);
+        // A new network means new addresses: drop cached DNS and
+        // reset the IPv6 breaker so the next attempt is judged fresh.
+        DNS_CACHE.clear();
+        mark_v6_up();
     }
     pub fn network(&self) -> u64 {
         self.network.load(Ordering::Relaxed)
     }
 
+    /// Drop the cached DNS entries (engine start does this, so a fresh
+    /// run re-resolves everything instead of trusting the old network).
+    pub fn flush_dns_cache(&self) {
+        DNS_CACHE.clear();
+    }
+
     /// Connect to `host:port` within `timeout` (the timeout bounds the
     /// DNS lookup; each connect attempt is capped at 5 s). Addresses
-    /// are tried IPv4 first.
+    /// are tried IPv4 first, staggered 300 ms apart; the first success
+    /// wins and the losers are dropped.
     pub async fn connect(
         &self,
         host: &str,
@@ -102,34 +131,100 @@ impl Connector {
             )));
         }
         order_addrs(&mut addrs);
-        let attempt_timeout = attempt_timeout(timeout);
+        // While the IPv6 breaker is down, IPv6 addresses are skipped
+        // when IPv4 ones exist; an IPv6-only target is refused at
+        // once instead of burning the 5 s cap.
+        let down_until = V6_DOWN_UNTIL_MS.load(Ordering::Relaxed);
+        let addrs = match v6_filter(addrs, down_until, now_ms()) {
+            Ok(addrs) => addrs,
+            Err(()) => {
+                return Err(ConnectError::Unreachable(io::Error::new(
+                    io::ErrorKind::AddrNotAvailable,
+                    format!("IPv6 is down (breaker tripped): {host}"),
+                )))
+            }
+        };
+        let cap = attempt_timeout(timeout);
+        let network = self.network();
+        let mut pending = JoinSet::new();
+        let mut next = 1usize;
         let mut last_err =
             io::Error::new(io::ErrorKind::AddrNotAvailable, "no address was tried");
-        for addr in addrs {
-            match tokio::time::timeout(attempt_timeout, connect_addr(addr, self.network())).await {
-                Ok(Ok(stream)) => {
-                    stream
-                        .set_nodelay(true)
-                        .map_err(ConnectError::Connect)?;
-                    return Ok(stream);
+        pending.spawn(connect_one(addrs[0], network, cap));
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(STAGGER), if next < addrs.len() => {
+                    pending.spawn(connect_one(addrs[next], network, cap));
+                    next += 1;
                 }
-                Ok(Err(e)) => last_err = e,
-                Err(_) => {
-                    last_err = io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("connect to {addr} timed out"),
-                    )
+                Some(result) = pending.join_next() => {
+                    match result {
+                        Ok(Ok((addr, stream))) => {
+                            if addr.is_ipv6() {
+                                mark_v6_up();
+                            }
+                            stream
+                                .set_nodelay(true)
+                                .map_err(ConnectError::Connect)?;
+                            return Ok(stream);
+                        }
+                        Ok(Err((addr, e))) => {
+                            if addr.is_ipv6() {
+                                mark_v6_down();
+                            }
+                            last_err = e;
+                        }
+                        Err(_) => {
+                            // A spawned attempt panicked; treat it as
+                            // a failed attempt and keep trying the rest.
+                        }
+                    }
                 }
+                else => break,
             }
         }
         Err(ConnectError::Connect(last_err))
     }
 
-    /// Resolve host:port. On Android with a non-default network, DNS
-    /// runs on that same network (see resolve_on_network); otherwise,
-    /// or when the network resolver is unavailable, the default lookup
-    /// runs.
+    /// Resolve host:port, using the DNS cache when the host is not an
+    /// IP literal. On Android with a non-default network, DNS runs on
+    /// that same network (see resolve_on_network); otherwise, or when
+    /// the network resolver is unavailable, the default lookup runs.
     async fn resolve(
+        &self,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<Vec<SocketAddr>, ConnectError> {
+        // IP literals need no lookup and are never cached.
+        let key: Option<DnsKey> = if host.parse::<IpAddr>().is_ok() {
+            None
+        } else {
+            Some((self.network(), host.to_lowercase(), port))
+        };
+        if let Some(key) = &key {
+            if let Some(cached) = DNS_CACHE.get(key, Instant::now()) {
+                return cached.map_err(|()| {
+                    ConnectError::Dns(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("{host} (cached DNS failure)"),
+                    ))
+                });
+            }
+        }
+        let result = self.resolve_uncached(host, port, timeout).await;
+        if let Some(key) = key {
+            let cached: Result<Vec<SocketAddr>, ()> = match &result {
+                Ok(addrs) => Ok(addrs.clone()),
+                Err(_) => Err(()),
+            };
+            DNS_CACHE.put(key, cached, Instant::now());
+        }
+        result
+    }
+
+    /// The uncached lookup: network resolver first, then the default.
+    async fn resolve_uncached(
         &self,
         host: &str,
         port: u16,
@@ -193,6 +288,158 @@ fn order_addrs(addrs: &mut [SocketAddr]) {
 fn attempt_timeout(timeout: Duration) -> Duration {
     timeout.min(Duration::from_secs(5))
 }
+
+/// Gap between staggered connect attempts (RFC 8305, simplified):
+/// the next address starts this long after the previous one when
+/// nothing has connected yet.
+const STAGGER: Duration = Duration::from_millis(300);
+
+/// One staggered attempt: connect to `addr` (bound to `network`)
+/// with the per-attempt cap. The address travels with the outcome so
+/// the caller can feed the IPv6 breaker.
+async fn connect_one(
+    addr: SocketAddr,
+    network: u64,
+    cap: Duration,
+) -> Result<(SocketAddr, TcpStream), (SocketAddr, io::Error)> {
+    match tokio::time::timeout(cap, connect_addr(addr, network)).await {
+        Ok(Ok(stream)) => Ok((addr, stream)),
+        Ok(Err(e)) => Err((addr, e)),
+        Err(_) => Err((
+            addr,
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("connect to {addr} timed out"),
+            ),
+        )),
+    }
+}
+
+// --- IPv6 fail-fast breaker (0.4.5) ---
+
+/// Process-wide IPv6 fail-fast breaker: while it is down, IPv6
+/// addresses are skipped (or refused outright for IPv6-only targets)
+/// instead of burning the 5 s attempt cap each time. Tripped by a
+/// failed or timed-out IPv6 attempt, cleared by a successful one or
+/// by a network change; a trip lasts 60 s.
+static V6_DOWN_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+const V6_DOWN_FOR_MS: u64 = 60_000;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// True when the breaker is down at `now` (the clock is a parameter
+/// so tests can move time without sleeping).
+fn v6_is_down_at(down_until_ms: u64, now: u64) -> bool {
+    now < down_until_ms
+}
+
+fn mark_v6_down_at(now: u64) {
+    V6_DOWN_UNTIL_MS.store(now + V6_DOWN_FOR_MS, Ordering::Relaxed);
+}
+
+fn mark_v6_down() {
+    mark_v6_down_at(now_ms());
+}
+
+fn mark_v6_up() {
+    V6_DOWN_UNTIL_MS.store(0, Ordering::Relaxed);
+}
+
+/// While the breaker is down at `now` (deadline passed in, so tests
+/// stay pure), drop IPv6 addresses when IPv4 ones exist; when every
+/// address is IPv6 there is nothing to try.
+fn v6_filter(
+    addrs: Vec<SocketAddr>,
+    down_until_ms: u64,
+    now: u64,
+) -> Result<Vec<SocketAddr>, ()> {
+    if !v6_is_down_at(down_until_ms, now) {
+        return Ok(addrs);
+    }
+    if addrs.iter().any(|a| a.is_ipv4()) {
+        Ok(addrs.into_iter().filter(|a| a.is_ipv4()).collect())
+    } else {
+        Err(())
+    }
+}
+
+// --- DNS cache (0.4.5) ---
+
+/// DNS cache: resolved addresses per (network handle, lowercase host,
+/// port). 60 s positive TTL, 5 s negative TTL, max 512 entries; when
+/// full, expired entries are dropped first, then the whole map is
+/// cleared. IP literals are never cached (they need no lookup). The
+/// port is part of the key because the cached SocketAddrs carry the
+/// port they were resolved with.
+const DNS_POSITIVE_TTL: Duration = Duration::from_secs(60);
+const DNS_NEGATIVE_TTL: Duration = Duration::from_secs(5);
+const DNS_MAX_ENTRIES: usize = 512;
+
+type DnsKey = (u64, String, u16);
+type DnsValue = (Instant, Result<Vec<SocketAddr>, ()>);
+
+struct DnsCache {
+    map: Mutex<HashMap<DnsKey, DnsValue>>,
+}
+
+impl DnsCache {
+    fn new() -> Self {
+        Self {
+            map: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn ttl(result: &Result<Vec<SocketAddr>, ()>) -> Duration {
+        if result.is_ok() {
+            DNS_POSITIVE_TTL
+        } else {
+            DNS_NEGATIVE_TTL
+        }
+    }
+
+    fn age(stored: Instant, now: Instant) -> Duration {
+        now.checked_duration_since(stored)
+            .unwrap_or(Duration::ZERO)
+    }
+
+    fn get(&self, key: &DnsKey, now: Instant) -> Option<Result<Vec<SocketAddr>, ()>> {
+        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.get(key)?.clone();
+        if Self::age(entry.0, now) >= Self::ttl(&entry.1) {
+            map.remove(key);
+            None
+        } else {
+            Some(entry.1)
+        }
+    }
+
+    fn put(&self, key: DnsKey, value: Result<Vec<SocketAddr>, ()>, now: Instant) {
+        let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() >= DNS_MAX_ENTRIES {
+            map.retain(|_, (stored, result)| Self::age(*stored, now) < Self::ttl(result));
+            if map.len() >= DNS_MAX_ENTRIES {
+                map.clear();
+            }
+        }
+        map.insert(key, (now, value));
+    }
+
+    fn clear(&self) {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+}
+
+static DNS_CACHE: LazyLock<DnsCache> = LazyLock::new(DnsCache::new);
 
 // --- DNS on the outbound network (Android only) ---
 
@@ -461,6 +708,206 @@ mod tests {
         assert_eq!(attempt_timeout(Duration::from_secs(10)), Duration::from_secs(5));
         assert_eq!(attempt_timeout(Duration::from_secs(2)), Duration::from_secs(2));
         assert_eq!(attempt_timeout(Duration::from_secs(5)), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn v6_breaker_skips_v6_when_v4_exists() {
+        let addrs: Vec<SocketAddr> = vec![
+            "192.0.2.1:80".parse().expect("v4"),
+            "[2001:db8::1]:80".parse().expect("v6"),
+            "198.51.100.1:80".parse().expect("v4"),
+        ];
+        // Breaker up (deadline 0): everything is tried.
+        assert_eq!(v6_filter(addrs.clone(), 0, 1_000).expect("up"), addrs);
+        // Breaker down until 61_000: only the IPv4 addresses survive.
+        let kept = v6_filter(addrs.clone(), 61_000, 1_000).expect("v4s kept");
+        assert!(kept.iter().all(|a| a.is_ipv4()));
+        assert_eq!(kept.len(), 2);
+        // Past the deadline the trip has expired.
+        assert_eq!(
+            v6_filter(addrs.clone(), 61_000, 61_001).expect("expired"),
+            addrs
+        );
+    }
+
+    #[test]
+    fn v6_breaker_refuses_v6_only_targets() {
+        let addrs: Vec<SocketAddr> = vec!["[2001:db8::1]:80".parse().expect("v6")];
+        assert!(v6_filter(addrs.clone(), 61_000, 1_000).is_err());
+        assert!(v6_filter(addrs, 61_000, 61_001).is_ok());
+    }
+
+    #[test]
+    fn v6_breaker_deadline_is_checked_against_the_clock() {
+        assert!(!v6_is_down_at(0, 1_000));
+        assert!(v6_is_down_at(61_000, 1_000));
+        assert!(!v6_is_down_at(61_000, 61_000));
+    }
+
+    fn cache_key() -> DnsKey {
+        (0, "example.com".to_string(), 80)
+    }
+
+    fn cached_addr() -> SocketAddr {
+        "93.184.216.34:80".parse().expect("addr")
+    }
+
+    #[test]
+    fn dns_cache_returns_a_hit_and_misses_unknown_hosts() {
+        let cache = DnsCache::new();
+        let now = Instant::now();
+        assert!(cache.get(&cache_key(), now).is_none());
+        cache.put(cache_key(), Ok(vec![cached_addr()]), now);
+        assert_eq!(
+            cache.get(&cache_key(), now).expect("hit").expect("positive"),
+            vec![cached_addr()]
+        );
+        assert!(cache.get(&(0, "other.com".to_string(), 80), now).is_none());
+    }
+
+    #[test]
+    fn dns_cache_positive_entry_expires_after_sixty_seconds() {
+        let cache = DnsCache::new();
+        let now = Instant::now();
+        cache.put(cache_key(), Ok(vec![cached_addr()]), now);
+        assert!(cache
+            .get(&cache_key(), now + Duration::from_secs(59))
+            .is_some());
+        assert!(cache
+            .get(&cache_key(), now + Duration::from_secs(61))
+            .is_none());
+    }
+
+    #[test]
+    fn dns_cache_negative_entry_expires_after_five_seconds() {
+        let cache = DnsCache::new();
+        let now = Instant::now();
+        cache.put(cache_key(), Err(()), now);
+        assert!(cache
+            .get(&cache_key(), now + Duration::from_secs(4))
+            .is_some());
+        assert!(cache
+            .get(&cache_key(), now + Duration::from_secs(6))
+            .is_none());
+    }
+
+    #[test]
+    fn dns_cache_flush_clears_it() {
+        let cache = DnsCache::new();
+        let now = Instant::now();
+        cache.put(cache_key(), Ok(vec![cached_addr()]), now);
+        cache.clear();
+        assert!(cache.get(&cache_key(), now).is_none());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn dns_cache_cap_drops_expired_entries_first() {
+        let cache = DnsCache::new();
+        let now = Instant::now();
+        // One entry that is already expired at `now`, the rest fresh.
+        cache.put(
+            (0, "old.com".to_string(), 80),
+            Ok(vec![cached_addr()]),
+            now - Duration::from_secs(61),
+        );
+        for i in 0..(DNS_MAX_ENTRIES - 1) {
+            cache.put(
+                (0, format!("host{i}.com"), 80),
+                Ok(vec![cached_addr()]),
+                now,
+            );
+        }
+        assert_eq!(cache.len(), DNS_MAX_ENTRIES);
+        cache.put((0, "new.com".to_string(), 80), Ok(vec![cached_addr()]), now);
+        // The expired entry was dropped, so the map stays at the cap
+        // and a fresh entry survives.
+        assert_eq!(cache.len(), DNS_MAX_ENTRIES);
+        assert!(cache.get(&(0, "old.com".to_string(), 80), now).is_none());
+        assert!(cache.get(&(0, "new.com".to_string(), 80), now).is_some());
+        assert!(cache
+            .get(&(0, "host0.com".to_string(), 80), now)
+            .is_some());
+    }
+
+    #[test]
+    fn dns_cache_cap_clears_when_nothing_is_expired() {
+        let cache = DnsCache::new();
+        let now = Instant::now();
+        for i in 0..DNS_MAX_ENTRIES {
+            cache.put(
+                (0, format!("host{i}.com"), 80),
+                Ok(vec![cached_addr()]),
+                now,
+            );
+        }
+        assert_eq!(cache.len(), DNS_MAX_ENTRIES);
+        cache.put((0, "new.com".to_string(), 80), Ok(vec![cached_addr()]), now);
+        // Nothing was expired, so the whole map was cleared first.
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(&(0, "new.com".to_string(), 80), now).is_some());
+        assert!(cache
+            .get(&(0, "host0.com".to_string(), 80), now)
+            .is_none());
+    }
+
+    /// The IPv6 breaker is process-wide, so this one test runs the
+    /// down and up scenarios in sequence: no other test can clear the
+    /// breaker mid-check (Connector::set_network resets it).
+    #[tokio::test]
+    async fn v6_breaker_refuses_v6_only_target_and_stagger_reaches_ipv6() {
+        // No IPv6 loopback on this machine: nothing to test.
+        let Ok(probe) = std::net::TcpListener::bind("[::1]:0") else {
+            return;
+        };
+        let free_port = probe.local_addr().expect("probe addr").port();
+        drop(probe);
+        // While the breaker is down, an IPv6-only target is refused at
+        // once instead of waiting out the 5 s cap. Re-arm up to 3
+        // times: another test calling set_network in this window would
+        // clear the breaker and turn the instant refusal into a plain
+        // refused connect.
+        let mut last_err = String::new();
+        for _ in 0..3 {
+            mark_v6_down_at(now_ms());
+            match Connector::default()
+                .connect("::1", free_port, Duration::from_secs(2))
+                .await
+            {
+                Err(ConnectError::Unreachable(_)) => {
+                    last_err.clear();
+                    break;
+                }
+                Err(e) => last_err = format!("{e}"),
+                Ok(_) => last_err = "connected".to_string(),
+            }
+        }
+        mark_v6_up();
+        assert!(
+            last_err.is_empty(),
+            "an IPv6-only target must be refused at once while the breaker is down, got: {last_err}"
+        );
+        // Stagger: a listener on IPv6 loopback only. "localhost"
+        // resolves to 127.0.0.1 (refused — nothing listens there) and
+        // ::1 (live); IPv4 sorts first, so the first attempt fails and
+        // the second starts after the 300 ms stagger.
+        let listener = TcpListener::bind("[::1]:0").await.expect("bind ::1");
+        let port = listener.local_addr().expect("addr").port();
+        mark_v6_up();
+        let start = std::time::Instant::now();
+        let stream = Connector::default()
+            .connect("localhost", port, Duration::from_secs(5))
+            .await
+            .expect("staggered connect reaches the live address");
+        assert_eq!(stream.peer_addr().expect("peer").ip().to_string(), "::1");
+        assert!(
+            start.elapsed() >= Duration::from_millis(200),
+            "the second attempt waits for the stagger interval"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "the stagger must not stall the connect"
+        );
     }
 
     /// Host builds have no libandroid, so the network resolver always

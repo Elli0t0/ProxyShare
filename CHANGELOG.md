@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.5 — engine performance and IPv6 fail-fast
+
+- TCP_NODELAY on the client side too: the accept loop sets it on
+  every accepted client socket (the outbound side already had it).
+  Expected: lower latency on interactive traffic (less Nagle delay
+  on small request/response exchanges).
+- IPv6 fail-fast circuit breaker (rust/engine/src/connector.rs):
+  a failed or timed-out IPv6 attempt trips the breaker for 60 s; a
+  successful one clears it. While down, IPv6 addresses are skipped
+  when IPv4 ones exist, and an IPv6-only/literal target is refused
+  immediately with a new ConnectError::Unreachable, mapped to
+  SOCKS5 0x03 (network unreachable) and HTTP 502, so clients fall
+  back to IPv4 at once instead of waiting out the 5 s cap per
+  attempt. The breaker resets when the outbound network handle
+  changes. Expected: pages that resolve to dead IPv6 addresses stop
+  stalling for 5 s per connection on an IPv4-only VPN.
+- DNS cache (connector.rs): resolved addresses are cached per
+  (network handle, lowercase host, port) — 60 s positive TTL, 5 s
+  negative TTL, max 512 entries (expired entries dropped first,
+  then the whole map is cleared). Flushed on engine start and on
+  network change; IP literals are never cached. Expected: fewer
+  repeated lookups on pages that open many connections to the same
+  hosts.
+- Adaptive pump buffer (rust/engine/src/relay.rs): each pump starts
+  at 8 KB and doubles up to 64 KB whenever a read fills the buffer,
+  instead of allocating 32 KB per direction up front. Expected:
+  less memory for the common case (idle or tiny connections) with
+  the same throughput for large transfers.
+- Staggered connect attempts (RFC 8305, simplified): when a
+  hostname resolves to several addresses, the next attempt starts
+  300 ms after the previous one when nothing has connected yet;
+  first success wins, the losers are dropped. The 5 s cap per
+  attempt and the IPv4-first ordering are unchanged. Expected: a
+  dead first address no longer blocks the whole connect — the live
+  one starts ~300 ms in.
+- Benchmark script scripts/bench.sh (PHONE_IP [PORT]): 20
+  sequential new connections through socks5h with connect / TLS /
+  first-byte timings, then a 50 MB download from
+  speed.cloudflare.com with its average speed. Run it as
+  `sh scripts/bench.sh PHONE_IP [PORT]`. No Kotlin changes; no
+  new dependencies.
+- Tests: Rust 111 -> 122 (IPv6 breaker filter + deadline, DNS
+  cache hit/expiry/negative/flush/size cap, breaker-refuses-
+  IPv6-only + staggered-attempts integration, pump buffer growth).
+  Kotlin 122 (unchanged).
+
 ## 0.4.4 — Logs tab + bug fixes
 
 - Logs is now its own screen (4th bottom tab): the session log

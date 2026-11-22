@@ -8,10 +8,11 @@
 //! and the byte counts are recorded.
 //!
 //! Reply codes: 0x00 success, 0x02 connection not allowed by ruleset
-//! (blocked domain), 0x04 host unreachable (the name did not resolve),
-//! 0x05 connection refused (no address accepted the connection),
-//! 0x07 command not supported (anything other than CONNECT), 0x08
-//! address type not supported.
+//! (blocked domain), 0x03 network unreachable (IPv6-only target while
+//! the IPv6 breaker is down), 0x04 host unreachable (the name did not
+//! resolve), 0x05 connection refused (no address accepted the
+//! connection), 0x07 command not supported (anything other than
+//! CONNECT), 0x08 address type not supported.
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -35,6 +36,7 @@ const NEGOTIATE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const REP_SUCCESS: u8 = 0x00;
 const REP_NOT_ALLOWED: u8 = 0x02;
+const REP_NETWORK_UNREACHABLE: u8 = 0x03;
 const REP_HOST_UNREACHABLE: u8 = 0x04;
 const REP_CONNECTION_REFUSED: u8 = 0x05;
 const REP_COMMAND_NOT_SUPPORTED: u8 = 0x07;
@@ -302,6 +304,16 @@ async fn connect(
             return Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
                 format!("could not resolve {host}"),
+            ));
+        }
+        Err(ConnectError::Unreachable(e)) => {
+            crate::diag::log_warn(format!(
+                "IPv6 is down, refusing {host}:{port} at once: {e}"
+            ));
+            let _ = send_error_reply(&mut client, REP_NETWORK_UNREACHABLE).await;
+            return Err(io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                format!("IPv6 is down: {host}:{port}"),
             ));
         }
         Err(ConnectError::Connect(e)) => {

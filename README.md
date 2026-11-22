@@ -72,3 +72,16 @@ and release APKs (release with R8) and uploads both as artifacts; the release
 APK size is printed in the job summary. Signing is persistent via
 `PROXYSHARE_*` repo secrets (see the workflow) so every update installs over
 the previous one.
+
+## Benchmark
+
+`scripts/bench.sh` measures the proxy from a laptop on the same Wi-Fi or
+hotspot as the phone (needs curl, proxy running):
+
+```sh
+sh scripts/bench.sh PHONE_IP [PORT]
+```
+
+It prints 20 sequential new connections through socks5h (connect / TLS /
+first-byte timings each) and then a 50 MB download from speed.cloudflare.com
+with its average speed. PORT defaults to 1080 (the split-mode SOCKS port).

@@ -273,6 +273,10 @@ impl Engine {
                 return Err(e);
             }
         };
+        // A fresh start re-resolves everything: drop cached DNS from
+        // the previous run (0.4.5), so stale entries can't point at
+        // the old network.
+        self.outbound.flush_dns_cache();
         {
             let mut inner = lock_inner(&self.inner);
             match inner.state {
@@ -682,6 +686,7 @@ async fn accept_loop(
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, peer)) => {
+                        let _ = stream.set_nodelay(true);
                         engine.try_spawn_connection(stream, peer, &config, allowed.clone(), shutdown.clone());
                     }
                     Err(e) => {
