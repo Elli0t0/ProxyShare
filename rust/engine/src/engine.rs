@@ -1524,6 +1524,104 @@ mod tests {
         engine.stop();
     }
 
+    /// Garbage in every protocol's shape must close promptly and
+    /// never wedge the engine: each case is a connection that the
+    /// engine must drop (EOF within 2 s), and a good connection
+    /// must still work afterwards.
+    #[tokio::test]
+    async fn garbage_connections_do_not_break_the_engine() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        // Truncated SOCKS5 greeting; first byte 0 (neither SOCKS4
+        // nor SOCKS5, so the HTTP path, which closes on EOF);
+        // truncated SOCKS4 head; a non-proxy first byte (HTTP path,
+        // 400 then close). The SOCKS5 version-0 and invalid-domain
+        // checks live in the socks5 module tests, which drive
+        // `negotiate`/`read_request` directly.
+        let cases: &[&[u8]] = &[
+            b"\x05",
+            b"\x00\x01\x00",
+            b"\x04\x01\x00\x50",
+            b"GARBAGE\r\n\r\n",
+        ];
+        for bytes in cases {
+            let mut client = TcpStream::connect(("127.0.0.1", port))
+                .await
+                .expect("connect");
+            client.write_all(bytes).await.expect("write garbage");
+            client
+                .shutdown(std::net::Shutdown::Write)
+                .expect("shutdown write");
+            // Drain until EOF: the engine closes the connection (a
+            // 400 reply may come first on the HTTP path).
+            let mut buf = [0u8; 4096];
+            let closed = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    match client.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(_) => continue,
+                        Err(_) => break,
+                    }
+                }
+            })
+            .await;
+            assert!(
+                closed.is_ok(),
+                "engine must close garbage {bytes:?} within 2 s"
+            );
+        }
+        // The engine still accepts a good connection afterwards.
+        let _client = echo_connection(port, echo_port, b"hello").await;
+        engine.stop();
+    }
+
+    /// Opening max_connections + 50 raw sockets: the extra ones are
+    /// counted in rejected_limit, and new connections work again
+    /// once the held ones close.
+    #[tokio::test]
+    async fn max_connections_rejects_the_overflow_and_recovers() {
+        let echo_port = start_echo_server().await;
+        let (engine, _sink, port) = start_test_engine("max_connections = 8");
+        // Hold 8 connections open, silent: they sit in the sniffer
+        // (5 s first-byte timeout) and count as active.
+        let mut held = Vec::new();
+        for _ in 0..8 {
+            held.push(
+                TcpStream::connect(("127.0.0.1", port))
+                    .await
+                    .expect("connect"),
+            );
+        }
+        wait_until("active reaches 8", || head_fields(&engine)[3] == "8").await;
+        // 50 more: each must be refused and counted.
+        let mut extra = Vec::new();
+        for _ in 0..50 {
+            extra.push(
+                TcpStream::connect(("127.0.0.1", port))
+                    .await
+                    .expect("connect"),
+            );
+        }
+        wait_until_timeout("rejected_limit reaches 50", 2, || {
+            head_fields(&engine)[4].parse::<u64>().unwrap_or(0) == 50
+        })
+        .await;
+        // The refused sockets are closed by the engine: reads end in EOF.
+        for client in extra.iter_mut() {
+            let mut buf = [0u8; 1];
+            let n = tokio::time::timeout(Duration::from_secs(2), client.read(&mut buf))
+                .await
+                .expect("read finished")
+                .expect("read ok");
+            assert_eq!(n, 0, "a refused socket must be closed");
+        }
+        // Close the held connections; a new one works again.
+        drop(held);
+        wait_until("active reaches 0", || head_fields(&engine)[3] == "0").await;
+        let _client = echo_connection(port, echo_port, b"again").await;
+        engine.stop();
+    }
+
     /// Start an engine with `extra_config` (one "key=value" line, or "")
     /// on a free port, with a collecting sink. Returns (engine, sink, port).
     fn start_test_engine(

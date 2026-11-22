@@ -425,3 +425,91 @@ async fn associate(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    /// Drive a parser over a localhost pair: write `bytes`, then close
+    /// the client so a truncated read ends in EOF (not the 10 s
+    /// negotiation timeout), and assert the parse fails within 2 s.
+    async fn parse_fails_within_2s<F, Fut>(bytes: &[u8], parse: F)
+    where
+        F: FnOnce(TcpStream) -> Fut,
+        Fut: std::future::Future<Output = io::Result<()>>,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            parse(stream).await
+        });
+        let mut client = TcpStream::connect(addr).await.expect("connect");
+        client.write_all(bytes).await.expect("write");
+        drop(client);
+        let result = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("parse finished within 2 s")
+            .expect("server task");
+        assert!(result.is_err(), "garbage {bytes:?} must fail");
+    }
+
+    async fn negotiate_case(bytes: &[u8]) {
+        parse_fails_within_2s(bytes, |mut s| async move {
+            let config = Config::default();
+            negotiate(&mut s, &config).await
+        })
+        .await;
+    }
+
+    async fn request_case(bytes: &[u8]) {
+        parse_fails_within_2s(bytes, |mut s| async move {
+            read_request(&mut s).await.map(|_| ())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn garbage_greeting_truncated_at_every_boundary() {
+        let full: [u8; 3] = [0x05, 0x01, 0x00];
+        for len in 0..full.len() {
+            negotiate_case(&full[..len]).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn garbage_greeting_bad_version_and_no_methods() {
+        // Version byte 0: rejected as soon as the 2-byte head is read.
+        negotiate_case(&[0x00, 0x01, 0x00]).await;
+        // No methods offered.
+        negotiate_case(&[0x05, 0x00]).await;
+    }
+
+    #[tokio::test]
+    async fn garbage_request_truncated_at_every_boundary() {
+        let full: [u8; 10] = [0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1, 0x1F, 0x90];
+        for len in 0..full.len() {
+            request_case(&full[..len]).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn garbage_request_domain_cases() {
+        // Domain request truncated at every boundary.
+        let mut full = vec![0x05, 0x01, 0x00, 0x03, 11];
+        full.extend_from_slice(b"example.com");
+        full.extend_from_slice(&0x1F90u16.to_be_bytes());
+        for len in 0..full.len() {
+            request_case(&full[..len]).await;
+        }
+        // Oversized host length: 255 claimed, only 3 sent.
+        request_case(&[0x05, 0x01, 0x00, 0x03, 255, b'a', b'b', b'c']).await;
+        // Invalid UTF-8 host.
+        request_case(&[0x05, 0x01, 0x00, 0x03, 0x03, 0xFF, 0xFE, 0xFD, 0x1F, 0x90]).await;
+        // CONNECT with no port (the 8-byte head, port bytes missing).
+        request_case(&[0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1]).await;
+        // Bad address type.
+        request_case(&[0x05, 0x01, 0x00, 0x02]).await;
+    }
+}

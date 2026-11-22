@@ -1,45 +1,63 @@
 package com.example.proxyshare.ui.screens
 
 import com.example.proxyshare.R
+import com.example.proxyshare.engine.NativeEngine
 
-/** Port 1024-65535, or null when the text is not a valid port. */
-fun validatePort(text: String): Int? = text.toIntOrNull()?.takeIf { it in 1024..65535 }
+/** Validation kinds for [validate]: must match rust/engine/src/validate.rs. */
+const val VALIDATE_CIDR = 0
+const val VALIDATE_DOMAIN = 1
+const val VALIDATE_PORT = 2
 
-/** "192.168.1.0/24" or a bare "10.0.0.5" (implies /32). Anything else is invalid. */
-fun validateCidr(text: String): Boolean {
-    val ip = text.substringBefore('/')
-    val bits = if ('/' in text) text.substringAfter('/') else "32"
-    val octets = ip.split('.')
-    if (octets.size != 4 || octets.any { (it.toIntOrNull() ?: -1) !in 0..255 }) return false
-    return (bits.toIntOrNull() ?: -1) in 0..32
-}
+/**
+ * Validate one settings value in Rust, the single validation source.
+ * Returns "" when valid, or a stable error code ("empty",
+ * "has_scheme", "has_path", "bad_cidr", "bad_port", "bad_domain",
+ * "bad_kind"). Kotlin holds no validation logic of its own.
+ */
+fun validate(kind: Int, value: String): String = NativeEngine.nativeValidate(kind, value)
+
+/** Error code from [validate] -> string resource. */
+val validationErrorRes: Map<String, Int> = mapOf(
+    "empty" to R.string.validation_empty,
+    "has_scheme" to R.string.validation_has_scheme,
+    "has_path" to R.string.validation_has_path,
+    "bad_cidr" to R.string.allowed_clients_invalid,
+    "bad_port" to R.string.port_error,
+    "bad_domain" to R.string.blocked_domains_invalid,
+    "bad_kind" to R.string.blocked_domains_invalid,
+)
+
+/** Port 1024-65535, or null when the text is not a valid port (validated in Rust). */
+fun validatePort(text: String): Int? =
+    if (validate(VALIDATE_PORT, text).isEmpty()) text.trim().toIntOrNull() else null
+
+/** A domain to block: "ads.example.com" or "*.example.com". Validated in Rust. */
+fun validateBlockedDomain(text: String): Boolean = validate(VALIDATE_DOMAIN, text).isEmpty()
 
 /** A whole number inside [range], or null when not a number or out of range. */
 fun validateIntInRange(text: String, range: IntRange): Int? =
     text.toIntOrNull()?.takeIf { it in range }
 
-/** A domain to block: "ads.example.com" or "*.example.com". No spaces, no scheme, no path. */
-fun validateBlockedDomain(text: String): Boolean {
-    val t = text.trim()
-    if (t.isEmpty()) return false
-    if (t.any { it.isWhitespace() }) return false
-    if (t.contains('/')) return false
-    if (t.contains(':')) return false
-    return true
-}
-
 /**
  * Split pasted text into the entries to add and the invalid count:
  * one per line, blank lines and #-comments ignored, duplicates
  * (within the paste and against [existing]) dropped silently.
+ * Each line is validated through the same Rust call as the single
+ * add row (one JNI call per line; this is not a hot path).
+ * [isValid] is injectable so JVM unit tests can check the splitting
+ * without loading the native library.
  */
-fun parseBlockedList(text: String, existing: List<String> = emptyList()): Pair<List<String>, Int> {
+fun parseBlockedList(
+    text: String,
+    existing: List<String> = emptyList(),
+    isValid: (String) -> Boolean = ::validateBlockedDomain,
+): Pair<List<String>, Int> {
     val added = mutableListOf<String>()
     var invalid = 0
     for (raw in text.lines()) {
         val line = raw.trim()
         if (line.isEmpty() || line.startsWith("#")) continue
-        if (!validateBlockedDomain(line)) {
+        if (!isValid(line)) {
             invalid++
         } else if (line !in existing && line !in added) {
             added += line

@@ -19,7 +19,8 @@
 //! functions), [`http`] (plain HTTP forwarding and CONNECT tunnels),
 //! [`listener`] (the JNI event callback), [`netbind`] (bind an outbound
 //! socket to an Android Network), [`history`] (speed history ring and
-//! sampler), [`sessionlog`] (session log ring).
+//! sampler), [`sessionlog`] (session log ring), [`validate`] (the
+//! single validation source for settings text: CIDR, domain, port).
 
 pub mod auth;
 pub mod cidr;
@@ -38,18 +39,19 @@ pub mod sniffer;
 pub mod socks4;
 pub mod socks5;
 pub mod udp;
+pub mod validate;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use jni::objects::{JClass, JObject, JString};
-use jni::sys::{jboolean, jlong, jstring};
+use jni::sys::{jboolean, jint, jlong, jstring};
 use jni::JNIEnv;
 
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.5.1".
-pub const ENGINE_VERSION: &str = "engine 0.5.1";
+/// The engine version string, e.g. "engine 0.5.2".
+pub const ENGINE_VERSION: &str = "engine 0.5.2";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -346,6 +348,36 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDia
     let result = catch_unwind(AssertUnwindSafe(crate::diag::clear));
     if result.is_err() {
         let _ = env.exception_clear();
+    }
+}
+
+/// Validate one settings value in Rust, the single validation source
+/// (0.5.2): `kind` 0 = CIDR/IP, 1 = domain pattern, 2 = port.
+/// Returns "" when valid, or a stable error code ("empty",
+/// "has_scheme", "has_path", "bad_cidr", "bad_port", "bad_domain",
+/// "bad_kind"). Kotlin maps the code to a string resource and holds
+/// no validation logic of its own. Takes no handle: validation is
+/// pure, not per-engine.
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeValidate<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    kind: jint,
+    value: JString<'local>,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let text = match from_jstring(&mut env, &value) {
+            Ok(text) => text,
+            Err(e) => return to_jstring(&env, &e),
+        };
+        to_jstring(&env, crate::validate::validate(kind, &text))
+    }));
+    match result {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
     }
 }
 

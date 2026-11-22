@@ -687,7 +687,7 @@ private fun NumberField(
 @Composable
 private fun CidrAddRow(onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    var invalid by rememberSaveable { mutableStateOf(false) }
+    var errorCode by rememberSaveable { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -695,27 +695,30 @@ private fun CidrAddRow(onAdd: (String) -> Unit) {
         ) {
             OutlinedTextField(
                 value = text,
-                onValueChange = { text = it; invalid = false },
+                onValueChange = { text = it; errorCode = null },
                 label = { Text(stringResource(R.string.allowed_clients_hint)) },
-                isError = invalid,
+                isError = errorCode != null,
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             Button(onClick = {
-                if (validateCidr(text.trim())) {
+                val code = validate(VALIDATE_CIDR, text.trim())
+                if (code.isEmpty()) {
                     onAdd(text.trim())
                     text = ""
-                    invalid = false
+                    errorCode = null
                 } else {
-                    invalid = true
+                    errorCode = code
                 }
             }) {
                 Text(stringResource(R.string.allowed_clients_add))
             }
         }
-        if (invalid) {
+        if (errorCode != null) {
             Text(
-                text = stringResource(R.string.allowed_clients_invalid),
+                text = stringResource(
+                    validationErrorRes[errorCode] ?: R.string.allowed_clients_invalid,
+                ),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -726,7 +729,7 @@ private fun CidrAddRow(onAdd: (String) -> Unit) {
 @Composable
 private fun DomainAddRow(onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    var invalid by rememberSaveable { mutableStateOf(false) }
+    var errorCode by rememberSaveable { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -734,27 +737,30 @@ private fun DomainAddRow(onAdd: (String) -> Unit) {
         ) {
             OutlinedTextField(
                 value = text,
-                onValueChange = { text = it; invalid = false },
+                onValueChange = { text = it; errorCode = null },
                 label = { Text(stringResource(R.string.blocked_domains_hint)) },
-                isError = invalid,
+                isError = errorCode != null,
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
             Button(onClick = {
-                if (validateBlockedDomain(text.trim())) {
+                val code = validate(VALIDATE_DOMAIN, text.trim())
+                if (code.isEmpty()) {
                     onAdd(text.trim())
                     text = ""
-                    invalid = false
+                    errorCode = null
                 } else {
-                    invalid = true
+                    errorCode = code
                 }
             }) {
                 Text(stringResource(R.string.blocked_domains_add))
             }
         }
-        if (invalid) {
+        if (errorCode != null) {
             Text(
-                text = stringResource(R.string.blocked_domains_invalid),
+                text = stringResource(
+                    validationErrorRes[errorCode] ?: R.string.blocked_domains_invalid,
+                ),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )

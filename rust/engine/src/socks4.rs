@@ -150,3 +150,58 @@ pub async fn handle(
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    /// Drive `read_cstring` over a localhost pair: write `bytes`,
+    /// then close the client so a truncated read ends in EOF (not
+    /// the 10 s read timeout), and return what the read produced
+    /// (within 2 s).
+    async fn read_cstring_case(bytes: &[u8]) -> io::Result<String> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            read_cstring(&mut stream, 255).await
+        });
+        let mut client = TcpStream::connect(addr).await.expect("connect");
+        client.write_all(bytes).await.expect("write");
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("read finished within 2 s")
+            .expect("server task")
+    }
+
+    #[tokio::test]
+    async fn garbage_userid_truncated_at_every_boundary() {
+        let full = b"user\0";
+        for len in 0..full.len() {
+            assert!(
+                read_cstring_case(&full[..len]).await.is_err(),
+                "truncated at {len} must fail"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn garbage_userid_oversized_and_invalid_utf8() {
+        // 300 bytes, no NUL: over the 255 cap.
+        let over = vec![b'a'; 300];
+        assert!(read_cstring_case(&over).await.is_err());
+        // Invalid UTF-8 before the NUL.
+        assert!(read_cstring_case(&[0xFF, 0xFE, 0x00]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn empty_userid_is_ok() {
+        // Pins the valid case: a bare NUL reads as an empty userid.
+        assert_eq!(
+            read_cstring_case(&[0x00]).await.expect("empty userid reads"),
+            ""
+        );
+    }
+}

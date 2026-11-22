@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +65,7 @@ fun AppRoot() {
                     NavigationBarItem(
                         selected = tab == 2,
                         onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        icon = { Icon(Icons.Filled.Menu, contentDescription = null) },
                         label = { Text(stringResource(R.string.nav_logs)) },
                     )
                     NavigationBarItem(

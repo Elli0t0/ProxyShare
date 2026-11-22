@@ -72,6 +72,16 @@ object NativeEngine {
     @JvmStatic
     external fun nativeDiagClear()
 
+    /**
+     * Validate one settings value in Rust, the single validation source
+     * (see docs/ENGINE_API.md): kind 0 = CIDR/IP, 1 = domain pattern,
+     * 2 = port. Returns "" when valid, or a stable error code
+     * ("empty", "has_scheme", "has_path", "bad_cidr", "bad_port",
+     * "bad_domain", "bad_kind"). Takes no handle: validation is pure.
+     */
+    @JvmStatic
+    external fun nativeValidate(kind: Int, value: String): String
+
     /** Register the callback that receives engine events. */
     @JvmStatic
     external fun nativeSetListener(handle: Long, listener: EngineListener)

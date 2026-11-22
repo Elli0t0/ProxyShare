@@ -2,29 +2,10 @@ package com.example.proxyshare.ui.screens
 
 import com.example.proxyshare.R
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsLogicTest {
-
-    @Test
-    fun portValidation() {
-        assertNull(validatePort("80"))
-        assertNull(validatePort("70000"))
-        assertEquals(8080, validatePort("8080"))
-        assertNull(validatePort("abc"))
-    }
-
-    @Test
-    fun cidrValidation() {
-        assertTrue(validateCidr("192.168.1.0/24"))
-        assertTrue(validateCidr("10.0.0.5"))
-        assertFalse(validateCidr("300.1.1.1"))
-        assertFalse(validateCidr("1.2.3"))
-        assertFalse(validateCidr("1.2.3.4/33"))
-    }
 
     @Test
     fun intRangeValidation() {
@@ -34,20 +15,13 @@ class SettingsLogicTest {
     }
 
     @Test
-    fun blockedDomainValidation() {
-        assertTrue(validateBlockedDomain("ads.example.com"))
-        assertTrue(validateBlockedDomain("*.example.com"))
-        assertFalse(validateBlockedDomain("ads .example.com"))
-        assertFalse(validateBlockedDomain("http://ads.example.com"))
-        assertFalse(validateBlockedDomain("https://example.com"))
-        assertFalse(validateBlockedDomain("ads.example.com/path"))
-        assertFalse(validateBlockedDomain("ads.example.com:8080"))
-        assertFalse(validateBlockedDomain(""))
-        assertFalse(validateBlockedDomain("   "))
-    }
-
-    @Test
     fun blockedListParsing() {
+        // The real validator lives in Rust now (see validate.rs) and
+        // its cases are ported there; here a stub stands in so this
+        // test checks only the splitting, comments, duplicates and
+        // the invalid count, without loading the native library.
+        val isValid: (String) -> Boolean =
+            { !it.contains(' ') && !it.startsWith("http") }
         val (added, invalid) = parseBlockedList(
             "ads.example.com\n" +
                 "# a comment\n" +
@@ -57,6 +31,7 @@ class SettingsLogicTest {
                 "ads.example.com\n" +
                 "http://x.example.com\n",
             existing = listOf("old.example.com"),
+            isValid = isValid,
         )
         assertEquals(listOf("ads.example.com", "*.tracker.example"), added)
         assertEquals(2, invalid)
@@ -64,6 +39,7 @@ class SettingsLogicTest {
         val (added2, invalid2) = parseBlockedList(
             "old.example.com\nads.example.com\nads.example.com\n",
             existing = listOf("old.example.com"),
+            isValid = isValid,
         )
         assertEquals(listOf("ads.example.com"), added2)
         assertEquals(0, invalid2)

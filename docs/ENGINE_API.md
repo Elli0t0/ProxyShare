@@ -54,6 +54,7 @@ second parameter.
 | `nativeSessionLogClear(h: Long)` | `Engine::clear_session_log` | Clears the session log ring and restarts the id counter at 0. Safe on an unknown handle (no-op). |
 | `nativeDiagLog(): String` | reads the diagnostics ring buffer | The log text (below), or `""` when empty. Takes no handle: the buffer is global, not per-engine. |
 | `nativeDiagClear()` | clears the diagnostics ring buffer | No handle: the buffer is global, not per-engine. |
+| `nativeValidate(kind: Int, value: String): String` | `validate::validate` | Validates one settings value in Rust, the single validation source (see "Validation"). Returns `""` when valid, or a stable error code. Takes no handle: validation is pure, not per-engine. |
 | `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
 
 ## Server (0.0.4, extended in 0.0.5)
@@ -543,6 +544,29 @@ idle.
   by a Busy edge; on expiry it emits `IdleStop` (type 13) and
   Kotlin stops the proxy. The 60 s wake-lock grace stays in
   Kotlin, driven by the same Busy / Idle edges.
+
+## Validation (0.5.2)
+
+Settings text is validated once, in Rust (`rust/engine/src/validate.rs`),
+through `nativeValidate(kind, value)`. Kotlin used to validate
+CIDR/domain/port itself while Rust validated the same values again in
+`cidr`/`config`, and the two could drift; now Kotlin calls this one
+function and keeps only the error-code -> string-resource map.
+
+- Kinds: 0 = CIDR/IP, 1 = domain pattern, 2 = port.
+- Returns `""` when valid, or a stable error code: `empty`,
+  `has_scheme` (contains `://`), `has_path` (contains `/`),
+  `bad_cidr`, `bad_port`, `bad_domain`, `bad_kind` (unknown kind, a
+  caller bug).
+- CIDR: `Cidr::parse` is the authority, so IPv6 works too
+  (`2001:db8::/32`, bare `::1`); the old Kotlin validator only knew
+  IPv4. Port: 1024-65535 (no privileged ports) — the stricter UI
+  rule; the engine config itself accepts 1-65535. Domain: an
+  optional leading `*.` wildcard, then labels of letters, digits
+  and `-` (not leading/trailing); uppercase and a trailing dot are
+  accepted; a single label is accepted.
+- Bulk "Paste list" validates each line through the same call, one
+  JNI call per line (not a hot path).
 
 ## Events
 

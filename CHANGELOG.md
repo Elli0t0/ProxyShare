@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.2 — single validation source + robustness tests
+
+- Validate once, in Rust: new `nativeValidate(kind, value)` JNI call
+  (`rust/engine/src/validate.rs`, kind 0 = CIDR/IP, 1 = domain
+  pattern, 2 = port) returns `""` when valid or a stable error code
+  (`empty`, `has_scheme`, `has_path`, `bad_cidr`, `bad_port`,
+  `bad_domain`, `bad_kind`). Kotlin keeps only the error-code ->
+  string-resource map; the duplicate Kotlin validators and their
+  tests are deleted, their cases ported to Rust (including
+  `*.example.com`, uppercase hosts, a trailing dot, IPv6 CIDR, port
+  0 and 65536). The CIDR validator now accepts IPv6 (the Rust
+  `Cidr::parse` is the authority; the old Kotlin one only knew
+  IPv4). Bulk "Paste list" validates each line through the same
+  call, one JNI call per line.
+- Parser robustness tests (Rust): table-driven garbage tests for the
+  SOCKS5, SOCKS4 and HTTP request parsers — truncated handshakes at
+  every byte boundary, oversized host length, invalid UTF-8 host,
+  version byte 0, a CONNECT with no port, header lines over 8 KB —
+  each finishing within 2 s, never panicking; plus an engine test
+  that garbage connections close promptly and the engine keeps
+  accepting afterwards. A 9 KB header line inside the 16 KB total
+  head cap still reads (no per-line cap); a head over 16 KB fails.
+- Connection-limit test: opening max_connections + 50 raw sockets
+  counts the extra ones in `rejected_limit` and new connections
+  work again once the held ones close.
+- Logs tab icon is now the list-style `Menu` icon from
+  material-icons-core (the `i` read like "About"); `List` was
+  already taken by the Connections tab, and no document icon exists
+  in core. `scripts/bench.sh` stays where it is: README references
+  it, so the move condition did not hold.
+- Tests: Rust 151 -> 170 (validate cases, SOCKS5/SOCKS4/HTTP
+  garbage tables, engine garbage + max-connections); Kotlin 133
+  -> 130 (3 validator tests deleted, paste test kept with a stub
+  validator).
+
 ## 0.5.1 — the engine owns the stats
 
 - Rust now owns every live stat, so Kotlin holds no timers,

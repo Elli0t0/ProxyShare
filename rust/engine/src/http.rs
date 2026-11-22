@@ -394,4 +394,72 @@ mod tests {
         assert_eq!(find_head_end(b"a\r\n\r"), None);
         assert_eq!(find_head_end(b""), None);
     }
+
+    #[test]
+    fn rewrite_garbage_returns_none() {
+        assert!(rewrite_head("CONNECT example.com:443 HTTP/1.1\r\n\r\n").is_none());
+        assert!(rewrite_head("GET /relative HTTP/1.1\r\n\r\n").is_none());
+        assert!(rewrite_head("GARBAGE\r\n\r\n").is_none());
+        assert!(rewrite_head("").is_none());
+    }
+
+    /// Drive `read_head` over a localhost pair: write `bytes`, then
+    /// close the client so a truncated head ends in EOF, and return
+    /// what the read produced (within 2 s).
+    async fn read_head_case(bytes: &[u8]) -> io::Result<(String, Vec<u8>)> {
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            read_head(&mut stream).await
+        });
+        let mut client = TcpStream::connect(addr).await.expect("connect");
+        client.write_all(bytes).await.expect("write");
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("read finished within 2 s")
+            .expect("server task")
+    }
+
+    #[tokio::test]
+    async fn garbage_head_truncated_at_every_boundary() {
+        let full = b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n";
+        for len in 0..full.len() {
+            assert!(
+                read_head_case(&full[..len]).await.is_err(),
+                "truncated at {len} must fail"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn garbage_head_oversized_and_invalid_utf8() {
+        // One 9 KB header line inside a head under the 16 KB total cap:
+        // the parser has no per-line cap, so this reads fine.
+        let mut head = b"GET http://example.com/ HTTP/1.1\r\nX-Long: ".to_vec();
+        head.extend_from_slice(&[b'a'; 9 * 1024]);
+        head.extend_from_slice(b"\r\n\r\n");
+        assert!(
+            read_head_case(&head).await.is_ok(),
+            "a 9 KB line under the cap reads"
+        );
+        // A head past the 16 KB total cap fails.
+        let mut big = b"GET http://example.com/ HTTP/1.1\r\nX-Long: ".to_vec();
+        big.extend_from_slice(&[b'a'; 17 * 1024]);
+        big.extend_from_slice(b"\r\n\r\n");
+        assert!(
+            read_head_case(&big).await.is_err(),
+            "a head over 16 KB must fail"
+        );
+        // Invalid UTF-8 before the blank line fails.
+        let mut bad = b"GET http://example.com/ HTTP/1.1\r\nX-Bad: ".to_vec();
+        bad.extend_from_slice(&[0xFF, 0xFE]);
+        bad.extend_from_slice(b"\r\n\r\n");
+        assert!(
+            read_head_case(&bad).await.is_err(),
+            "invalid UTF-8 must fail"
+        );
+    }
 }

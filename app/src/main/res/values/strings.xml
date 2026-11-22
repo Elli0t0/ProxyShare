@@ -85,6 +85,9 @@
     <string name="settings_appearance">Appearance</string>
     <string name="port_label">Port</string>
     <string name="port_error">Port must be 1024–65535</string>
+    <string name="validation_empty">Enter a value</string>
+    <string name="validation_has_scheme">Remove http:// or https://</string>
+    <string name="validation_has_path">Remove the path after the domain</string>
     <string name="separate_ports_label">Separate ports for HTTP and SOCKS</string>
     <string name="http_port_label">HTTP port</string>
     <string name="socks_port_label">SOCKS port</string>
