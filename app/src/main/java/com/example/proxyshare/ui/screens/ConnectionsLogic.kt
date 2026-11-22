@@ -111,6 +111,35 @@ fun sessionLogEntry(conn: ConnInfo, closedAtMs: Long): SessionLogEntry =
         blocked = conn.blocked,
     )
 
+/**
+ * Parse the engine session-log text (see docs/ENGINE_API.md): one
+ * "log_id<TAB>conn_id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked"
+ * line per record, oldest first. Returns (log id, entry) pairs;
+ * malformed lines are skipped, never a crash. `closedAtMs` is the
+ * time the UI received the records (the engine does not stamp the
+ * close time).
+ */
+fun parseSessionLog(text: String, closedAtMs: Long): List<Pair<Long, SessionLogEntry>> {
+    if (text.isBlank()) return emptyList()
+    return text.lineSequence().filter { it.isNotEmpty() }.mapNotNull { line ->
+        val f = line.split('\t')
+        if (f.size < 10) return@mapNotNull null
+        val logId = f[0].toLongOrNull() ?: return@mapNotNull null
+        val conn = ConnInfo(
+            id = f[1].toLongOrNull() ?: return@mapNotNull null,
+            client = f[2],
+            host = f[3],
+            port = f[4].toIntOrNull() ?: return@mapNotNull null,
+            proto = f[5],
+            startedMs = f[6].toLongOrNull() ?: return@mapNotNull null,
+            up = f[7].toLongOrNull() ?: return@mapNotNull null,
+            down = f[8].toLongOrNull() ?: return@mapNotNull null,
+            blocked = f[9] == "1",
+        )
+        logId to sessionLogEntry(conn, closedAtMs)
+    }.toList()
+}
+
 /** Append an entry, keeping only the last `max` (500) entries. */
 fun pushLogEntry(
     log: List<SessionLogEntry>,

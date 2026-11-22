@@ -71,16 +71,19 @@ impl RateLimiter {
 }
 
 /// Copy bytes from `r` to `w` until the read side hits EOF, errors, or
-/// sits idle for `idle`. Every copied chunk is counted live into `ctr`.
-/// On EOF the write half is shut down, so the peer sees a clean FIN.
-/// When `limiter` is set, each chunk waits for its tokens first. The
-/// buffer starts at 8 KB and doubles up to 64 KB whenever a read fills
-/// it, so idle or tiny connections don't pay for a 32 KB buffer up
-/// front.
+/// sits idle for `idle`. Every copied chunk is counted live into `ctr`
+/// (this connection) and into `live` (the engine-wide total, so the
+/// snapshot's liveUp/liveDown are monotonic and include closed
+/// connections). On EOF the write half is shut down, so the peer sees
+/// a clean FIN. When `limiter` is set, each chunk waits for its tokens
+/// first. The buffer starts at 8 KB and doubles up to 64 KB whenever
+/// a read fills it, so idle or tiny connections don't pay for a 32 KB
+/// buffer up front.
 pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     mut r: R,
     mut w: W,
     ctr: &AtomicU64,
+    live: &AtomicU64,
     idle: Duration,
     limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
@@ -102,6 +105,7 @@ pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         }
         w.write_all(&buf[..n]).await?;
         ctr.fetch_add(n as u64, Ordering::Relaxed);
+        live.fetch_add(n as u64, Ordering::Relaxed);
     }
 }
 
@@ -112,11 +116,12 @@ pub async fn pump<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 /// peer that ignores the FIN. The first error wins. `up_limiter`
 /// (client -> target) and `down_limiter` (target -> client) are shared
 /// across all connections; None means unlimited in that direction.
+/// The record carries both the per-connection counters and the
+/// engine-wide live totals the pumps also feed.
 pub async fn relay(
     client: TcpStream,
     upstream: TcpStream,
-    up: &AtomicU64,
-    down: &AtomicU64,
+    record: &std::sync::Arc<crate::engine::ConnRecord>,
     idle: Duration,
     up_limiter: Option<&Arc<RateLimiter>>,
     down_limiter: Option<&Arc<RateLimiter>>,
@@ -124,8 +129,8 @@ pub async fn relay(
     let (client_r, client_w) = client.into_split();
     let (up_r, up_w) = upstream.into_split();
     let (r1, r2) = tokio::join!(
-        pump(client_r, up_w, up, idle, up_limiter),
-        pump(up_r, client_w, down, idle, down_limiter),
+        pump(client_r, up_w, &record.up, &record.live_up, idle, up_limiter),
+        pump(up_r, client_w, &record.down, &record.live_down, idle, down_limiter),
     );
     match (r1, r2) {
         (Ok(()), Ok(())) => Ok(()),
@@ -137,6 +142,7 @@ pub async fn relay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -145,8 +151,9 @@ mod tests {
         let (mut client_end, relay_in) = tokio::io::duplex(64);
         let (relay_out, mut server_end) = tokio::io::duplex(64);
         let ctr = AtomicU64::new(0);
+        let live = AtomicU64::new(0);
         let (result, _) = tokio::join!(
-            pump(relay_in, relay_out, &ctr, Duration::from_secs(5), None),
+            pump(relay_in, relay_out, &ctr, &live, Duration::from_secs(5), None),
             async {
                 client_end.write_all(b"hello").await.expect("write");
                 let mut buf = [0u8; 5];
@@ -154,6 +161,7 @@ mod tests {
                 assert_eq!(&buf, b"hello");
                 // The counter moved while the transfer was still running.
                 assert_eq!(ctr.load(Ordering::Relaxed), 5);
+                assert_eq!(live.load(Ordering::Relaxed), 5);
                 drop(client_end);
                 drop(server_end);
             },
@@ -168,16 +176,18 @@ mod tests {
         let (mut client_end, relay_in) = tokio::io::duplex(64 * 1024);
         let (relay_out, mut server_end) = tokio::io::duplex(64 * 1024);
         let ctr = AtomicU64::new(0);
+        let live = AtomicU64::new(0);
         let payload = vec![7u8; 20 * 1024];
         let expected = payload.clone();
         let (result, _) = tokio::join!(
-            pump(relay_in, relay_out, &ctr, Duration::from_secs(5), None),
+            pump(relay_in, relay_out, &ctr, &live, Duration::from_secs(5), None),
             async {
                 client_end.write_all(&payload).await.expect("write");
                 let mut buf = vec![0u8; 20 * 1024];
                 server_end.read_exact(&mut buf).await.expect("read");
                 assert_eq!(buf, expected);
                 assert_eq!(ctr.load(Ordering::Relaxed), 20 * 1024);
+                assert_eq!(live.load(Ordering::Relaxed), 20 * 1024);
                 drop(client_end);
                 drop(server_end);
             },
@@ -190,11 +200,13 @@ mod tests {
         let (_a, relay_in) = tokio::io::duplex(64);
         let (_b, relay_out) = tokio::io::duplex(64);
         let ctr = AtomicU64::new(0);
-        let err = pump(relay_in, relay_out, &ctr, Duration::from_millis(50), None)
+        let live = AtomicU64::new(0);
+        let err = pump(relay_in, relay_out, &ctr, &live, Duration::from_millis(50), None)
             .await
             .expect_err("an idle pump must time out");
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
         assert_eq!(ctr.load(Ordering::Relaxed), 0);
+        assert_eq!(live.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test]
@@ -218,14 +230,23 @@ mod tests {
             .await
             .expect("connect front");
         let (relay_client, _) = front.accept().await.expect("accept front");
-        let up = AtomicU64::new(0);
-        let down = AtomicU64::new(0);
+        let record = std::sync::Arc::new(crate::engine::ConnRecord {
+            id: 1,
+            client_ip: std::net::IpAddr::from_str("127.0.0.1").expect("test IP"),
+            target: std::sync::Mutex::new(("example.com".to_string(), 80)),
+            protocol: crate::model::Protocol::Http,
+            started_ms: 0,
+            up: AtomicU64::new(0),
+            down: AtomicU64::new(0),
+            blocked: std::sync::atomic::AtomicBool::new(false),
+            live_up: std::sync::Arc::new(AtomicU64::new(0)),
+            live_down: std::sync::Arc::new(AtomicU64::new(0)),
+        });
         let (result, _) = tokio::join!(
             relay(
                 relay_client,
                 upstream,
-                &up,
-                &down,
+                &record,
                 Duration::from_secs(5),
                 None,
                 None
@@ -235,8 +256,10 @@ mod tests {
                 let mut buf = [0u8; 4];
                 client_side.read_exact(&mut buf).await.expect("read echo");
                 assert_eq!(&buf, b"ping");
-                assert_eq!(up.load(Ordering::Relaxed), 4);
-                assert_eq!(down.load(Ordering::Relaxed), 4);
+                assert_eq!(record.up.load(Ordering::Relaxed), 4);
+                assert_eq!(record.down.load(Ordering::Relaxed), 4);
+                assert_eq!(record.live_up.load(Ordering::Relaxed), 4);
+                assert_eq!(record.live_down.load(Ordering::Relaxed), 4);
                 drop(client_side);
             },
         );

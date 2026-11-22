@@ -119,13 +119,43 @@ class EngineTest {
         assertEquals(null, parseConnLine(""))
     }
     @Test
-    fun liveTotalsIncludeActiveConnections() {
-        val text = "running\t100\t200\t2\n" +
+    fun liveTotalsComeFromTheHeadLine() {
+        // liveUp/liveDown are engine-wide totals from the head line:
+        // they are NOT totalUp + the active connections' bytes anymore.
+        val text = "running\t100\t200\t2\t0\t0\t0\t140\t260\t1\t50\t60\n" +
             "1\t10.0.0.2\thost\t80\thttp\t100\t10\t20\n" +
             "2\t10.0.0.3\thost\t443\tsocks5\t100\t30\t40\n"
         val snap = parseSnapshot(text)!!
         assertEquals(140L, snap.liveUp)
         assertEquals(260L, snap.liveDown)
+        assertEquals(1, snap.devices)
+        assertEquals(50L, snap.speedUp)
+        assertEquals(60L, snap.speedDown)
+    }
+
+    @Test
+    fun missingLiveAndSpeedFieldsDefaultToZero() {
+        val snap = parseSnapshot("running\t0\t0\t0\n")
+        assertEquals(0L, snap?.liveUp)
+        assertEquals(0L, snap?.liveDown)
+        assertEquals(0, snap?.devices)
+        assertEquals(0L, snap?.speedUp)
+        assertEquals(0L, snap?.speedDown)
+    }
+
+    @Test
+    fun parsesHistoryPairs() {
+        assertEquals(
+            listOf(SpeedSample(100, 200), SpeedSample(0, 0), SpeedSample(50, 60)),
+            parseHistory("100,200;0,0;50,60"),
+        )
+        // Malformed pairs are skipped, never a crash.
+        assertEquals(
+            listOf(SpeedSample(100, 200), SpeedSample(50, 60)),
+            parseHistory("100,200;bad;1,2,3;,;4,x;50,60"),
+        )
+        assertEquals(emptyList<SpeedSample>(), parseHistory(""))
+        assertEquals(emptyList<SpeedSample>(), parseHistory("bad;1,2,3"))
     }
 
     @Test

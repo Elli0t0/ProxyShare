@@ -46,6 +46,18 @@ impl JniListener {
 
 impl EventSink for JniListener {
     fn on_event(&self, event: Event) {
+        // Per-connection events no longer cross JNI: the engine owns
+        // the stats now (snapshot, history, session log), so a busy
+        // connection would spam the JVM with two upcalls each. The
+        // Rust-internal variants and tests stay; only this forwarder
+        // drops them. Edge events (Busy/Idle/DevicesChanged/IdleStop)
+        // and errors still cross.
+        if matches!(
+            event,
+            Event::ConnectionOpened(_) | Event::ConnectionClosed(_)
+        ) {
+            return;
+        }
         let (t, a, b) = event.to_callback();
         // Worker threads are long-lived: attach once permanently
         // instead of attaching and detaching on every event. The

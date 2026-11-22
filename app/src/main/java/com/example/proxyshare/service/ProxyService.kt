@@ -18,11 +18,10 @@ import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -43,6 +42,9 @@ class ProxyService : Service() {
     private var observing = false
     private var idleObserving = false
     private var vpnDropObserving = false
+    /** True while a client is connected (from the engine's Busy/Idle edge events). */
+    private var busy = false
+    private var wakeGraceJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -58,8 +60,7 @@ class ProxyService : Service() {
             this, NOTIF_ID, buildNotification(
                 notificationText(
                     ProxyController.settings.value,
-                    ProxyController.devices.value,
-                    ProxyController.activeConns.value,
+                    ProxyController.snapshot.value.devices,
                     singleDeviceName(ProxyController.settings.value),
                 ),
             ),
@@ -67,7 +68,7 @@ class ProxyService : Service() {
         )
         observeWakeLock()
         observeState()
-        observeIdleStop()
+        observeEngineEvents()
         observeVpnDrop()
         ProxyController.start()
         return START_STICKY
@@ -85,49 +86,69 @@ class ProxyService : Service() {
     }
 
     /**
-     * Hold the wake lock only while a client is connected (or while
-     * battery saver is off). With no clients and battery saver on, the
-     * lock is released after a 60 s grace period; collectLatest cancels
-     * that wait the moment a client connects.
+     * Hold the wake lock while a client is connected (or while battery
+     * saver is off), driven by the engine's Busy/Idle edge events.
+     * With no clients and battery saver on, the lock is released after
+     * a 60 s grace period; a Busy edge cancels that wait at once. The
+     * busy flag is seeded from a fresh snapshot poll at start: an
+     * edge that fired before this collector started must not be
+     * missed.
      */
     private fun observeWakeLock() {
         serviceScope.launch {
-            combine(
-                ProxyController.activeConns,
-                ProxyController.settings.map { it.batterySaver },
-            ) { n, saver -> n to saver }
-                .collectLatest { (n, saver) ->
-                    if (!saver || n > 0) {
-                        acquireWakeLock()
-                    } else {
-                        delay(60_000)
-                        releaseWakeLock()
+            ProxyController.pollNow()
+            busy = ProxyController.snapshot.value.active > 0
+            updateWakeLock()
+            ProxyController.events.collect { e ->
+                when (e.type) {
+                    10 -> {
+                        busy = true
+                        updateWakeLock()
+                    }
+                    11 -> {
+                        busy = false
+                        updateWakeLock()
                     }
                 }
+            }
+        }
+        serviceScope.launch {
+            ProxyController.settings.map { it.batterySaver }.collect { updateWakeLock() }
+        }
+    }
+
+    /** Acquire the wake lock when busy or battery saver is off; otherwise release it after the 60 s grace. */
+    private fun updateWakeLock() {
+        val saver = ProxyController.settings.value.batterySaver
+        if (!saver || busy) {
+            wakeGraceJob?.cancel()
+            wakeGraceJob = null
+            acquireWakeLock()
+        } else {
+            wakeGraceJob?.cancel()
+            wakeGraceJob = serviceScope.launch {
+                delay(60_000)
+                releaseWakeLock()
+            }
         }
     }
 
     /**
-     * Stop the proxy after the chosen idle time with no connections.
-     * collectLatest cancels the countdown the moment a connection
-     * opens (or the setting changes); the timer is inexact.
+     * Engine edge events the service acts on: IdleStop (type 13) stops
+     * the proxy after the engine's idle countdown expired. The
+     * Busy/Idle edges are consumed by observeWakeLock instead.
      */
-    private fun observeIdleStop() {
+    private fun observeEngineEvents() {
         if (idleObserving) return
         idleObserving = true
         serviceScope.launch {
-            combine(
-                ProxyController.activeConns,
-                ProxyController.settings.map { it.idleStopMinutes },
-            ) { n, m -> n to m }
-                .collectLatest { (n, minutes) ->
-                    if (n == 0 && minutes > 0) {
-                        delay(minutes * 60_000L)
-                        ProxyController.stop()
-                        showIdleStopped()
-                        stopSelf()
-                    }
+            ProxyController.events.collect { e ->
+                if (e.type == 13) {
+                    ProxyController.stop()
+                    showIdleStopped()
+                    stopSelf()
                 }
+            }
         }
     }
 
@@ -147,7 +168,7 @@ class ProxyService : Service() {
                 if (!active && wasActive &&
                     (mode == OutboundMode.DEFAULT || mode == OutboundMode.VPN_ONLY) &&
                     ProxyController.state.value is EngineState.Running &&
-                    ProxyController.activeConns.value > 0
+                    ProxyController.snapshot.value.active > 0
                 ) {
                     showVpnDropped()
                 }
@@ -225,8 +246,7 @@ class ProxyService : Service() {
                         buildNotification(
                             notificationText(
                                 settings,
-                                ProxyController.devices.value,
-                                ProxyController.activeConns.value,
+                                ProxyController.snapshot.value.devices,
                                 singleDeviceName(settings),
                             ),
                         ),
@@ -234,36 +254,17 @@ class ProxyService : Service() {
                 }
             }
         }
-        // Live device/connection counts in the notification, on count
-        // changes only (no timer, no polling): the counts are
-        // event-driven already.
+        // Live device count in the notification, on DevicesChanged
+        // edges only (no timer, no polling).
         serviceScope.launch {
-            ProxyController.activeConns.collect {
-                if (ProxyController.state.value is EngineState.Running) {
+            ProxyController.events.collect { e ->
+                if (e.type == 12 && ProxyController.state.value is EngineState.Running) {
                     getSystemService(NotificationManager::class.java)?.notify(
                         NOTIF_ID,
                         buildNotification(
                             notificationText(
                                 ProxyController.settings.value,
-                                ProxyController.devices.value,
-                                ProxyController.activeConns.value,
-                                singleDeviceName(ProxyController.settings.value),
-                            ),
-                        ),
-                    )
-                }
-            }
-        }
-        serviceScope.launch {
-            ProxyController.devices.collect {
-                if (ProxyController.state.value is EngineState.Running) {
-                    getSystemService(NotificationManager::class.java)?.notify(
-                        NOTIF_ID,
-                        buildNotification(
-                            notificationText(
-                                ProxyController.settings.value,
-                                ProxyController.devices.value,
-                                ProxyController.activeConns.value,
+                                ProxyController.snapshot.value.devices,
                                 singleDeviceName(ProxyController.settings.value),
                             ),
                         ),
@@ -273,11 +274,10 @@ class ProxyService : Service() {
         }
     }
 
-    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. With devices connected, the counts lead: "1 device · 45 connections · SOCKS :1080" (the connections part is dropped when 0). With exactly one device and a name for it, the name leads instead of "1 device". */
+    /** "1 device · SOCKS :1080", or the ports alone when no device is connected. With exactly one device and a name for it, the name leads instead of "1 device". */
     private fun notificationText(
         settings: AppSettings,
         devices: Int,
-        connections: Int,
         singleDeviceName: String? = null,
     ): String {
         val base = if (!settings.separatePorts) {
@@ -302,18 +302,13 @@ class ProxyService : Service() {
         } else if (devices > 0) {
             parts += resources.getQuantityString(R.plurals.notif_devices, devices, devices)
         }
-        if (connections > 0) {
-            parts += resources.getQuantityString(
-                R.plurals.notif_connections, connections, connections
-            )
-        }
         if (parts.isEmpty()) return base
         return (parts + base).joinToString(" · ")
     }
 
     /** The stored name of the one connected device, if exactly one device is connected and it has a name. */
     private fun singleDeviceName(settings: AppSettings): String? {
-        if (ProxyController.devices.value != 1) return null
+        if (ProxyController.snapshot.value.devices != 1) return null
         val ip = ProxyController.snapshot.value.connections.firstOrNull()?.client
             ?: return null
         return settings.clientNames[ip]

@@ -57,6 +57,10 @@ pub struct Config {
     /// state arrives through set_vpn_active; false here means the
     /// flag is ignored). Existing connections are never closed.
     pub require_vpn: bool,
+    /// Seconds of idleness (no connections at all) before the engine
+    /// emits IdleStop. 0 = off. The Kotlin side stops the proxy on
+    /// that event; the engine never stops itself.
+    pub idle_stop_secs: u64,
 }
 
 impl Default for Config {
@@ -78,6 +82,7 @@ impl Default for Config {
             limit_down_kbps: 0,
             limit_up_kbps: 0,
             require_vpn: false,
+            idle_stop_secs: 0,
         }
     }
 }
@@ -123,6 +128,9 @@ impl Config {
                     config.limit_up_kbps = parse_u64(value, line_no, key)?
                 }
                 "require_vpn" => config.require_vpn = parse_bool(value, line_no, key)?,
+                "idle_stop_secs" => {
+                    config.idle_stop_secs = parse_u64(value, line_no, key)?
+                }
                 _ => { /* unknown keys are ignored */ }
             }
         }
@@ -156,8 +164,13 @@ impl Config {
         } else {
             ""
         };
+        let idle_stop = if self.idle_stop_secs > 0 {
+            format!(", idle stop {}s", self.idle_stop_secs)
+        } else {
+            String::new()
+        };
         format!(
-            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}",
+            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}{idle_stop}",
             self.bind_addr,
             protocols.join("+"),
             self.private_only,

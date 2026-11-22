@@ -144,12 +144,30 @@ pub enum Event {
     /// blocked IP tried to connect again. a = the IP only, b = "".
     /// Never carries a password or any credential.
     AuthFailed(IpAddr),
+    /// The first connection opened (active 0 -> 1). a = "", b = "".
+    /// The sampler starts on this edge; the wake lock is acquired.
+    Busy,
+    /// The last connection closed (active 1 -> 0). a = "", b = "".
+    /// The idle-stop countdown starts on this edge, when configured.
+    Idle,
+    /// The distinct-client count changed. a = the new device count,
+    /// b = "". Fires only when a device joins or leaves, never per
+    /// connection.
+    DevicesChanged(usize),
+    /// The engine sat idle for idle_stop_secs. a = "", b = "". The
+    /// Kotlin side stops the proxy on this event; the engine does
+    /// not stop itself.
+    IdleStop,
 }
 
 impl Event {
     /// Callback type numbers: 1 = state changed, 2 = connection opened,
-    /// 3 = connection closed, 4 = handler missing, 5 = auth failed.
-    /// They are part of the contract: do not renumber.
+    /// 3 = connection closed, 4 = handler missing, 5 = auth failed,
+    /// 10 = busy, 11 = idle, 12 = devices changed, 13 = idle stop.
+    /// They are part of the contract: do not renumber. Types 2 and 3
+    /// are no longer sent through JNI (the engine owns the stats now):
+    /// the JNI listener drops them, but the variants and the
+    /// Rust-internal tests stay.
     pub fn to_callback(&self) -> (i32, String, String) {
         match self {
             Event::StateChanged(state) => {
@@ -163,32 +181,47 @@ impl Event {
             Event::ConnectionClosed(info) => (3, info.id.to_string(), info.snapshot_line()),
             Event::HandlerMissing(info) => (4, info.id.to_string(), info.snapshot_line()),
             Event::AuthFailed(ip) => (5, ip.to_string(), String::new()),
+            Event::Busy => (10, String::new(), String::new()),
+            Event::Idle => (11, String::new(), String::new()),
+            Event::DevicesChanged(n) => (12, n.to_string(), String::new()),
+            Event::IdleStop => (13, String::new(), String::new()),
         }
     }
 }
 
 /// The whole-engine snapshot text: first line
-/// "state\ttotal_up\ttotal_down\tactive\trejected_limit\trejected_denied\trejected_not_allowed",
+/// "state\ttotal_up\ttotal_down\tactive\trejected_limit\trejected_denied\trejected_not_allowed\tlive_up\tlive_down\tdevices\tspeed_up\tspeed_down",
 /// then one line per connection. The three rejected counts are the
 /// lifetime totals of connections refused for the connection limit,
 /// for a denied client, and for a client outside allowed_clients.
+/// live_up/live_down are the engine-wide live totals (monotonic,
+/// including closed connections, so Kotlin no longer adds the active
+/// connections' bytes itself). devices is the distinct-client count.
+/// speed_up/speed_down are the latest 1 s samples (EMA, bytes/s).
 /// See docs/ENGINE_API.md.
 pub fn snapshot_text(
     state: &EngineState,
-    total_up: u64,
-    total_down: u64,
+    totals: (u64, u64),
     conns: &[ConnInfo],
     rejected: (u64, u64, u64),
+    live: (u64, u64),
+    devices: usize,
+    speed: (u64, u64),
 ) -> String {
     let mut text = format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         state.as_str(),
-        total_up,
-        total_down,
+        totals.0,
+        totals.1,
         conns.len(),
         rejected.0,
         rejected.1,
         rejected.2,
+        live.0,
+        live.1,
+        devices,
+        speed.0,
+        speed.1,
     );
     for conn in conns {
         text.push('\n');
@@ -252,13 +285,21 @@ mod tests {
     #[test]
     fn snapshot_text_shape() {
         assert_eq!(
-            snapshot_text(&EngineState::Stopped, 0, 0, &[], (0, 0, 0)),
-            "stopped\t0\t0\t0\t0\t0\t0"
+            snapshot_text(&EngineState::Stopped, (0, 0), &[], (0, 0, 0), (0, 0), 0, (0, 0)),
+            "stopped\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0"
         );
         let conn = sample_conn();
         assert_eq!(
-            snapshot_text(&EngineState::Running, 1024, 2048, &[conn], (3, 1, 2)),
-            "running\t1024\t2048\t1\t3\t1\t2\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
+            snapshot_text(
+                &EngineState::Running,
+                (1024, 2048),
+                &[conn],
+                (3, 1, 2),
+                (4096, 8192),
+                2,
+                (500, 600)
+            ),
+            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
         );
     }
 
@@ -286,5 +327,13 @@ mod tests {
             Event::AuthFailed(IpAddr::from_str("127.0.0.1").expect("test IP is valid"))
                 .to_callback();
         assert_eq!((t, a.as_str(), b.as_str()), (5, "127.0.0.1", ""));
+        let (t, a, b) = Event::Busy.to_callback();
+        assert_eq!((t, a.as_str(), b.as_str()), (10, "", ""));
+        let (t, a, b) = Event::Idle.to_callback();
+        assert_eq!((t, a.as_str(), b.as_str()), (11, "", ""));
+        let (t, a, b) = Event::DevicesChanged(3).to_callback();
+        assert_eq!((t, a.as_str(), b.as_str()), (12, "3", ""));
+        let (t, a, b) = Event::IdleStop.to_callback();
+        assert_eq!((t, a.as_str(), b.as_str()), (13, "", ""));
     }
 }

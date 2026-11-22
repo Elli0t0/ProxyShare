@@ -143,8 +143,7 @@ pub async fn handle(
     relay::relay(
         client,
         upstream,
-        &record.up,
-        &record.down,
+        record,
         Duration::from_secs(config.idle_timeout_s),
         up_limiter,
         down_limiter,

@@ -135,10 +135,11 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun idleStopMinutesDoesNotChangeEngineConfig() {
+    fun idleStopMinutesWritesIdleStopSecs() {
         val base = AppSettings(authPass = "secret").toEngineConfig()
+        assertFalse(base.contains("idle_stop_secs"))
         val changed = AppSettings(authPass = "secret", idleStopMinutes = 30).toEngineConfig()
-        assertEquals(base, changed)
+        assertTrue(changed.contains("idle_stop_secs=1800"))
     }
 
     @Test

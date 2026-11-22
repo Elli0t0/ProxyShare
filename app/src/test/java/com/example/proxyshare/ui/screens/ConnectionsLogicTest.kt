@@ -172,6 +172,32 @@ class ConnectionsLogicTest {
     }
 
     @Test
+    fun parseSessionLogReadsLogIdAndEntry() {
+        val text = "1\t7\t192.168.1.10\texample.com\t443\thttps\t1000\t500\t4000\t0\n" +
+            "2\t8\t192.168.1.10\tads.example.com\t443\thttps\t2000\t100\t200\t1\n"
+        val entries = parseSessionLog(text, closedAtMs = 4000)
+        assertEquals(2, entries.size)
+        assertEquals(1L, entries[0].first)
+        assertEquals("example.com", entries[0].second.host)
+        assertEquals(3000L, entries[0].second.durationMs)
+        assertEquals(false, entries[0].second.blocked)
+        assertEquals(2L, entries[1].first)
+        assertEquals("ads.example.com", entries[1].second.host)
+        assertEquals(true, entries[1].second.blocked)
+        assertEquals(2000L, entries[1].second.durationMs)
+    }
+
+    @Test
+    fun parseSessionLogSkipsMalformedLines() {
+        val text = "1\t7\t192.168.1.10\texample.com\t443\thttps\t1000\t500\t4000\t0\n" +
+            "bad line\n" +
+            "x\t8\t192.168.1.10\texample.com\t443\thttps\t1000\t500\t4000\t0\n" +
+            "3\t9\t192.168.1.10\texample.com\n"
+        assertEquals(1, parseSessionLog(text, closedAtMs = 4000).size)
+        assertEquals(emptyList<Pair<Long, SessionLogEntry>>(), parseSessionLog("", closedAtMs = 4000))
+    }
+
+    @Test
     fun sessionLogJsonIsAnArrayOfObjects() {
         val json = sessionLogJson(
             listOf(

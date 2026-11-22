@@ -93,7 +93,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
-    val devices by ProxyController.devices.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     val vpnActive by VpnWatcher.active.collectAsStateWithLifecycle()
@@ -243,7 +242,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 ) {
                     StatTile(
                         label = stringResource(R.string.stat_devices),
-                        value = devices.toString(),
+                        value = snapshot.devices.toString(),
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                     StatTile(

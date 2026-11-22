@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.proxyshare.R
-import com.example.proxyshare.service.SpeedSample
+import com.example.proxyshare.engine.SpeedSample
 import com.example.proxyshare.ui.screens.formatBytes
 
 /**

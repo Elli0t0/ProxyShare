@@ -77,6 +77,7 @@ fun AppSettings.toEngineConfig(): String = buildString {
     if (limitDownKbps > 0) appendLine("limit_down_kbps=$limitDownKbps")
     if (limitUpKbps > 0) appendLine("limit_up_kbps=$limitUpKbps")
     if (requireVpn) appendLine("require_vpn=true")
+    if (idleStopMinutes > 0) appendLine("idle_stop_secs=${idleStopMinutes * 60}")
 }
 
 /** The port each protocol listens on, or null when it is disabled. */

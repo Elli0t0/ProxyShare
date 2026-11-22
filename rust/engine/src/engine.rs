@@ -64,6 +64,11 @@ pub struct ConnRecord {
     pub down: AtomicU64,
     /// True when the connection was refused for a blocked domain.
     pub blocked: AtomicBool,
+    /// Engine-wide live totals (shared with every connection): every
+    /// byte counted here is also counted there, so the snapshot's
+    /// liveUp/liveDown are monotonic and include closed connections.
+    pub live_up: std::sync::Arc<AtomicU64>,
+    pub live_down: std::sync::Arc<AtomicU64>,
 }
 
 impl ConnRecord {
@@ -75,6 +80,20 @@ impl ConnRecord {
     /// Mark this connection as refused for a blocked domain.
     pub fn mark_blocked(&self) {
         self.blocked.store(true, Ordering::Relaxed);
+    }
+
+    /// Count bytes read from the client, into the record and the
+    /// engine-wide live total. Use for bytes that bypass the relay
+    /// pumps (UDP datagrams, an HTTP body prefix already written).
+    pub fn count_up(&self, n: u64) {
+        self.up.fetch_add(n, Ordering::Relaxed);
+        self.live_up.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Count bytes written to the client (see count_up).
+    pub fn count_down(&self, n: u64) {
+        self.down.fetch_add(n, Ordering::Relaxed);
+        self.live_down.fetch_add(n, Ordering::Relaxed);
     }
 
     fn to_conn_info(&self) -> ConnInfo {
@@ -112,6 +131,19 @@ struct EngineInner {
     /// The connection limit in force: min(config.max_connections,
     /// (nofile_soft - 128) / 2), computed at start().
     effective_max: usize,
+    /// Distinct client IPs with their open-connection counts: one
+    /// device per IP, however many connections it holds.
+    devices: HashMap<IpAddr, usize>,
+    /// Last 120 seconds of speed, sampled while busy.
+    history: crate::history::History,
+    /// Last 500 closed connections, with monotonically increasing ids.
+    session_log: crate::sessionlog::SessionLog,
+    /// The sampler task, while it runs (started on the idle->busy
+    /// edge, ends itself after 2 empty ticks).
+    sampler_task: Option<JoinHandle<()>>,
+    /// The idle-stop countdown, while it runs (started on the
+    /// busy->idle edge, cancelled on Busy or stop()).
+    idle_stop_task: Option<JoinHandle<()>>,
     /// Shared speed limiters, one per direction (None = unlimited).
     up_limiter: Option<std::sync::Arc<RateLimiter>>,
     down_limiter: Option<std::sync::Arc<RateLimiter>>,
@@ -140,6 +172,12 @@ pub struct Engine {
     rejected_limit: RejectStats,
     rejected_denied: RejectStats,
     rejected_not_allowed: RejectStats,
+    /// Engine-wide live byte totals: every pump chunk lands here as
+    /// well as in its connection record, so the snapshot's liveUp/
+    /// liveDown are monotonic and include closed connections. Never
+    /// reset: Kotlin baselines them per session, like the totals.
+    live_up: std::sync::Arc<AtomicU64>,
+    live_down: std::sync::Arc<AtomicU64>,
     /// The outbound used to dial targets. It holds the Android Network
     /// handle for outbound sockets (0 = default network).
     outbound: std::sync::Arc<Connector>,
@@ -155,6 +193,14 @@ fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Wall-clock seconds since the epoch, for history ring timestamps.
+fn now_unix_sec() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
         .unwrap_or(0)
 }
 
@@ -259,6 +305,11 @@ impl Engine {
                 handles: HashMap::new(),
                 denied: HashSet::new(),
                 effective_max: 256,
+                devices: HashMap::new(),
+                history: crate::history::History::new(),
+                session_log: crate::sessionlog::SessionLog::new(),
+                sampler_task: None,
+                idle_stop_task: None,
                 up_limiter: None,
                 down_limiter: None,
                 vpn_active: false,
@@ -270,6 +321,8 @@ impl Engine {
             rejected_limit: RejectStats::new(),
             rejected_denied: RejectStats::new(),
             rejected_not_allowed: RejectStats::new(),
+            live_up: std::sync::Arc::new(AtomicU64::new(0)),
+            live_down: std::sync::Arc::new(AtomicU64::new(0)),
             outbound: std::sync::Arc::new(Connector::default()),
             auth_guard: crate::auth::AuthGuard::default(),
         }
@@ -384,6 +437,18 @@ impl Engine {
                 _ => inner.state = EngineState::Starting,
             }
             inner.effective_max = effective_max as usize;
+            // A fresh start gets a fresh history: the old samples
+            // belong to the previous session. Any sampler or idle-stop
+            // countdown left over from it is aborted (its ticks would
+            // push into the new session's ring); the next Busy edge
+            // starts a new sampler.
+            inner.history.clear();
+            if let Some(task) = inner.sampler_task.take() {
+                task.abort();
+            }
+            if let Some(task) = inner.idle_stop_task.take() {
+                task.abort();
+            }
         }
         self.emit(Event::StateChanged(EngineState::Starting));
 
@@ -510,6 +575,13 @@ impl Engine {
             }
             // A block lasts until the proxy restarts: a stop clears it.
             inner.denied.clear();
+            inner.devices.clear();
+            if let Some(task) = inner.sampler_task.take() {
+                task.abort();
+            }
+            if let Some(task) = inner.idle_stop_task.take() {
+                task.abort();
+            }
             inner.state = EngineState::Stopped;
         }
         for task in accept_tasks {
@@ -523,7 +595,7 @@ impl Engine {
 
     /// The snapshot text (see docs/ENGINE_API.md).
     pub fn snapshot(&self) -> String {
-        let (state, total_up, total_down, rejected, mut conns);
+        let (state, total_up, total_down, rejected, live, devices, speed, mut conns);
         {
             let inner = lock_inner(&self.inner);
             state = inner.state.clone();
@@ -534,6 +606,13 @@ impl Engine {
                 self.rejected_denied.total.load(Ordering::Relaxed),
                 self.rejected_not_allowed.total.load(Ordering::Relaxed),
             );
+            live = (
+                self.live_up.load(Ordering::Relaxed),
+                self.live_down.load(Ordering::Relaxed),
+            );
+            devices = inner.devices.len();
+            let latest = inner.history.latest();
+            speed = (latest.up_bps, latest.down_bps);
             conns = inner
                 .connections
                 .values()
@@ -541,7 +620,33 @@ impl Engine {
                 .collect::<Vec<_>>();
         }
         conns.sort_by_key(|c| c.id);
-        snapshot_text(&state, total_up, total_down, &conns, rejected)
+        snapshot_text(
+            &state,
+            (total_up, total_down),
+            &conns,
+            rejected,
+            live,
+            devices,
+            speed,
+        )
+    }
+
+    /// The last 120 seconds of speed as "up,down;up,down;…" oldest
+    /// first (see docs/ENGINE_API.md). All zeros when the engine
+    /// never ran.
+    pub fn history(&self) -> String {
+        lock_inner(&self.inner).history.render(now_unix_sec())
+    }
+
+    /// Session-log records newer than `since_id`, one
+    /// "log_id\t<snapshot line>" per line, oldest first.
+    pub fn session_log_since(&self, since_id: u64) -> String {
+        lock_inner(&self.inner).session_log.since(since_id)
+    }
+
+    /// Drop every session-log record. Ids keep increasing.
+    pub fn clear_session_log(&self) {
+        lock_inner(&self.inner).session_log.clear();
     }
 
     /// The connection limit in force (see start()).
@@ -605,10 +710,14 @@ impl Engine {
             self.note_rejection(RejectReason::NotAllowed);
             return; // stream dropped: client not allowed, no event
         }
-        if self.active.fetch_add(1, Ordering::SeqCst) >= self.effective_max() {
+        let prev = self.active.fetch_add(1, Ordering::SeqCst);
+        if prev >= self.effective_max() {
             self.active.fetch_sub(1, Ordering::SeqCst);
             self.note_rejection(RejectReason::Limit);
             return; // stream dropped: at the limit, no event
+        }
+        if prev == 0 {
+            self.on_busy();
         }
         // The id is reserved here so the abort handle can be stored
         // against it before the task registers (or ever registers).
@@ -632,6 +741,96 @@ impl Engine {
                 slot.0 = Some(join.abort_handle());
             }
             // else: the task already finished and cleared the slot.
+        }
+    }
+
+    /// The idle->busy edge (active 0 -> 1): cancel a pending
+    /// idle-stop countdown, start the speed sampler unless one is
+    /// already running, and tell the UI the proxy is busy.
+    fn on_busy(self: &std::sync::Arc<Self>) {
+        // Cancel a pending idle-stop countdown: traffic is back.
+        let idle_task = {
+            let mut inner = lock_inner(&self.inner);
+            inner.idle_stop_task.take()
+        };
+        if let Some(task) = idle_task {
+            task.abort();
+        }
+        // Start the sampler unless one is already running. The check
+        // and the store happen under one lock, so two concurrent Busy
+        // edges cannot start two samplers.
+        {
+            let mut inner = lock_inner(&self.inner);
+            let running = inner
+                .sampler_task
+                .as_ref()
+                .map_or(false, |h| !h.is_finished());
+            if !running {
+                inner.sampler_task = Some(tokio::task::spawn(sampler_loop(
+                    std::sync::Arc::clone(self),
+                )));
+            }
+        }
+        self.emit(Event::Busy);
+    }
+
+    /// The busy->idle edge (active 1 -> 0): tell the UI the proxy is
+    /// idle and, when the config sets idle_stop_secs, start the
+    /// countdown that ends with IdleStop. The countdown is cancelled
+    /// by the next Busy edge or by stop(). No-op while stopped: a
+    /// connection task ending during stop() must not arm a countdown.
+    fn on_idle(self: &std::sync::Arc<Self>) {
+        let secs = {
+            let inner = lock_inner(&self.inner);
+            if !matches!(inner.state, EngineState::Running) {
+                return;
+            }
+            inner.config.as_ref().map_or(0, |c| c.idle_stop_secs)
+        };
+        self.emit(Event::Idle);
+        if secs == 0 {
+            return;
+        }
+        let old = {
+            let mut inner = lock_inner(&self.inner);
+            inner.idle_stop_task.take()
+        };
+        if let Some(old) = old {
+            old.abort();
+        }
+        let engine = std::sync::Arc::clone(self);
+        let task = tokio::task::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            engine.emit(Event::IdleStop);
+            engine.clear_idle_stop_task();
+        });
+        lock_inner(&self.inner).idle_stop_task = Some(task);
+    }
+
+    /// Clear the stored sampler handle once the task ended (it ends
+    /// itself after 2 empty ticks). Only clears a finished handle, so
+    /// a newer sampler started in the meantime is never dropped.
+    fn clear_sampler_task(&self) {
+        let mut inner = lock_inner(&self.inner);
+        if inner
+            .sampler_task
+            .as_ref()
+            .map_or(false, |h| h.is_finished())
+        {
+            inner.sampler_task = None;
+        }
+    }
+
+    /// Clear the stored idle-stop handle once it fired. Only clears
+    /// a finished handle, so a newer countdown is never dropped.
+    fn clear_idle_stop_task(&self) {
+        let mut inner = lock_inner(&self.inner);
+        if inner
+            .idle_stop_task
+            .as_ref()
+            .map_or(false, |h| h.is_finished())
+        {
+            inner.idle_stop_task = None;
         }
     }
 
@@ -682,18 +881,31 @@ impl Engine {
             handle.abort();
         }
         let mut closed = Vec::new();
+        let mut devices_changed = None;
         {
             let mut inner = lock_inner(&self.inner);
             for id in ids {
                 if let Some(record) = inner.connections.remove(&id) {
                     inner.total_up += record.up.load(Ordering::Relaxed);
                     inner.total_down += record.down.load(Ordering::Relaxed);
-                    closed.push(record.to_conn_info());
+                    let info = record.to_conn_info();
+                    inner.session_log.push(info.clone());
+                    if let Some(count) = inner.devices.get_mut(&record.client_ip) {
+                        *count -= 1;
+                        if *count == 0 {
+                            inner.devices.remove(&record.client_ip);
+                            devices_changed = Some(inner.devices.len());
+                        }
+                    }
+                    closed.push(info);
                 }
             }
         }
         for info in closed {
             self.emit(Event::ConnectionClosed(info));
+        }
+        if let Some(devices) = devices_changed {
+            self.emit(Event::DevicesChanged(devices));
         }
     }
 
@@ -729,16 +941,43 @@ impl Engine {
             up: AtomicU64::new(0),
             down: AtomicU64::new(0),
             blocked: AtomicBool::new(false),
+            live_up: std::sync::Arc::clone(&self.live_up),
+            live_down: std::sync::Arc::clone(&self.live_down),
         });
         inner.connections.insert(id, std::sync::Arc::clone(&record));
+        let joined = {
+            let count = inner.devices.entry(client_ip).or_insert(0);
+            *count += 1;
+            *count == 1
+        };
+        let devices = inner.devices.len();
+        drop(inner);
+        if joined {
+            self.emit(Event::DevicesChanged(devices));
+        }
         record
     }
 
     fn unregister(&self, id: u64) {
-        let mut inner = lock_inner(&self.inner);
-        if let Some(record) = inner.connections.remove(&id) {
-            inner.total_up += record.up.load(Ordering::Relaxed);
-            inner.total_down += record.down.load(Ordering::Relaxed);
+        let mut devices_changed = None;
+        {
+            let mut inner = lock_inner(&self.inner);
+            if let Some(record) = inner.connections.remove(&id) {
+                inner.total_up += record.up.load(Ordering::Relaxed);
+                inner.total_down += record.down.load(Ordering::Relaxed);
+                let info = record.to_conn_info();
+                inner.session_log.push(info);
+                if let Some(count) = inner.devices.get_mut(&record.client_ip) {
+                    *count -= 1;
+                    if *count == 0 {
+                        inner.devices.remove(&record.client_ip);
+                        devices_changed = Some(inner.devices.len());
+                    }
+                }
+            }
+        }
+        if let Some(devices) = devices_changed {
+            self.emit(Event::DevicesChanged(devices));
         }
     }
 
@@ -832,8 +1071,53 @@ struct ActiveGuard(std::sync::Arc<Engine>);
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
-        self.0.active.fetch_sub(1, Ordering::SeqCst);
+        if self.0.active.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.0.on_idle();
+        }
     }
+}
+
+/// Sample the live counters once a second while the engine is busy
+/// and push each sample into the history ring. Starts on the
+/// idle->busy edge; ends after 2 consecutive empty ticks (no active
+/// connections), so nothing runs while the engine is idle. The first
+/// tick is immediate (tokio intervals fire at once): it only sets the
+/// baseline, no sample is pushed.
+async fn sampler_loop(engine: std::sync::Arc<Engine>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.tick().await;
+    let mut prev_up = engine.live_up.load(Ordering::Relaxed);
+    let mut prev_down = engine.live_down.load(Ordering::Relaxed);
+    let mut prev_time = tokio::time::Instant::now();
+    let mut prev_sample = crate::history::SpeedSample::default();
+    let mut empty_ticks = 0u32;
+    loop {
+        interval.tick().await;
+        let now_up = engine.live_up.load(Ordering::Relaxed);
+        let now_down = engine.live_down.load(Ordering::Relaxed);
+        let now = tokio::time::Instant::now();
+        let elapsed = now.duration_since(prev_time);
+        let sample = crate::history::smooth_sample(
+            prev_up, prev_down, now_up, now_down, elapsed, prev_sample,
+        );
+        prev_up = now_up;
+        prev_down = now_down;
+        prev_time = now;
+        prev_sample = sample;
+        {
+            let mut inner = lock_inner(&engine.inner);
+            inner.history.push(now_unix_sec(), sample);
+        }
+        if engine.active.load(Ordering::SeqCst) == 0 {
+            empty_ticks += 1;
+            if empty_ticks >= 2 {
+                break;
+            }
+        } else {
+            empty_ticks = 0;
+        }
+    }
+    engine.clear_sampler_task();
 }
 
 /// The accept loop: accept connections until stop() signals shutdown.
@@ -2894,6 +3178,298 @@ mod tests {
             std::net::TcpStream::connect(("127.0.0.1", ignored)).is_err(),
             "port must be ignored in split mode"
         );
+        engine.stop();
+    }
+
+    /// The snapshot head fields, in order: state, total_up,
+    /// total_down, active, rejected×3, live_up, live_down, devices,
+    /// speed_up, speed_down.
+    fn head_fields(engine: &Engine) -> Vec<String> {
+        engine
+            .snapshot()
+            .lines()
+            .next()
+            .expect("snapshot head")
+            .split('\t')
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Open a SOCKS5 connection through the engine to the echo server
+    /// and move `payload` through it (echoed back). Returns the client
+    /// socket, still open.
+    async fn echo_connection(
+        port: u16,
+        echo_port: u16,
+        payload: &[u8],
+    ) -> TcpStream {
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let mut req = vec![0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1];
+        req.extend_from_slice(&echo_port.to_be_bytes());
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x00, "CONNECT succeeded, got {reply:?}");
+        client.write_all(payload).await.expect("write payload");
+        let mut echo = vec![0u8; payload.len()];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(echo, payload);
+        client
+    }
+
+    /// Poll until `check` is true or the deadline passes (real time).
+    async fn wait_until<F: Fn() -> bool>(what: &str, check: F) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if check() {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for {what}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Poll until `check` is true, advancing the paused clock in
+    /// 100 ms steps (a paused test's sleeps never complete on their
+    /// own). Real I/O still runs between advances.
+    async fn wait_until_paused<F: Fn() -> bool>(what: &str, check: F) {
+        let mut waited = 0u64;
+        loop {
+            if check() {
+                return;
+            }
+            assert!(waited < 5000, "timed out waiting for {what}");
+            tokio::time::advance(Duration::from_millis(100)).await;
+            waited += 100;
+        }
+    }
+
+    #[tokio::test]
+    async fn live_counters_include_active_and_closed() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let client = echo_connection(port, echo_port, b"hello").await;
+        // While the connection is open, the live totals already
+        // include its bytes (the closed-only totals do not yet).
+        let head = head_fields(&engine);
+        assert_eq!(head[3], "1", "one active connection");
+        assert_eq!(head[7], "5", "live_up counts the active bytes");
+        assert_eq!(head[8], "5", "live_down counts the active bytes");
+        assert_eq!(head[1], "0", "closed total is still 0");
+        drop(client);
+        wait_until("the connection to close", || {
+            head_fields(&engine)[3] == "0"
+        })
+        .await;
+        // Closing moves the bytes into the closed totals; the live
+        // totals are monotonic and keep them.
+        let head = head_fields(&engine);
+        assert_eq!(head[1], "5");
+        assert_eq!(head[2], "5");
+        assert_eq!(head[7], "5");
+        assert_eq!(head[8], "5");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn devices_counts_distinct_ips_not_connections() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let c1 = echo_connection(port, echo_port, b"a").await;
+        let c2 = echo_connection(port, echo_port, b"b").await;
+        // Two connections from the same IP are one device, and the
+        // DevicesChanged edge fired exactly once for it.
+        wait_until("devices to reach 1", || head_fields(&engine)[9] == "1").await;
+        assert_eq!(
+            sink.events()
+                .iter()
+                .filter(|e| matches!(e, Event::DevicesChanged(_)))
+                .count(),
+            1,
+            "one device joined, one edge"
+        );
+        assert_eq!(head_fields(&engine)[3], "2", "two active connections");
+        drop(c1);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(head_fields(&engine)[9], "1", "one connection left, still one device");
+        assert_eq!(
+            sink.events()
+                .iter()
+                .filter(|e| matches!(e, Event::DevicesChanged(_)))
+                .count(),
+            1,
+            "no device left while a connection remains"
+        );
+        drop(c2);
+        wait_until("devices to reach 0", || head_fields(&engine)[9] == "0").await;
+        assert!(sink
+            .events()
+            .iter()
+            .any(|e| matches!(e, Event::DevicesChanged(0))));
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn busy_and_idle_fire_only_on_edges() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let c1 = echo_connection(port, echo_port, b"a").await;
+        let c2 = echo_connection(port, echo_port, b"b").await;
+        wait_until("both connections to register", || {
+            head_fields(&engine)[3] == "2"
+        })
+        .await;
+        // Two connections, one Busy edge.
+        assert_eq!(
+            sink.events().iter().filter(|e| matches!(e, Event::Busy)).count(),
+            1,
+            "Busy fires once, on the 0 -> 1 edge"
+        );
+        drop(c1);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            sink.events().iter().filter(|e| matches!(e, Event::Idle)).count(),
+            0,
+            "no Idle while a connection is still open"
+        );
+        drop(c2);
+        wait_until("the Idle edge", || {
+            sink.events().iter().any(|e| matches!(e, Event::Idle))
+        })
+        .await;
+        assert_eq!(
+            sink.events().iter().filter(|e| matches!(e, Event::Idle)).count(),
+            1,
+            "Idle fires once, on the 1 -> 0 edge"
+        );
+        engine.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sampler_samples_while_busy_and_stops_when_idle() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        // A 10 KB burst: the first 1 s tick sees ~10 KB/s, well over
+        // the 64 B/s snap, so the EMA sample is nonzero.
+        let payload = vec![7u8; 10 * 1024];
+        let client = echo_connection(port, echo_port, &payload).await;
+        // One 1 s tick: the burst is sampled (EMA from 0 halves the
+        // raw rate). All ticks share one real unix second, so the
+        // ring holds a single entry: check it before later ticks
+        // (no new bytes) decay it to 0.
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let head = head_fields(&engine);
+        assert!(head[10].parse::<u64>().expect("speed_up") > 0, "speed_up sampled: {head:?}");
+        let history = engine.history();
+        assert_eq!(history.split(';').count(), 120, "a full 120 s");
+        assert!(
+            history.split(';').any(|p| p != "0,0"),
+            "the burst is in the history: {history}"
+        );
+        // Two more ticks with no new bytes: the samples decay to 0.
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert_eq!(head_fields(&engine)[10], "0", "no new bytes, speed reads 0");
+        // Close the connection: after 2 empty ticks the sampler ends
+        // and nothing runs while idle.
+        drop(client);
+        tokio::time::advance(Duration::from_secs(5)).await;
+        wait_until_paused("the sampler to end", || {
+            lock_inner(&engine.inner).sampler_task.is_none()
+        })
+        .await;
+        // The history still renders a full 120 s (gaps are zeros).
+        assert_eq!(engine.history().split(';').count(), 120);
+        engine.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_stop_fires_after_idle() {
+        let (engine, sink, port) = start_test_engine("idle_stop_secs = 5");
+        let echo_port = start_echo_server().await;
+        let client = echo_connection(port, echo_port, b"a").await;
+        drop(client);
+        wait_until_paused("the Idle edge", || {
+            sink.events().iter().any(|e| matches!(e, Event::Idle))
+        })
+        .await;
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert!(
+            sink.events().iter().any(|e| matches!(e, Event::IdleStop)),
+            "IdleStop fires 5 s after idle: {:?}",
+            sink.events()
+        );
+        engine.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_stop_is_cancelled_by_busy() {
+        let (engine, sink, port) = start_test_engine("idle_stop_secs = 5");
+        let echo_port = start_echo_server().await;
+        let client = echo_connection(port, echo_port, b"a").await;
+        drop(client);
+        wait_until_paused("the Idle edge", || {
+            sink.events().iter().any(|e| matches!(e, Event::Idle))
+        })
+        .await;
+        // Traffic returns 2 s into the countdown: the countdown is
+        // cancelled and no IdleStop ever fires.
+        tokio::time::advance(Duration::from_secs(2)).await;
+        let _client2 = echo_connection(port, echo_port, b"b").await;
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(
+            !sink.events().iter().any(|e| matches!(e, Event::IdleStop)),
+            "Busy cancelled the countdown: {:?}",
+            sink.events()
+        );
+        engine.stop();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_stop_off_by_default() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let client = echo_connection(port, echo_port, b"a").await;
+        drop(client);
+        wait_until_paused("the Idle edge", || {
+            sink.events().iter().any(|e| matches!(e, Event::Idle))
+        })
+        .await;
+        tokio::time::advance(Duration::from_secs(60)).await;
+        assert!(
+            !sink.events().iter().any(|e| matches!(e, Event::IdleStop)),
+            "idle_stop_secs = 0 never fires IdleStop"
+        );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn session_log_records_closed_connections() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let client = echo_connection(port, echo_port, b"hello").await;
+        drop(client);
+        wait_until("the connection to close", || {
+            head_fields(&engine)[3] == "0"
+        })
+        .await;
+        let log = engine.session_log_since(0);
+        let lines: Vec<&str> = log.lines().collect();
+        assert_eq!(lines.len(), 1, "one closed connection: {log}");
+        let fields: Vec<&str> = lines[0].split('\t').collect();
+        assert_eq!(fields.len(), 10, "log id + 9 connection fields");
+        assert_eq!(fields[0], "1", "first log id is 1");
+        assert_eq!(fields[2], "127.0.0.1");
+        assert_eq!(fields[3], "127.0.0.1");
+        assert_eq!(fields[4], echo_port.to_string());
+        assert_eq!(fields[7], "5");
+        assert_eq!(fields[8], "5");
+        assert_eq!(engine.session_log_since(1), "", "nothing newer than 1");
+        engine.clear_session_log();
+        assert_eq!(engine.session_log_since(0), "", "cleared");
         engine.stop();
     }
 }

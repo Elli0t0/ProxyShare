@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,10 +38,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.proxyshare.R
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.service.ProxyController
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -65,6 +70,21 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
 
     val entries = remember(sessionLog, search, blockedOnly) {
         filterSessionLog(sessionLog, search, blockedOnly).reversed()
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    // Pull new records from the engine once a second, only while this
+    // screen is visible: repeatOnLifecycle cancels the loop as soon as
+    // we leave STARTED, so nothing polls in the background. The pull
+    // also runs once when the tab opens (the effect starts on
+    // composition).
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                ProxyController.pullSessionLog()
+                delay(1000)
+            }
+        }
     }
 
     Column(

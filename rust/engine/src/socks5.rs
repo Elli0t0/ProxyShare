@@ -340,8 +340,7 @@ async fn connect(
     relay::relay(
         client,
         upstream,
-        &record.up,
-        &record.down,
+        record,
         Duration::from_secs(config.idle_timeout_s),
         up_limiter,
         down_limiter,
@@ -414,12 +413,12 @@ async fn associate(
                     client_udp = Some(from);
                     let data = &buf[offset..n];
                     udp.send_to(data, addr).await?;
-                    record.up.fetch_add(n as u64, Ordering::Relaxed);
+                    record.count_up(n as u64);
                 } else if let Some(client_addr) = client_udp {
                     let mut out = crate::udp::build_udp_header(from);
                     out.extend_from_slice(&buf[..n]);
                     udp.send_to(&out, client_addr).await?;
-                    record.down.fetch_add(out.len() as u64, Ordering::Relaxed);
+                    record.count_down(out.len() as u64);
                 }
                 // No client address known yet: drop the datagram.
             }

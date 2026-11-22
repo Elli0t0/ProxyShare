@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.5.1 — the engine owns the stats
+
+- Rust now owns every live stat, so Kotlin holds no timers,
+  refcounts or samplers and no JNI upcall fires per connection:
+  per connection the callback went from 2 upcalls (open + close)
+  to 0 — only the Busy / Idle / DevicesChanged edge events, plus
+  the existing 1 s snapshot/history poll while the UI is visible.
+  No periodic timer runs while there is no traffic.
+- Engine-wide live byte counters (`live_up` / `live_down`,
+  monotonic, including open connections) in the snapshot; the
+  Kotlin `totalUp + Σ conn.up` hack is gone. Distinct-client
+  refcount in the engine, exposed as `devices` in the snapshot.
+  Speed history in the engine: a sampler starts on the idle ->
+  busy edge, ticks once a second (EMA alpha 0.5, snapped to 0
+  under 64 B/s), keeps a 120 s ring, stops after 2 empty ticks,
+  and `nativeHistory` returns the last 120 s gap-filled with
+  zeros, so the chart is full even right after returning to the
+  app. The snapshot also carries the latest sample
+  (`speed_up` / `speed_down`).
+- Session log in the engine: a ring of the last 500 closed
+  connections with monotonic ids; `nativeSessionLog(sinceId)`
+  returns only newer records, `nativeSessionLogClear` clears it.
+- Edge events only: Busy (10) / Idle (11) / DevicesChanged (12)
+  fire on the edge; ConnectionOpened / ConnectionClosed are no
+  longer sent through JNI (the Rust variants and tests stay).
+- Idle auto-stop moved into the engine: config `idle_stop_secs`
+  (0 = off); on the Idle edge a sleep starts, cancelled by Busy,
+  and on expiry the engine emits IdleStop (13) and Kotlin stops
+  the proxy. Settings "Stop automatically when idle" now just
+  writes that key. The 60 s wake-lock grace stays in Kotlin,
+  driven by the Busy / Idle edges.
+- Removed Kotlin code: `DeviceCounter`, the `activeConns`
+  refcount/resync, `rebaseline` / `SamplerState` / `smoothSpeed` /
+  `startSpeedSampler`, and the session-log-from-events collector
+  (all in `ProxyController` / `Engine.kt`). The notification now
+  reads "1 device · SOCKS :1080" (connection count dropped).
+- Tests: Rust 132 -> 151 (history ring + smoothing, session log,
+  devices, edge events, sampler and idle-stop under paused time);
+  Kotlin 140 -> 133 (speed/history tests moved to Rust, the
+  deleted-code tests removed).
+
 ## 0.5.0 — engine robustness
 
 - Connection limit: default 64 -> 256 (engine config and Settings).

@@ -21,10 +21,6 @@
         <item quantity="one">%1$d device</item>
         <item quantity="other">%1$d devices</item>
     </plurals>
-    <plurals name="notif_connections">
-        <item quantity="one">%1$d connection</item>
-        <item quantity="other">%1$d connections</item>
-    </plurals>
     <string name="notif_stop">Stop</string>
     <string name="notif_explain_title">Notifications</string>
     <string name="notif_explain_text">ProxyShare shows an ongoing notification while the proxy runs, with a Stop action. Allow notifications to see it.</string>

@@ -56,6 +56,18 @@ object NativeEngine {
     @JvmStatic
     external fun nativeDiagLog(): String
 
+    /** The last 120 seconds of speed as "up,down;up,down;…" oldest first (see docs/ENGINE_API.md), or "" for a bad handle. */
+    @JvmStatic
+    external fun nativeHistory(handle: Long): String
+
+    /** Session-log records newer than `sinceId`, one "log_id<TAB><snapshot line>" per line, oldest first (see docs/ENGINE_API.md), or "" when nothing is newer or the handle is bad. */
+    @JvmStatic
+    external fun nativeSessionLog(handle: Long, sinceId: Long): String
+
+    /** Drop every session-log record. Safe on a bad handle (no-op). */
+    @JvmStatic
+    external fun nativeSessionLogClear(handle: Long)
+
     /** Clear the diagnostics ring buffer (Logs screen "Clear"). */
     @JvmStatic
     external fun nativeDiagClear()

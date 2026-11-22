@@ -49,6 +49,9 @@ second parameter.
 | `nativeSetVpnActive(h: Long, active: Boolean)` | `Engine::set_vpn_active` | Tells the engine whether a VPN network is active right now. Only consulted when the config sets `require_vpn` (see "VPN watchdog"). Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
+| `nativeHistory(h: Long): String` | `Engine::history` | The last 120 seconds of speed samples as `up,down;up,down;…` (oldest first, one pair per second, gaps filled with `0,0`), or `""` for an unknown handle. See "Engine-owned stats". |
+| `nativeSessionLog(h: Long, sinceId: Long): String` | `Engine::session_log_since` | Closed-connection records with an id greater than `sinceId`, one line per record (below), oldest first; `""` when there is nothing newer. See "Engine-owned stats". |
+| `nativeSessionLogClear(h: Long)` | `Engine::clear_session_log` | Clears the session log ring and restarts the id counter at 0. Safe on an unknown handle (no-op). |
 | `nativeDiagLog(): String` | reads the diagnostics ring buffer | The log text (below), or `""` when empty. Takes no handle: the buffer is global, not per-engine. |
 | `nativeDiagClear()` | clears the diagnostics ring buffer | No handle: the buffer is global, not per-engine. |
 | `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
@@ -79,9 +82,11 @@ second parameter.
   a path where no handler reads the stream consumes the byte first, so
   the close is a clean FIN instead of a reset.
 - Each connection is handled by its protocol's handler (see below):
-  a `ConnectionOpened` event (type 2) is emitted when the connection
-  is registered, and a `ConnectionClosed` event (type 3) with the
-  final byte counts when it ends.
+  the connection is registered when it opens and unregistered with
+  its final byte counts when it ends. (The Rust-internal
+  `ConnectionOpened` / `ConnectionClosed` events still exist for
+  tests, but since 0.5.1 they are no longer sent through JNI — see
+  "Events".)
 
 ## Failed-auth throttle (0.0.10)
 
@@ -108,9 +113,8 @@ second parameter.
   (and after auth): HTTP CONNECT and plain HTTP get a 403, SOCKS5
   CONNECT gets 0x02 (connection not allowed by ruleset), SOCKS4
   CONNECT gets 0x5B. The refused connection is marked blocked on
-  its record, so its `ConnectionClosed` event (type 3) — and the
-  session log built from it — carry the flag; the connection is
-  otherwise closed normally (no error event).
+  its record, so the record in the engine session log carries the
+  flag; the connection is otherwise closed normally (no error event).
 - UDP ASSOCIATE datagrams are NOT filtered: there is no refusal
   reply for a datagram, so the block applies to TCP connects only.
 
@@ -304,6 +308,7 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `limit_down_kbps` | whole number ≥ 0 | `0` | Download speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
 | `limit_up_kbps` | whole number ≥ 0 | `0` | Upload speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
 | `require_vpn` | `true` / `false` | `false` | Refuse new connections while no VPN is active (the live state arrives through `nativeSetVpnActive`). Existing connections are never closed. See "VPN watchdog". |
+| `idle_stop_secs` | seconds ≥ 0 | `0` | Stop the proxy after this many seconds with no active connection. 0 = off. See "Engine-owned stats". |
 
 Example:
 
@@ -339,7 +344,7 @@ Parsing rules:
 text. First line:
 
 ```
-state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed
+state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down
 ```
 
 Then one line per connection:
@@ -356,6 +361,14 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blo
   lifetime totals of connections refused for the connection limit, for a
   denied client, and for a client outside `allowed_clients`. The Kotlin
   parser treats them as optional (older snapshots lack them: 0).
+- `live_up` / `live_down` are the engine's lifetime byte counts
+  including open connections (the relay adds every chunk as it is
+  written); `total_up` / `total_down` count closed connections only,
+  so Kotlin displays the live totals and baselines them per session.
+  `devices` is the number of distinct client IPs with an open
+  connection. `speed_up` / `speed_down` are the latest sampler
+  reading in bytes per second (see "Engine-owned stats"). All five
+  are optional in the Kotlin parser (older snapshots lack them: 0).
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
   milliseconds, `up` / `down` the connection's byte counts, `blocked`
@@ -366,7 +379,7 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blo
 Example:
 
 ```
-running	1024	2048	1
+running	1024	2048	1	0	0	0	1024	2048	1	512	1024
 1	192.168.1.5	example.com	443	http	1794500000000	1024	2048	0
 ```
 
@@ -405,9 +418,12 @@ ts_ms<TAB>LEVEL<TAB>message<TAB>count
   every open connection from that IP, including ones still sniffing
   (no record yet). The aborted tasks are dropped at their next await
   point, so their own unregister never runs: `close_client` removes
-  the records itself, folds the counters into the totals and emits
-  `ConnectionClosed` for each. A client that is only disconnected
-  can reconnect immediately.
+  the records itself and folds the counters into the totals. A client
+  that is only disconnected can reconnect immediately.
+- `close_client` also appends each removed connection to the engine
+  session log (see "Engine-owned stats") and emits the internal
+  `ConnectionClosed` event for it; connections closed by the relay
+  itself are logged the same way when they unregister.
 - `denied_clients`: a runtime-only set of client IPs (never
   persisted), checked in the accept path before `allowed_clients`
   and the connection limit. A denied client is closed without any
@@ -478,6 +494,56 @@ ts_ms<TAB>LEVEL<TAB>message<TAB>count
   request and the HTTP head each have a 10 s read timeout, so a
   silent client can never hold a slot until the 300 s idle timeout.
 
+## Engine-owned stats (0.5.1)
+
+Since 0.5.1 the engine owns the live stats, so Kotlin holds no
+timers, refcounts or samplers and no JNI upcall fires per
+connection. Kotlin reads the snapshot once a second while the UI
+is visible (the existing poll loop) and pulls the history and the
+session log from the same loop; nothing runs while the proxy is
+idle.
+
+- Live counters: every relay chunk is added to engine-wide
+  `live_up` / `live_down` atomics as it is written, so the
+  snapshot's live totals include open connections; the per-session
+  `total_up` / `total_down` still count closed connections only.
+  The engine also keeps a distinct-client refcount (IP -> open
+  connections) and exposes it as `devices` in the snapshot.
+- Speed history: a sampler task starts on the idle -> busy edge
+  (active 0 -> 1) and stops after 2 consecutive ticks with no
+  active connection; ticks are 1 s tokio intervals. Each tick
+  diffs the live counters over the real elapsed time, smooths with
+  an EMA (alpha 0.5, snapped to 0 under 64 B/s) and pushes
+  `(unix_sec, up_bps, down_bps)` into a ring of 120. Reading
+  (`nativeHistory`, `Engine::history`) fills gaps with zeros by
+  timestamp, so the returned history is always the last 120 s
+  aligned to "now", even if the UI was hidden. The snapshot also
+  carries the latest sample as `speed_up` / `speed_down`.
+  `start()` clears the history ring.
+- Session log: a ring of the last 500 closed-connection records
+  with a monotonically increasing id. A record is appended when a
+  connection unregisters (normal close or `close_client`); `stop()`
+  does not log its drain. One line per record, oldest first:
+
+  ```text
+  log_id<TAB>conn_id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked
+  ```
+
+  `nativeSessionLog(h, sinceId)` returns only records with an id
+  greater than `sinceId` (the Kotlin side keeps the last seen id
+  and appends, capped at 500); `nativeSessionLogClear` clears the
+  ring. Ids keep increasing across a clear. The ring survives
+  `stop()` / restart.
+- Edge events: `Busy` (type 10) fires on the 0 -> 1 active edge,
+  `Idle` (type 11) on 1 -> 0, `DevicesChanged` (type 12, a = the
+  new distinct-client count) when a client IP gains or loses its
+  last open connection. They fire only on the edge.
+- Idle auto-stop: config `idle_stop_secs` (0 = off). On the Idle
+  edge the engine starts a tokio sleep of that length, cancelled
+  by a Busy edge; on expiry it emits `IdleStop` (type 13) and
+  Kotlin stops the proxy. The 60 s wake-lock grace stays in
+  Kotlin, driven by the same Busy / Idle edges.
+
 ## Events
 
 The engine reports things to Kotlin through one callback,
@@ -491,10 +557,16 @@ are never renumbered. `a` and `b` are always strings; an empty string means
 | 2 | Connection opened | connection id | snapshot line of that connection |
 | 3 | Connection closed | connection id | final snapshot line of that connection |
 | 4 | Handler missing | connection id | snapshot line of that connection |
+| 10 | Busy | `""` | `""` |
+| 11 | Idle | `""` | `""` |
+| 12 | Devices changed | new distinct-client count | `""` |
+| 13 | Idle stop | `""` | `""` |
 
-This is the fixed mapping of the `Event` enum in `rust/engine/src/model.rs`
-(`Event::to_callback`). The callback is registered with
-`nativeSetListener`; see the lifecycle table above.
+Types 2 and 3 are Rust-internal only since 0.5.1: the `Event`
+variants and their tests still exist, but `JniListener` does not
+forward them through the callback (Kotlin reads the session log
+and the snapshot instead). Types 10–13 are the edge events from
+"Engine-owned stats".
 
 ## Rules
 

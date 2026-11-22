@@ -43,16 +43,19 @@ data class Snapshot(
     val rejectedLimit: Long = 0,
     val rejectedDenied: Long = 0,
     val rejectedNotAllowed: Long = 0,
-) {
     /**
-     * Totals including active connections. The engine reports totalUp/
-     * totalDown for closed connections only, so the live total is the
-     * closed total plus what the active connections moved so far.
-     * Monotonic: bytes just move from active to closed.
+     * Engine-wide live totals (monotonic, including active and closed
+     * connections), read straight from the engine: Kotlin no longer
+     * adds the active connections' bytes to the closed totals itself.
      */
-    val liveUp: Long get() = totalUp + connections.sumOf { it.up }
-    val liveDown: Long get() = totalDown + connections.sumOf { it.down }
-}
+    val liveUp: Long = 0,
+    val liveDown: Long = 0,
+    /** Distinct client devices (one per IP). */
+    val devices: Int = 0,
+    /** Latest 1 s speed samples from the engine sampler (bytes/s). */
+    val speedUp: Long = 0,
+    val speedDown: Long = 0,
+)
 
 /**
  * Session totals: the native counters are cumulative across restarts
@@ -96,9 +99,9 @@ fun parseConnLine(line: String): ConnInfo? {
 
 /**
  * Parse the snapshot text from nativeSnapshot (see docs/ENGINE_API.md):
- * first line "state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed",
+ * first line "state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down",
  * then one tab-separated line per connection: id, client, host, port,
- * proto, started_ms, up, down, blocked. The three rejected counts are
+ * proto, started_ms, up, down, blocked. The trailing head fields are
  * optional (older snapshots lack them: 0). Returns null when there is
  * no usable head line; a malformed connection line is skipped, never
  * a crash.
@@ -117,7 +120,32 @@ fun parseSnapshot(text: String): Snapshot? {
         rejectedLimit = head.getOrNull(4)?.toLongOrNull() ?: 0L,
         rejectedDenied = head.getOrNull(5)?.toLongOrNull() ?: 0L,
         rejectedNotAllowed = head.getOrNull(6)?.toLongOrNull() ?: 0L,
+        liveUp = head.getOrNull(7)?.toLongOrNull() ?: 0L,
+        liveDown = head.getOrNull(8)?.toLongOrNull() ?: 0L,
+        devices = head.getOrNull(9)?.toIntOrNull() ?: 0,
+        speedUp = head.getOrNull(10)?.toLongOrNull() ?: 0L,
+        speedDown = head.getOrNull(11)?.toLongOrNull() ?: 0L,
     )
+}
+
+/** Live speed sample, in bytes per second. */
+data class SpeedSample(val upBps: Long, val downBps: Long)
+
+/**
+ * Parse the speed history text from nativeHistory (see
+ * docs/ENGINE_API.md): "up,down;up,down;…" oldest first, one pair per
+ * second for the last 120 s. Malformed pairs are skipped, never a
+ * crash; an empty text parses to an empty list.
+ */
+fun parseHistory(text: String): List<SpeedSample> {
+    if (text.isBlank()) return emptyList()
+    return text.split(';').mapNotNull { pair ->
+        val f = pair.split(',')
+        if (f.size != 2) return@mapNotNull null
+        val up = f[0].toLongOrNull() ?: return@mapNotNull null
+        val down = f[1].toLongOrNull() ?: return@mapNotNull null
+        SpeedSample(up, down)
+    }
 }
 
 /** One event from the engine (see docs/ENGINE_API.md for the type numbers). */
@@ -180,6 +208,10 @@ class Engine(
         Snapshot(state = "stopped", totalUp = 0L, totalDown = 0L, active = 0, connections = emptyList())
     )
     val snapshot: StateFlow<Snapshot> = _snapshot.asStateFlow()
+
+    private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
+    /** Last 120 seconds of speed from the engine sampler, pulled with the snapshot (same 1 s poll, same visibility gate). Empty until the first poll. */
+    val history: StateFlow<List<SpeedSample>> = _history.asStateFlow()
 
     // Events arrive on a native thread: never block, never touch the UI here.
     private val _events = MutableSharedFlow<EngineEvent>(
@@ -295,6 +327,16 @@ class Engine(
         }
     }
 
+    /** Session-log records newer than `sinceId` (see docs/ENGINE_API.md), read on IO. */
+    suspend fun sessionLogSince(sinceId: Long): String = withContext(Dispatchers.IO) {
+        NativeEngine.nativeSessionLog(handle, sinceId)
+    }
+
+    /** Drop every session-log record in the engine. */
+    fun clearSessionLog() {
+        NativeEngine.nativeSessionLogClear(handle)
+    }
+
     /** Destroy the native handle. Safe to call more than once. */
     fun close() {
         if (closed) return
@@ -305,16 +347,22 @@ class Engine(
     }
 
     private suspend fun pollOnce() {
-        val text = withContext(Dispatchers.IO) {
-            NativeEngine.nativeSnapshot(handle)
+        val (text, histText) = withContext(Dispatchers.IO) {
+            NativeEngine.nativeSnapshot(handle) to NativeEngine.nativeHistory(handle)
         }
         parseSnapshot(text)?.let { snap ->
             lastRawUp = snap.totalUp
             lastRawDown = snap.totalDown
             val (up, down) = sessionTotals(snap.totalUp, snap.totalDown, baselineUp, baselineDown)
-            val adjusted = snap.copy(totalUp = up, totalDown = down)
+            // The live counters are cumulative across restarts too,
+            // and equal the closed totals at start (no active
+            // connections), so the same baseline applies to them.
+            val (liveUp, liveDown) =
+                sessionTotals(snap.liveUp, snap.liveDown, baselineUp, baselineDown)
+            val adjusted = snap.copy(totalUp = up, totalDown = down, liveUp = liveUp, liveDown = liveDown)
             _snapshot.value = adjusted
             _state.value = engineStateFromName(adjusted.state)
         }
+        _history.value = parseHistory(histText)
     }
 }

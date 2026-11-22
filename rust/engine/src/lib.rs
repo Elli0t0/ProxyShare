@@ -18,7 +18,8 @@
 //! CONNECT), [`udp`] (SOCKS5 UDP datagram header parse/build, pure
 //! functions), [`http`] (plain HTTP forwarding and CONNECT tunnels),
 //! [`listener`] (the JNI event callback), [`netbind`] (bind an outbound
-//! socket to an Android Network).
+//! socket to an Android Network), [`history`] (speed history ring and
+//! sampler), [`sessionlog`] (session log ring).
 
 pub mod auth;
 pub mod cidr;
@@ -26,11 +27,13 @@ pub mod config;
 pub mod connector;
 pub mod diag;
 pub mod engine;
+pub mod history;
 pub mod http;
 pub mod listener;
 pub mod model;
 pub mod netbind;
 pub mod relay;
+pub mod sessionlog;
 pub mod sniffer;
 pub mod socks4;
 pub mod socks5;
@@ -45,8 +48,8 @@ use jni::JNIEnv;
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.4.6".
-pub const ENGINE_VERSION: &str = "engine 0.5.0";
+/// The engine version string, e.g. "engine 0.5.1".
+pub const ENGINE_VERSION: &str = "engine 0.5.1";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -252,6 +255,67 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSna
             std::ptr::null_mut()
         }
     }
+}
+
+/// The last 120 seconds of speed as "up,down;up,down;…" oldest first
+/// (see docs/ENGINE_API.md), or "" for an unknown handle.
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeHistory<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        match with_engine(handle, |engine| engine.history()) {
+            Some(text) => to_jstring(&env, &text),
+            None => to_jstring(&env, ""),
+        }
+    }));
+    match result {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Session-log records newer than `since_id`, one
+/// "log_id\t<snapshot line>" per line, oldest first (see
+/// docs/ENGINE_API.md), or "" when nothing is newer or the handle is
+/// unknown.
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSessionLog<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    since_id: jlong,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        match with_engine(handle, |engine| engine.session_log_since(since_id as u64)) {
+            Some(text) => to_jstring(&env, &text),
+            None => to_jstring(&env, ""),
+        }
+    }));
+    match result {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Drop every session-log record. Safe on an unknown handle (no-op).
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSessionLogClear<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        with_engine(handle, |engine| engine.clear_session_log());
+    }));
 }
 
 /// The diagnostics log text (see docs/ENGINE_API.md): one

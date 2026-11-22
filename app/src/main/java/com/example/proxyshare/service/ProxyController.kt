@@ -3,7 +3,6 @@ package com.example.proxyshare.service
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
-import android.os.SystemClock
 import com.example.proxyshare.data.AppSettings
 import com.example.proxyshare.data.SettingsRepository
 import com.example.proxyshare.data.UsageHistoryStore
@@ -13,15 +12,14 @@ import com.example.proxyshare.engine.EngineEvent
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.NativeEngine
 import com.example.proxyshare.engine.Snapshot
-import com.example.proxyshare.engine.parseConnLine
+import com.example.proxyshare.engine.SpeedSample
 import com.example.proxyshare.ui.screens.SessionLogEntry
+import com.example.proxyshare.ui.screens.parseSessionLog
 import com.example.proxyshare.ui.screens.pushLogEntry
-import com.example.proxyshare.ui.screens.sessionLogEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,104 +27,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Live speed sample, in bytes per second. */
-data class SpeedSample(val upBps: Long, val downBps: Long)
-
-/**
- * One speed step: raw bytes-per-second from the delta over the actual
- * elapsed time, smoothed with EMA (alpha 0.5). A direction with no new
- * bytes snaps to exactly 0 instead of decaying forever.
- */
-fun smoothSpeed(
-    prevUp: Long,
-    prevDown: Long,
-    nowUp: Long,
-    nowDown: Long,
-    elapsedMs: Long,
-    prev: SpeedSample,
-): SpeedSample {
-    val seconds = elapsedMs.coerceAtLeast(1) / 1000.0
-    val upDelta = nowUp - prevUp
-    val downDelta = nowDown - prevDown
-    val upBps = if (upDelta <= 0) {
-        0
-    } else {
-        (0.5 * (upDelta / seconds) + 0.5 * prev.upBps).toLong()
-    }
-    val downBps = if (downDelta <= 0) {
-        0
-    } else {
-        (0.5 * (downDelta / seconds) + 0.5 * prev.downBps).toLong()
-    }
-    return SpeedSample(upBps, downBps)
-}
-
-/** Append one sample to the rolling history, capped at [max] newest, order preserved. */
-fun pushSample(
-    history: List<SpeedSample>,
-    sample: SpeedSample,
-    max: Int = 120,
-): List<SpeedSample> = (history + sample).takeLast(max.coerceAtLeast(1))
-
-/** Sampler state carried between 1 Hz ticks. */
-data class SamplerState(
-    val prevUp: Long,
-    val prevDown: Long,
-    val prevTimeMs: Long,
-    val prev: SpeedSample,
-)
-
-/**
- * Fresh baseline after the UI comes back: totals from the current
- * snapshot, clock now, sample zeroed — so the first tick after a
- * hidden period cannot report a fake spike from bytes that moved
- * while the UI was hidden.
- */
-fun rebaseline(liveUp: Long, liveDown: Long, nowMs: Long): SamplerState =
-    SamplerState(liveUp, liveDown, nowMs, SpeedSample(0, 0))
-
 /** Result of the user-triggered exit-IP check. */
 sealed interface ExitIpResult {
     data class Success(val ip: String) : ExitIpResult
     data class Failure(val failure: ExitIpFailure) : ExitIpResult
-}
-
-/**
- * Distinct client IPs with a refcount per IP: one device per IP,
- * however many connections it has open. Pure: no coroutines, no
- * flows. A device counts once while any of its connections is open.
- */
-class DeviceCounter {
-    private val counts = HashMap<String, Int>()
-
-    /** Distinct devices currently connected. */
-    val devices: Int get() = counts.size
-
-    fun onOpen(ip: String) {
-        counts.merge(ip, 1, Int::plus)
-    }
-
-    fun onClose(ip: String) {
-        val n = (counts[ip] ?: return) - 1
-        if (n <= 0) counts.remove(ip) else counts[ip] = n
-    }
-
-    /** Rebuild from the snapshot's client IPs (events can be dropped). */
-    fun resync(ips: List<String>) {
-        counts.clear()
-        ips.forEach { counts.merge(it, 1, Int::plus) }
-    }
-
-    fun clear() {
-        counts.clear()
-    }
 }
 
 /**
@@ -177,7 +87,6 @@ object ProxyController {
     private var selector: NetworkSelector? = null
     private var started = false
     private var networkJob: Job? = null
-    private var speedJob: Job? = null
     private var vpnJob: Job? = null
 
     private var usageStore: UsageHistoryStore? = null
@@ -199,30 +108,33 @@ object ProxyController {
     /** The network matching the chosen outbound mode, if any. */
     val network: StateFlow<Network?> = _network.asStateFlow()
 
-    private val _speed = MutableStateFlow(SpeedSample(0, 0))
-    /** Live upload/download speed, sampled once per second while running. 0 when stopped. */
-    val speed: StateFlow<SpeedSample> = _speed.asStateFlow()
-
-    private val _activeConns = MutableStateFlow(0)
-    /** Active connections, tracked from engine events (type 2 opened, 3 closed). */
-    val activeConns: StateFlow<Int> = _activeConns.asStateFlow()
-
-    private val deviceCounter = DeviceCounter()
-    private val _devices = MutableStateFlow(0)
-    /** Distinct client devices (one per IP), tracked from the same events. */
-    val devices: StateFlow<Int> = _devices.asStateFlow()
-
     private val deniedClientsState = DeniedClients()
     private val _deniedClients = MutableStateFlow<Set<String>>(emptySet())
     /** Client IPs blocked until the proxy restarts (in-memory only). */
     val deniedClients: StateFlow<Set<String>> = _deniedClients.asStateFlow()
 
     private val _sessionLog = MutableStateFlow<List<SessionLogEntry>>(emptyList())
-    /** Last 500 closed connections (metadata only). In-memory only, never persisted. */
+    /** Last 500 closed connections (metadata only). In-memory only, never persisted. Pulled from the engine by the Logs tab. */
     val sessionLog: StateFlow<List<SessionLogEntry>> = _sessionLog.asStateFlow()
 
-    /** Clear the session log (Connections overflow menu). */
+    /** Highest session-log id pulled so far (the engine's ids only increase). */
+    private var lastLogId = 0L
+
+    /** Pull session-log records newer than [lastLogId] from the engine and append them (capped at 500). No-op when nothing is new. Called by the Logs tab while it is visible. */
+    suspend fun pullSessionLog() {
+        val text = engine.sessionLogSince(lastLogId)
+        val entries = parseSessionLog(text, System.currentTimeMillis())
+        if (entries.isEmpty()) return
+        lastLogId = entries.maxOf { it.first }
+        _sessionLog.update { log ->
+            entries.fold(log) { acc, (_, entry) -> pushLogEntry(acc, entry) }
+        }
+    }
+
+    /** Clear the session log, in the engine and locally. */
     fun clearSessionLog() {
+        engine.clearSessionLog()
+        lastLogId = 0L
         _sessionLog.value = emptyList()
     }
 
@@ -285,58 +197,16 @@ object ProxyController {
         _diagLogText.value = ""
     }
 
-    private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
-    /** Rolling 2-minute speed history (120 samples at 1 Hz), cleared on every start. */
-    val history: StateFlow<List<SpeedSample>> = _history.asStateFlow()
+    /** Rolling 2-minute speed history (120 samples at 1 Hz) from the engine sampler, pulled with the snapshot (same 1 s poll, same visibility gate). */
+    val history: StateFlow<List<SpeedSample>> = engine.history
 
     val state: StateFlow<EngineState> = engine.state
     val snapshot: StateFlow<Snapshot> = engine.snapshot
     val events: SharedFlow<EngineEvent> = engine.events
 
-    /**
-     * Sample the live totals once per second while running AND the UI
-     * is visible. While hidden the loop suspends at uiVisible.first
-     * (zero wakeups) and pushes no samples; on return it polls once
-     * and re-baselines so the first tick cannot spike.
-     */
-    private fun startSpeedSampler() {
-        speedJob?.cancel()
-        _history.value = emptyList()
-        speedJob = scope.launch {
-            var state = SamplerState(
-                engine.snapshot.value.liveUp,
-                engine.snapshot.value.liveDown,
-                SystemClock.elapsedRealtime(),
-                SpeedSample(0, 0),
-            )
-            while (isActive) {
-                uiVisible.first { it }
-                engine.pollNow()
-                state = rebaseline(
-                    engine.snapshot.value.liveUp,
-                    engine.snapshot.value.liveDown,
-                    SystemClock.elapsedRealtime(),
-                )
-                while (isActive && uiVisible.value) {
-                    delay(1000)
-                    val now = SystemClock.elapsedRealtime()
-                    val snap = engine.snapshot.value
-                    val sample = smoothSpeed(
-                        state.prevUp, state.prevDown, snap.liveUp, snap.liveDown,
-                        now - state.prevTimeMs, state.prev,
-                    )
-                    _speed.value = sample
-                    _history.value = pushSample(_history.value, sample)
-                    state = SamplerState(snap.liveUp, snap.liveDown, now, sample)
-                }
-            }
-        }
-    }
-
-    private fun stopSpeedSampler() {
-        speedJob?.cancel()
-        speedJob = null
-        _speed.value = SpeedSample(0, 0)
+    /** Poll the snapshot (and history) once right now (e.g. when the service starts, so the wake lock sees a fresh active count). */
+    suspend fun pollNow() {
+        engine.pollNow()
     }
 
     /** Called by MainActivity onStart/onStop. */
@@ -395,44 +265,6 @@ object ProxyController {
         scope.launch {
             selector.network.collect { _network.value = it }
         }
-        // Active connections from engine events (no polling). The
-        // SharedFlow drops old events, so resync from the snapshot
-        // whenever the UI becomes visible.
-        scope.launch {
-            events.collect { e ->
-                when (e.type) {
-                    2 -> {
-                        _activeConns.update { it + 1 }
-                        parseConnLine(e.b)?.let { conn ->
-                            deviceCounter.onOpen(conn.client)
-                            _devices.value = deviceCounter.devices
-                        }
-                    }
-                    3 -> {
-                        _activeConns.update { (it - 1).coerceAtLeast(0) }
-                        // Type 3 payload (b) is the connection's snapshot
-                        // line: id, client, host, port, proto, started_ms,
-                        // up, down. Only metadata, never payloads.
-                        parseConnLine(e.b)?.let { conn ->
-                            deviceCounter.onClose(conn.client)
-                            _devices.value = deviceCounter.devices
-                            _sessionLog.update { log ->
-                                pushLogEntry(log, sessionLogEntry(conn, System.currentTimeMillis()))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        scope.launch {
-            uiVisible.collect { visible ->
-                if (visible) {
-                    _activeConns.value = engine.snapshot.value.active
-                    deviceCounter.resync(engine.snapshot.value.connections.map { it.client })
-                    _devices.value = deviceCounter.devices
-                }
-            }
-        }
     }
 
     /** Read the settings, generate a password on first run, start the engine. */
@@ -451,7 +283,6 @@ object ProxyController {
                 flushUsage()
                 networkJob?.cancel()
                 networkJob = null
-                stopSpeedSampler()
                 stopVpnJob()
                 started = false
                 startLocked()
@@ -464,9 +295,6 @@ object ProxyController {
         val repo = repository ?: return
         val selector = selector ?: return
         started = true
-        _activeConns.value = 0
-        deviceCounter.clear()
-        _devices.value = 0
         deniedClientsState.clear()
         _deniedClients.value = emptySet()
         try {
@@ -491,12 +319,8 @@ object ProxyController {
                     if (mode == OutboundMode.VPN_ONLY && net == null) {
                         // Kill switch: never fall back to the default network.
                         started = false
-                        _activeConns.value = 0
-                        deviceCounter.clear()
-                        _devices.value = 0
                         runCatching { engine.stop() }
                         flushUsage()
-                        stopSpeedSampler()
                         stopVpnJob()
                         engine.setError("VPN lost — proxy stopped")
                         networkJob?.cancel()
@@ -510,21 +334,18 @@ object ProxyController {
                 started = false
                 networkJob?.cancel()
                 networkJob = null
-                stopSpeedSampler()
                 stopVpnJob()
             } else {
                 // A fresh start applies the current settings.
                 _restartNeeded.value = false
                 flushedUp = 0L
                 flushedDown = 0L
-                startSpeedSampler()
                 startVpnJob()
             }
         } catch (_: Exception) {
             started = false
             networkJob?.cancel()
             networkJob = null
-            stopSpeedSampler()
             stopVpnJob()
             runCatching { engine.stop() }
         }
@@ -536,11 +357,7 @@ object ProxyController {
             startMutex.withLock {
                 networkJob?.cancel()
                 networkJob = null
-                stopSpeedSampler()
                 stopVpnJob()
-                _activeConns.value = 0
-                deviceCounter.clear()
-                _devices.value = 0
                 deniedClientsState.clear()
                 _deniedClients.value = emptySet()
                 selector?.select(OutboundMode.DEFAULT)

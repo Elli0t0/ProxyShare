@@ -72,6 +72,7 @@ import com.example.proxyshare.data.enabledPorts
 import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.ConnInfo
 import com.example.proxyshare.engine.EngineState
+import com.example.proxyshare.engine.SpeedSample
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.ui.components.InfoChip
 import com.example.proxyshare.ui.components.StatTile
@@ -98,7 +99,7 @@ fun ConnectionsScreen(
     val primary = ranked.firstOrNull()
     val (httpPort, socksPort) = settings.enabledPorts()
     val advertise = advertiseAddress(ranked, httpPort, socksPort)
-    val speed by ProxyController.speed.collectAsStateWithLifecycle()
+    val speed = SpeedSample(snapshot.speedUp, snapshot.speedDown)
     val history by ProxyController.history.collectAsStateWithLifecycle()
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
     val deniedClients by ProxyController.deniedClients.collectAsStateWithLifecycle()

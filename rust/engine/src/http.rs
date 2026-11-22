@@ -250,15 +250,12 @@ pub async fn handle(
             .await?;
         if !body_prefix.is_empty() {
             upstream.write_all(&body_prefix).await?;
-            record
-                .up
-                .fetch_add(body_prefix.len() as u64, Ordering::Relaxed);
+            record.count_up(body_prefix.len() as u64);
         }
         return relay::relay(
             client,
             upstream,
-            &record.up,
-            &record.down,
+            record,
             Duration::from_secs(config.idle_timeout_s),
             up_limiter,
             down_limiter,
@@ -306,15 +303,12 @@ pub async fn handle(
     upstream.write_all(rewritten.as_bytes()).await?;
     if !body_prefix.is_empty() {
         upstream.write_all(&body_prefix).await?;
-        record
-            .up
-            .fetch_add(body_prefix.len() as u64, Ordering::Relaxed);
+        record.count_up(body_prefix.len() as u64);
     }
     relay::relay(
         client,
         upstream,
-        &record.up,
-        &record.down,
+        record,
         Duration::from_secs(config.idle_timeout_s),
         up_limiter,
         down_limiter,
