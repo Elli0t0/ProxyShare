@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 — launcher icon rebuilt to spec (small centered share mark)
+
+- Launcher icon rebuilt exactly to the spec: flat #45B5B0 teal
+  filling the whole canvas edge to edge, no rounded corners, no
+  text; a small white share mark (three circles joined by two thin
+  lines) centered in the middle, symbol box x 28..80, y 28..80
+  (48% of the canvas, 26% empty teal margin on every side). The
+  farthest mark point is 31.6 units from center, inside the 33-unit
+  circle mask, so no launcher mask can crop it. Nothing else changed.
+
 ## 0.3.2 — new launcher icon (share mark)
 
 - Launcher icon is now the share mark from the new logo (three

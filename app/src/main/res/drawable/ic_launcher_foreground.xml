@@ -3,24 +3,24 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Share mark from the new logo (three circles joined by two
-         lines), scaled to fit the 66dp safe zone with margin: the old
-         S-route ran to x=89 and the launcher mask clipped the right
-         circle, so the whole mark now stays inside x 26..82, y 24..84. -->
+    <!-- Small centered share mark: three circles joined by two thin
+         lines. Symbol box is x 28..80, y 28..80 (48% of the canvas,
+         26% empty teal margin on every side), so nothing is cropped
+         by any launcher mask — it even fits the 66dp circle. -->
     <path
-        android:pathData="M 71,34 L 36,54 L 72,74"
-        android:strokeWidth="5.5"
+        android:pathData="M 72,36 L 36,54 L 72,72"
+        android:strokeWidth="5"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
     <path
-        android:pathData="M 46,54 a 10,10 0 1,1 -0.1,0 Z"
+        android:pathData="M 44,54 a 8,8 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
     <path
-        android:pathData="M 81,34 a 10,10 0 1,1 -0.1,0 Z"
+        android:pathData="M 80,36 a 8,8 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
     <path
-        android:pathData="M 82,74 a 10,10 0 1,1 -0.1,0 Z"
+        android:pathData="M 80,72 a 8,8 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
 </vector>
