@@ -3345,16 +3345,30 @@ mod tests {
     async fn sampler_samples_while_busy_and_stops_when_idle() {
         let (engine, _sink, port) = start_test_engine("");
         let echo_port = start_echo_server().await;
-        // A 10 KB burst: the first 1 s tick sees ~10 KB/s, well over
+        // Connect first with a 1-byte payload: the sampler starts on
+        // the Busy edge, but its baseline is taken at its first poll
+        // — a burst sent before that poll would be counted before
+        // the baseline and no tick would ever see it (that flaked
+        // on CI). So wait for the sampler's first tick (one history
+        // entry), then send the burst: the next tick must see the
+        // full delta.
+        let mut client = echo_connection(port, echo_port, b"a").await;
+        wait_until_timeout("the sampler's first tick", 5, || {
+            lock_inner(&engine.inner).history.len() >= 1
+        })
+        .await;
+        // A 10 KB burst: the next 1 s tick sees ~10 KB/s, well over
         // the 64 B/s snap, so the EMA sample is nonzero. The sampler
         // ticks in real time on the engine runtime, so this test
         // waits for the ticks instead of advancing a paused clock
         // (see wait_until_timeout).
         let payload = vec![7u8; 10 * 1024];
-        let client = echo_connection(port, echo_port, &payload).await;
-        // The first tick samples the burst (EMA from 0 halves the
-        // raw rate). The burst entry stays in the 120 s ring even
-        // after later ticks decay to 0.
+        client.write_all(&payload).await.expect("write burst");
+        let mut echo = vec![0u8; payload.len()];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(echo, payload);
+        // The burst entry stays in the 120 s ring even after later
+        // ticks decay to 0.
         wait_until_timeout("the first sample", 3, || {
             head_fields(&engine)[10].parse::<u64>().unwrap_or(0) > 0
         })
