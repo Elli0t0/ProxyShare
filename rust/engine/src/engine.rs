@@ -650,13 +650,22 @@ fn listener_specs(config: &Config) -> Result<Vec<ListenerSpec>, String> {
 /// block_on panics inside one, and the engine is never stopped from a
 /// worker thread anyway.
 fn wait_for_task(task: JoinHandle<()>) {
+    let wait = || {
+        if let Ok(rt) = runtime() {
+            rt.block_on(async {
+                let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+            });
+        }
+    };
     if tokio::runtime::Handle::try_current().is_ok() {
-        return; // Inside a runtime: the task unwinds on its own.
-    }
-    if let Ok(rt) = runtime() {
-        rt.block_on(async {
-            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
-        });
+        // Inside a runtime: block_on would panic here, so park this
+        // worker (a replacement worker takes its place) and wait on
+        // the engine runtime instead. Returning immediately would
+        // leave the listener bound and a restart on the same port
+        // would fail with "Address already in use".
+        tokio::task::block_in_place(wait);
+    } else {
+        wait();
     }
 }
 
