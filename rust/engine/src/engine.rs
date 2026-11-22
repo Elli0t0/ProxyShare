@@ -1549,9 +1549,7 @@ mod tests {
                 .await
                 .expect("connect");
             client.write_all(bytes).await.expect("write garbage");
-            client
-                .shutdown(std::net::Shutdown::Write)
-                .expect("shutdown write");
+            client.shutdown().await.expect("shutdown write");
             // Drain until EOF: the engine closes the connection (a
             // 400 reply may come first on the HTTP path).
             let mut buf = [0u8; 4096];
