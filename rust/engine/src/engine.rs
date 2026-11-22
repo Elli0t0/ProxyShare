@@ -1580,15 +1580,17 @@ mod tests {
     async fn max_connections_rejects_the_overflow_and_recovers() {
         let echo_port = start_echo_server().await;
         let (engine, _sink, port) = start_test_engine("max_connections = 8");
-        // Hold 8 connections open, silent: they sit in the sniffer
-        // (5 s first-byte timeout) and count as active.
+        // Hold 8 connections open: each sends one SOCKS5 byte so it
+        // passes the sniffer and registers (a silent connection never
+        // registers, so the snapshot would not count it), then hangs
+        // in the greeting read (10 s timeout) while the test runs.
         let mut held = Vec::new();
         for _ in 0..8 {
-            held.push(
-                TcpStream::connect(("127.0.0.1", port))
-                    .await
-                    .expect("connect"),
-            );
+            let mut c = TcpStream::connect(("127.0.0.1", port))
+                .await
+                .expect("connect");
+            c.write_all(&[0x05]).await.expect("write first byte");
+            held.push(c);
         }
         wait_until("active reaches 8", || head_fields(&engine)[3] == "8").await;
         // 50 more: each must be refused and counted.
