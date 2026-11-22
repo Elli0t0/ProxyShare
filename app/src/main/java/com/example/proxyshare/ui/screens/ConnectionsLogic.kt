@@ -31,7 +31,8 @@ fun formatBytes(n: Long): String {
         v /= 1024
         i++
     } while (v >= 1024 && i < units.size - 1)
-    return String.format(Locale.US, "%.1f %s", v, units[i])
+    // Whole values read "5 MB", not "5.0 MB".
+    return String.format(Locale.US, "%.1f %s", v, units[i]).replace(".0 ", " ")
 }
 
 /** One client's connections, with totals. */

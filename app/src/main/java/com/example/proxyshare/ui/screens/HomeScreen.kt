@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,11 +30,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -50,9 +54,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -151,9 +158,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 16.dp),
+                .statusBarsPadding()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
@@ -282,11 +289,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 InfoChip(text = stringResource(R.string.no_password_private))
             }
 
-            // Protocol chips reflecting the settings.
+            // Protocol chips: read-only, so only the enabled ones show,
+            // each with a leading check.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ProtocolChip("HTTP", "http" in settings.protocols)
-                ProtocolChip("SOCKS4", "socks4" in settings.protocols)
-                ProtocolChip("SOCKS5", "socks5" in settings.protocols)
+                if ("http" in settings.protocols) ProtocolChip("HTTP")
+                if ("socks4" in settings.protocols) ProtocolChip("SOCKS4")
+                if ("socks5" in settings.protocols) ProtocolChip("SOCKS5")
             }
 
             // Outbound mode + exit-IP check.
@@ -377,17 +385,18 @@ private fun AddressCard(
                 )
             }
             if (primary != null) {
-                Text(
-                    text = "${stringResource(R.string.primary_address)} — " +
-                        kindLabel(primary.kind),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = primary.name,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Kind + raw name on one line, the name small and secondary.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = kindLabel(primary.kind),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = " · ${primary.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (httpPort != null) {
                     ProtocolAddressRow(
                         label = "HTTP",
@@ -408,60 +417,79 @@ private fun AddressCard(
                     )
                 }
             }
-            if (others.isNotEmpty()) {
-                TextButton(onClick = { showOthers = !showOthers }) {
-                    Text(stringResource(R.string.other_addresses))
-                }
-                AnimatedVisibility(visible = showOthers) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (nif in others) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = kindLabel(nif.kind),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    Text(
-                                        text = nif.name,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+            // Toggle + VPN rows sit 8dp apart: the old TextButton's
+            // 40dp min height plus the card's 12dp gaps read as ~40dp.
+            if (others.isNotEmpty() || vpnInterfaces.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (others.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.other_addresses),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button) {
+                                    showOthers = !showOthers
                                 }
-                                CopyChip(text = nif.ip)
-                            }
-                            if (nif.kind == IfKind.MOBILE) {
-                                Text(
-                                    text = stringResource(R.string.mobile_unreachable),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                        )
+                        AnimatedVisibility(visible = showOthers) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                for (nif in others) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Text(
+                                                text = kindLabel(nif.kind),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                            Text(
+                                                text = " · ${nif.name}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        CopyChip(text = nif.ip)
+                                    }
+                                    if (nif.kind == IfKind.MOBILE) {
+                                        Text(
+                                            text = stringResource(R.string.mobile_unreachable),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                    for (nif in vpnInterfaces) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${kindLabel(nif.kind)}: ${nif.ip}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                text = " · ${nif.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (vpnInterfaces.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.outbound_only),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-            }
-            for (nif in vpnInterfaces) {
-                Text(
-                    text = "${kindLabel(nif.kind)}: ${nif.ip}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = nif.name,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (vpnInterfaces.isNotEmpty()) {
-                Text(
-                    text = stringResource(R.string.outbound_only),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -577,6 +605,25 @@ private fun OutboundCard(
                             count = OutboundMode.entries.size,
                         ),
                         enabled = enabled,
+                        // Explicit colors: the defaults read inverted
+                        // here — the selected segment came out dim grey
+                        // while the unselected ones showed a bright
+                        // outline. (Theme.kt defines no
+                        // secondaryContainer/outlineVariant of its own,
+                        // so the defaults fall back to the baseline
+                        // scheme; on dynamic color the wallpaper-derived
+                        // secondaryContainer is dim against a near-black
+                        // surface.) Selected keeps its container and
+                        // blends its border into it; unselected uses the
+                        // dimmer outlineVariant/onSurfaceVariant.
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            activeBorderColor = MaterialTheme.colorScheme.secondaryContainer,
+                            inactiveContainerColor = Color.Transparent,
+                            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        ),
                     ) {
                         Text(text = stringResource(modeLabel(item)))
                     }
@@ -637,18 +684,26 @@ private fun modeLabel(mode: OutboundMode): Int = when (mode) {
 }
 
 @Composable
-private fun ProtocolChip(label: String, enabled: Boolean) {
+private fun ProtocolChip(label: String) {
     Surface(
-        color = if (enabled) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (enabled) MaterialTheme.colorScheme.onSecondaryContainer
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = RoundedCornerShape(16.dp),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        )
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
     }
 }

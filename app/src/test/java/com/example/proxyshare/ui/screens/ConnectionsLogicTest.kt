@@ -41,9 +41,9 @@ class ConnectionsLogicTest {
     fun formatBytesBoundaries() {
         assertEquals("0 B", formatBytes(0))
         assertEquals("1023 B", formatBytes(1023))
-        assertEquals("1.0 KB", formatBytes(1024))
+        assertEquals("1 KB", formatBytes(1024))
         assertEquals("1.5 KB", formatBytes(1536))
-        assertEquals("5.0 GB", formatBytes(5L * 1024 * 1024 * 1024))
+        assertEquals("5 GB", formatBytes(5L * 1024 * 1024 * 1024))
     }
 
     @Test

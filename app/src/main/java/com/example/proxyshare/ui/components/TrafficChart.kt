@@ -46,24 +46,22 @@ import com.example.proxyshare.R
 import com.example.proxyshare.service.SpeedSample
 import com.example.proxyshare.ui.screens.formatBytes
 
-private val NICE_STEPS = longArrayOf(1L, 2L, 5L, 10L)
-
 /**
- * Smallest "nice" value >= [value] from the 1-2-5-10 x 10^k ladder
- * (10, 20, 50, 100, 200, 500, 1K, 2K, 5K, ... bytes/s). 0 or negative
- * input scales to 10 KB/s so the chart always has headroom.
+ * Smallest "nice" value >= [value], rounded in the DISPLAY unit
+ * (KB/MB/GB) so the axis label never reads "4.8 MB/s": the old
+ * decimal 1-2-5-10 ladder produced values like 5,000,000 bytes,
+ * which formatBytes renders as 4.8 MB. 0 or negative input scales
+ * to the 10 KB/s floor so the chart always has headroom.
  */
 fun niceCeiling(value: Long): Long {
-    if (value <= 0) return 10_240L
-    var step = 1L
-    while (step <= Long.MAX_VALUE / 10) {
-        for (multiplier in NICE_STEPS) {
-            val candidate = multiplier * step
-            if (candidate >= value) return candidate
-        }
-        step *= 10
-    }
-    return Long.MAX_VALUE
+    val floor = 10L * 1024
+    if (value <= floor) return floor
+    var u = 1024L
+    while (value / u >= 1000) u *= 1024
+    val n = value.toDouble() / u
+    val steps = doubleArrayOf(1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0)
+    val s = steps.firstOrNull { it >= n } ?: return u * 1024
+    return (s * u).toLong()
 }
 
 private data class ChartPaths(

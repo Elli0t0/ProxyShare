@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.6 — visual fixes only
+
+- Double top inset fixed: the Scaffold no longer adds the status
+  bar inset (contentWindowInsets = 0; the NavigationBar pads the
+  nav-bar inset itself) and each screen keeps exactly one
+  statusBarsPadding. Home and Settings reorder it after
+  verticalScroll, so content scrolls up under the status bar
+  instead of being clipped; all three titles sit at the same y.
+- Chart axis label: niceCeiling() now rounds in the display unit
+  (KB/MB/GB), so the label reads "5 MB/s" instead of "4.8 MB/s";
+  formatBytes drops a trailing ".0" ("5 MB", "500 KB"). Tests
+  updated (TrafficChart + formatBytes).
+- Outbound segmented buttons: explicit SegmentedButton colors
+  (selected keeps secondaryContainer with its border blended in;
+  unselected uses outlineVariant/onSurfaceVariant) — the defaults
+  read inverted because Theme.kt defines no secondaryContainer or
+  outlineVariant of its own and dynamic color makes the selected
+  container dim against a near-black surface.
+- Addresses card: primary header is one line ("Hotspot · ap0",
+  name small and secondary), same for the other-address rows and
+  the VPN rows; the "Other addresses" toggle is now a compact
+  clickable text and sits 8dp from the VPN rows; protocol chips
+  are read-only, so only enabled ones show, each with a leading
+  check icon.
+- Cleanup: res/drawable/ic_launcher_background.xml was already
+  removed in 0.3.5 (nothing references it anymore).
+
 ## 0.3.5 — launcher icon rebuilt as a proper adaptive icon
 
 - Launcher icon rebuilt exactly per spec, all vectors, no PNGs:

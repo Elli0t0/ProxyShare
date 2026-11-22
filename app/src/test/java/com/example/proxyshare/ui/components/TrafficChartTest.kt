@@ -6,25 +6,36 @@ import org.junit.Test
 class TrafficChartTest {
 
     @Test
-    fun zeroScalesToTenKilobytes() {
+    fun zeroAndNegativeScaleToTenKilobytes() {
         assertEquals(10_240L, niceCeiling(0))
+        assertEquals(10_240L, niceCeiling(-5))
     }
 
     @Test
-    fun exactNiceValueIsKept() {
-        assertEquals(10L, niceCeiling(10))
-        assertEquals(500L, niceCeiling(500))
+    fun floorValueIsKept() {
+        assertEquals(10_240L, niceCeiling(10_240))
+        assertEquals(10_240L, niceCeiling(5120))
     }
 
     @Test
-    fun justAboveNiceValueRoundsUpOneStep() {
-        assertEquals(20L, niceCeiling(11))
-        assertEquals(1000L, niceCeiling(501))
+    fun justAboveFloorRoundsToTwentyKilobytes() {
+        assertEquals(20_480L, niceCeiling(10_241))
+        assertEquals(20_480L, niceCeiling(11_264))
     }
 
     @Test
-    fun megabytesUseTheSameLadder() {
-        assertEquals(2_000_000L, niceCeiling(1_500_000))
-        assertEquals(5_000_000L, niceCeiling(2_000_001))
+    fun megabytesRoundInTheDisplayUnit() {
+        // Exact nice values are kept, so the label reads "5 MB/s".
+        assertEquals(5L * 1024 * 1024, niceCeiling(5L * 1024 * 1024))
+        assertEquals(20L * 1024 * 1024, niceCeiling(20L * 1024 * 1024))
+        assertEquals(500L * 1024, niceCeiling(500L * 1024))
+        // The old decimal ladder rounded 4.8 MB up to 5,000,000 bytes,
+        // which the label rendered as "4.8 MB/s"; now it is 5 MB.
+        assertEquals(5L * 1024 * 1024, niceCeiling(4_800_000))
+    }
+
+    @Test
+    fun aboveLargestStepGoesToNextUnit() {
+        assertEquals(1024L * 1024, niceCeiling(600L * 1024))
     }
 }

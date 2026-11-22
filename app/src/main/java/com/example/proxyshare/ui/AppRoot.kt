@@ -1,5 +1,6 @@
 package com.example.proxyshare.ui
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -31,6 +32,10 @@ import com.example.proxyshare.ui.screens.SettingsScreen
 fun AppRoot() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(
+        // No system insets from the Scaffold: the NavigationBar pads
+        // the nav-bar inset itself, and each screen adds exactly one
+        // status-bar inset. (Otherwise the status bar is counted twice.)
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
