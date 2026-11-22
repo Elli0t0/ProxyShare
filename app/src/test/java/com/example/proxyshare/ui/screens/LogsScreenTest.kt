@@ -42,7 +42,8 @@ class LogsScreenTest {
     @Test
     fun filterDiagLinesMatchesMessageCaseInsensitively() {
         assertEquals(1, filterDiagLines(lines, "ADS", 0).size)
-        assertEquals(1, filterDiagLines(lines, "bind", 0).size)
+        // "bind" matches two lines: the INFO start line and the ERROR line.
+        assertEquals(2, filterDiagLines(lines, "bind", 0).size)
         assertEquals(0, filterDiagLines(lines, "nope", 0).size)
         assertEquals(0, filterDiagLines(lines, "ads", 2).size)
     }
