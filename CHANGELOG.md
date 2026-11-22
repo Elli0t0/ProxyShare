@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — launcher icon redraw
+
+- Launcher icon redrawn from the logo's real geometry (measured off
+  the logo file): long horizontal arms, one steep S-rise in the
+  middle, big circles at both ends (centers (27,65) and (81,42),
+  r 8, stroke 7). The old vector spread the rise across the whole
+  width, which read as a wobbly worm. Nothing else changed.
+
 ## 0.3.0 — correctness + features
 
 - Connector (Rust): resolved addresses are tried IPv4 first (stable

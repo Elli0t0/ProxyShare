@@ -3,17 +3,19 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- White S-route mark from the app logo, scaled to the 66dp safe zone. -->
+    <!-- White S-route mark from the app logo, traced from its real
+         geometry: long horizontal arms, one steep S-rise in the middle,
+         big circles at both ends. -->
     <path
-        android:pathData="M 32,64 C 50,64 52,58 54,54 C 56,50 58,44 76,44"
+        android:pathData="M 27,65 L 39,65 C 50,65 43,42 54,42 L 81,42"
         android:strokeWidth="7"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
     <path
-        android:pathData="M 40,64 a 8,8 0 1,1 -0.1,0 Z"
+        android:pathData="M 35,65 a 8,8 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
     <path
-        android:pathData="M 84,44 a 8,8 0 1,1 -0.1,0 Z"
+        android:pathData="M 89,42 a 8,8 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
 </vector>
