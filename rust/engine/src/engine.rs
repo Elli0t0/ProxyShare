@@ -173,10 +173,10 @@ pub fn raise_nofile_limit() -> Option<u64> {
         if rl.rlim_cur < target {
             let new = libc::rlimit { rlim_cur: target, rlim_max: rl.rlim_max };
             if libc::setrlimit(libc::RLIMIT_NOFILE, &new) == 0 {
-                return Some(target as u64);
+                return Some(target);
             }
         }
-        Some(rl.rlim_cur as u64)
+        Some(rl.rlim_cur)
     }
 }
 
