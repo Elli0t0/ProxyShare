@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -62,6 +63,16 @@ fun niceCeiling(value: Long): Long {
     val steps = doubleArrayOf(1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0)
     val s = steps.firstOrNull { it >= n } ?: return u * 1024
     return (s * u).toLong()
+}
+
+/** Chart ceiling with a speed limit folded in, so the limit line is always on scale. */
+fun chartMaxWithLimit(peakBps: Long, limitBps: Long): Long =
+    niceCeiling(maxOf(peakBps, limitBps))
+
+/** Y position of a limit line in a plot of [heightPx] with axis max [maxBps]. */
+fun limitLineY(limitBps: Long, maxBps: Long, heightPx: Float): Float {
+    if (maxBps <= 0L) return heightPx
+    return heightPx * (1f - limitBps.coerceIn(0L, maxBps).toFloat() / maxBps.toFloat())
 }
 
 private data class ChartPaths(
@@ -143,6 +154,8 @@ fun TrafficChart(
     history: List<SpeedSample>,
     current: SpeedSample,
     modifier: Modifier = Modifier,
+    downloadLimitBps: Long = 0,
+    uploadLimitBps: Long = 0,
 ) {
     val upColor = MaterialTheme.colorScheme.tertiary
     val downColor = MaterialTheme.colorScheme.primary
@@ -151,14 +164,17 @@ fun TrafficChart(
     val density = LocalDensity.current
     val strokePx = with(density) { 2.dp.toPx() }
     val textMeasurer = rememberTextMeasurer()
+    // One line: the download limit when set, else the upload limit.
+    val limitBps = if (downloadLimitBps > 0) downloadLimitBps else uploadLimitBps
+    val limited = downloadLimitBps > 0 || uploadLimitBps > 0
 
     val maxRaw = remember(history) {
         history.maxOfOrNull { maxOf(it.upBps, it.downBps) } ?: 0L
     }
     // Starts at the 10 KB/s floor so the first frame already has a scale.
     var smoothedMax by remember { mutableLongStateOf(10_240L) }
-    LaunchedEffect(history) {
-        val target = niceCeiling(maxRaw)
+    LaunchedEffect(history, limitBps) {
+        val target = chartMaxWithLimit(maxRaw, limitBps)
         smoothedMax = if (target >= smoothedMax) {
             target
         } else {
@@ -215,6 +231,9 @@ fun TrafficChart(
                 label = stringResource(R.string.stat_download),
                 bps = current.downBps,
             )
+            if (limited) {
+                InfoChip(stringResource(R.string.limited_chip))
+            }
         }
         CompositionLocalProvider(
             LocalLayoutDirection provides LayoutDirection.Ltr,
@@ -238,6 +257,15 @@ fun TrafficChart(
                 val stroke = Stroke(width = strokePx, cap = StrokeCap.Round, join = StrokeJoin.Round)
                 drawPath(paths.upLine, color = upColor, style = stroke)
                 drawPath(paths.downLine, color = downColor, style = stroke)
+                if (limitBps > 0) {
+                    drawLine(
+                        color = if (downloadLimitBps > 0) downColor else upColor,
+                        start = Offset(0f, limitLineY(limitBps, smoothedMax, height)),
+                        end = Offset(width, limitLineY(limitBps, smoothedMax, height)),
+                        strokeWidth = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f),
+                    )
+                }
                 // Max label sits just above the top grid line (y = 25%),
                 // inside the plot's left padding so it stays with the line.
                 drawText(

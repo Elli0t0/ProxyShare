@@ -16,6 +16,7 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,6 +26,7 @@ use crate::config::Config;
 use crate::connector::{ConnectError, Connector};
 use crate::engine::ConnRecord;
 use crate::relay;
+use crate::relay::RateLimiter;
 
 /// How long a negotiation read (greeting, request) may take. The
 /// sniffer already waited 5 s for the first byte; the rest of the
@@ -244,11 +246,13 @@ pub async fn handle(
     outbound: &Connector,
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
+    up_limiter: Option<&Arc<RateLimiter>>,
+    down_limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
     negotiate(&mut client, config).await?;
     let (cmd, target, port) = read_request(&mut client).await?;
     match cmd {
-        0x01 => connect(client, outbound, config, record, target, port).await,
+        0x01 => connect(client, outbound, config, record, target, port, up_limiter, down_limiter).await,
         0x03 => associate(client, config, record).await,
         other => {
             let _ = send_error_reply(&mut client, REP_COMMAND_NOT_SUPPORTED).await;
@@ -268,6 +272,8 @@ async fn connect(
     record: &std::sync::Arc<ConnRecord>,
     target: Target,
     port: u16,
+    up_limiter: Option<&Arc<RateLimiter>>,
+    down_limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
     let host = target.host();
     record.set_target(host.clone(), port);
@@ -311,6 +317,8 @@ async fn connect(
         &record.up,
         &record.down,
         Duration::from_secs(config.idle_timeout_s),
+        up_limiter,
+        down_limiter,
     )
     .await
 }

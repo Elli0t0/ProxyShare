@@ -552,6 +552,25 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     validate = { validateIntInRange(it, 2..120) },
                     onValid = { saveRestart { updateConnectTimeoutS(it) } },
                 )
+                NumberField(
+                    label = stringResource(R.string.limit_down_label),
+                    value = settings.limitDownKbps,
+                    errorText = stringResource(R.string.invalid_number),
+                    validate = { validateIntInRange(it, 0..1_000_000) },
+                    onValid = { saveRestart { updateLimitDownKbps(it) } },
+                )
+                NumberField(
+                    label = stringResource(R.string.limit_up_label),
+                    value = settings.limitUpKbps,
+                    errorText = stringResource(R.string.invalid_number),
+                    validate = { validateIntInRange(it, 0..1_000_000) },
+                    onValid = { saveRestart { updateLimitUpKbps(it) } },
+                )
+                Text(
+                    text = stringResource(R.string.limit_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             // Appearance.

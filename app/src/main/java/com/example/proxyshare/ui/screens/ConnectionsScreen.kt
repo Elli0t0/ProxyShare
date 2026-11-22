@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -42,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,6 +63,7 @@ import androidx.core.app.ShareCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.io.File
+import kotlinx.coroutines.launch
 import com.example.proxyshare.R
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetworkWatcher
@@ -96,9 +99,12 @@ fun ConnectionsScreen(
     val speed by ProxyController.speed.collectAsStateWithLifecycle()
     val history by ProxyController.history.collectAsStateWithLifecycle()
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
+    val deniedClients by ProxyController.deniedClients.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showMenu by remember { mutableStateOf(false) }
     var showSessionLog by rememberSaveable { mutableStateOf(false) }
+    var blockTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -197,7 +203,12 @@ fun ConnectionsScreen(
             }
 
             if (running) {
-                TrafficChart(history = history, current = speed)
+                TrafficChart(
+                    history = history,
+                    current = speed,
+                    downloadLimitBps = settings.limitDownKbps * 1024L,
+                    uploadLimitBps = settings.limitUpKbps * 1024L,
+                )
                 Text(
                     text = stringResource(
                         R.string.traffic_peak,
@@ -222,7 +233,13 @@ fun ConnectionsScreen(
             } else {
                 // Stopped: dimmed chart with an overlay, no radar state.
                 Box(contentAlignment = Alignment.Center) {
-                    TrafficChart(history = history, current = speed, modifier = Modifier.alpha(0.4f))
+                    TrafficChart(
+                        history = history,
+                        current = speed,
+                        modifier = Modifier.alpha(0.4f),
+                        downloadLimitBps = settings.limitDownKbps * 1024L,
+                        uploadLimitBps = settings.limitUpKbps * 1024L,
+                    )
                     Text(
                         text = stringResource(R.string.proxy_stopped),
                         style = MaterialTheme.typography.titleMedium,
@@ -302,7 +319,18 @@ fun ConnectionsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(groups, key = { it.client }) { group ->
-                        ClientCard(group = group, speeds = speeds)
+                        ClientCard(
+                            group = group,
+                            speeds = speeds,
+                            denied = group.client in deniedClients,
+                            onDisconnect = {
+                                scope.launch { ProxyController.disconnectClient(group.client) }
+                            },
+                            onBlock = { blockTarget = group.client },
+                            onUnblock = {
+                                scope.launch { ProxyController.allowClient(group.client) }
+                            },
+                        )
                     }
                 }
             }
@@ -312,6 +340,28 @@ fun ConnectionsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+
+    if (blockTarget != null) {
+        AlertDialog(
+            onDismissRequest = { blockTarget = null },
+            title = { Text(stringResource(R.string.block_client_title)) },
+            text = { Text(stringResource(R.string.block_client_text, blockTarget ?: "")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val ip = blockTarget ?: return@TextButton
+                    blockTarget = null
+                    scope.launch { ProxyController.denyClient(ip) }
+                }) {
+                    Text(stringResource(R.string.block_client))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { blockTarget = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
 }
 
@@ -337,8 +387,16 @@ private fun copyText(context: Context, text: String) {
 }
 
 @Composable
-private fun ClientCard(group: ClientGroup, speeds: Map<Long, Speed>) {
+private fun ClientCard(
+    group: ClientGroup,
+    speeds: Map<Long, Speed>,
+    denied: Boolean,
+    onDisconnect: () -> Unit,
+    onBlock: () -> Unit,
+    onUnblock: () -> Unit,
+) {
     var expanded by rememberSaveable(group.client) { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -396,6 +454,44 @@ private fun ClientCard(group: ClientGroup, speeds: Map<Long, Speed>) {
                         fontFeatureSettings = "tnum",
                     ),
                 )
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = stringResource(R.string.connections_menu),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.disconnect_client)) },
+                        onClick = {
+                            showMenu = false
+                            onDisconnect()
+                        },
+                    )
+                    if (!denied) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.block_client)) },
+                            onClick = {
+                                showMenu = false
+                                onBlock()
+                            },
+                        )
+                    }
+                }
+            }
+            if (denied) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BlockedBadge()
+                    TextButton(onClick = onUnblock) {
+                        Text(stringResource(R.string.unblock_client))
+                    }
+                }
             }
             AnimatedVisibility(visible = expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -405,6 +501,22 @@ private fun ClientCard(group: ClientGroup, speeds: Map<Long, Speed>) {
                 }
             }
         }
+    }
+}
+
+/** Small error-colored "Blocked" chip (a blocked client, not a blocked domain). */
+@Composable
+private fun BlockedBadge() {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.client_blocked),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 

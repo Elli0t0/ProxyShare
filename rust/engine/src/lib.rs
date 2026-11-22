@@ -46,7 +46,7 @@ use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
 /// The engine version string, e.g. "engine 0.2.4".
-pub const ENGINE_VERSION: &str = "engine 0.4.2";
+pub const ENGINE_VERSION: &str = "engine 0.4.3";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -131,6 +131,62 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSto
 ) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         with_engine(handle, |engine| engine.stop());
+    }));
+}
+
+/// Abort every open connection from one client IP (see
+/// docs/ENGINE_API.md). Safe on an unknown handle or a malformed IP
+/// (no-op).
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeCloseClient<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    ip: JString<'local>,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let Ok(text) = from_jstring(&mut env, &ip) else {
+            let _ = env.exception_clear();
+            return;
+        };
+        with_engine(handle, |engine| engine.close_client(&text));
+    }));
+}
+
+/// Refuse a client until the proxy restarts (see docs/ENGINE_API.md).
+/// Existing connections are NOT closed: call nativeCloseClient for
+/// that. Safe on an unknown handle or a malformed IP (no-op).
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDenyClient<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    ip: JString<'local>,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let Ok(text) = from_jstring(&mut env, &ip) else {
+            let _ = env.exception_clear();
+            return;
+        };
+        with_engine(handle, |engine| engine.deny_client(&text));
+    }));
+}
+
+/// Lift a block set by nativeDenyClient. Safe on an unknown handle or
+/// a malformed IP (no-op).
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeAllowClient<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    ip: JString<'local>,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let Ok(text) = from_jstring(&mut env, &ip) else {
+            let _ = env.exception_clear();
+            return;
+        };
+        with_engine(handle, |engine| engine.allow_client(&text));
     }));
 }
 

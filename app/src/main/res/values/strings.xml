@@ -173,6 +173,16 @@
     <string name="idle_stop_60">1 h</string>
     <string name="idle_stop_120">2 h</string>
     <string name="idle_stopped_notification">ProxyShare stopped (idle)</string>
+    <string name="disconnect_client">Disconnect</string>
+    <string name="block_client">Block until proxy restarts</string>
+    <string name="unblock_client">Unblock</string>
+    <string name="client_blocked">Blocked</string>
+    <string name="block_client_title">Block this client?</string>
+    <string name="block_client_text">Block %1$s until the proxy restarts? Its current connections will be closed.</string>
+    <string name="limit_down_label">Download limit (KB/s)</string>
+    <string name="limit_up_label">Upload limit (KB/s)</string>
+    <string name="limit_note">0 = no limit. The limit applies to all connections together.</string>
+    <string name="limited_chip">Limited</string>
     <string name="connect_timeout_label">Connect timeout (s)</string>
     <string name="invalid_number">Invalid number</string>
     <string name="theme_label">Theme</string>

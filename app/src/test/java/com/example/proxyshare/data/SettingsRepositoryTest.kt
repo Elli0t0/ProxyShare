@@ -149,4 +149,18 @@ class SettingsRepositoryTest {
         assertTrue(password.all { it in allowed })
         assertEquals(8, randomPassword(8).length)
     }
+
+    @Test
+    fun limitsDefaultToZeroAndAreOmitted() {
+        val config = AppSettings().toEngineConfig()
+        assertTrue(!config.contains("limit_down_kbps"))
+        assertTrue(!config.contains("limit_up_kbps"))
+    }
+
+    @Test
+    fun limitsAreSentWhenSet() {
+        val config = AppSettings(limitDownKbps = 512, limitUpKbps = 128).toEngineConfig()
+        assertTrue(config.contains("limit_down_kbps=512\n"))
+        assertTrue(config.contains("limit_up_kbps=128\n"))
+    }
 }

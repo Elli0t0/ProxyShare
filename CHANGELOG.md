@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.3 — client control + speed limit
+
+- Disconnect / block one client: the engine keeps an abort handle per
+  connection task (keyed by the pre-assigned connection id) and
+  `close_client(ip)` aborts all of an IP's connections, including
+  ones still sniffing; it removes the records, folds the counters
+  into the totals and emits ConnectionClosed for each, so the UI's
+  counts and session log stay right. A runtime-only `denied_clients`
+  set (never persisted, cleared by stop()) is checked on accept
+  before allowed_clients and the connection limit; a denied client
+  is closed without a reply or an event. JNI: nativeCloseClient,
+  nativeDenyClient, nativeAllowClient (documented in
+  docs/ENGINE_API.md). ClientCard overflow menu: "Disconnect"
+  (close now, the client can reconnect) and "Block until proxy
+  restarts" (deny + close, with a confirm dialog); a blocked client
+  shows a "Blocked" badge with an "Unblock" action.
+- Speed limit (token bucket): config keys `limit_down_kbps` /
+  `limit_up_kbps` (0 = unlimited), applied to the TOTAL of all
+  connections in one direction — one shared `RateLimiter` per
+  direction in relay.rs, taken after each read and before the write
+  in pump(). The bucket clock is tokio's Instant, not std's: the
+  two agree in production, but only tokio's moves under
+  tokio::time::pause, which the unit test uses to prove 1 MB at
+  512 KB/s takes about 2 s without waiting. Settings > Limits has
+  two numeric fields ("Download limit (KB/s)", "Upload limit
+  (KB/s)", 0 = off, validated 0..1,000,000, restart banner as
+  usual); the Connections chart shows a "Limited" chip when a limit
+  is active and draws the limit as a dashed horizontal line (the
+  download limit when set, else the upload limit). UDP ASSOCIATE
+  datagrams are NOT limited — they never go through the relay pumps
+  (same carve-out as the blocked-domains check).
+- Tests: Kotlin 109 -> 115 (denied-clients state, limits sent /
+  omitted, chart ceiling + limit line position). Rust 102 -> 109
+  (token bucket timing, close/deny/allow incl. deny leaves existing
+  connections open and stop clears the deny set, limits parse +
+  summary).
+
 ## 0.4.2 — in-app session log, diagnostics, idle auto-stop
 
 - Session log screen (Connections menu > "Session log"): the last 500

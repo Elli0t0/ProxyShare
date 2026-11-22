@@ -26,6 +26,9 @@ phone's active VPN. No root.
   monospace, selectable, auto-scrolled, shareable with credentials
   redacted; optional idle auto-stop (15 min / 30 min / 1 h / 2 h) in
   "Battery & startup".
+- Client control: disconnect one client, or block it until the proxy
+  restarts (Connections card menu); per-direction speed limits
+  (Settings > Limits), shown as a dashed line on the traffic chart.
 - Outbound DNS runs on the selected network (API 29+), addresses are
   tried IPv4 first with each attempt capped at 5 s.
 

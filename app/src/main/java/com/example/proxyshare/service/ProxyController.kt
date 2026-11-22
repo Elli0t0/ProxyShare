@@ -128,6 +128,31 @@ class DeviceCounter {
 }
 
 /**
+ * Clients blocked until the proxy restarts (one IP each). Pure: no
+ * coroutines, no flows. The engine holds the same set; this mirrors
+ * it so the UI can badge blocked clients without polling.
+ */
+class DeniedClients {
+    private val set = HashSet<String>()
+
+    fun deny(ip: String) {
+        set += ip
+    }
+
+    fun allow(ip: String) {
+        set -= ip
+    }
+
+    fun isDenied(ip: String): Boolean = ip in set
+
+    fun snapshot(): Set<String> = set.toSet()
+
+    fun clear() {
+        set.clear()
+    }
+}
+
+/**
  * App-scoped singleton that owns the one [Engine], the settings and
  * their coroutine scope. No Hilt. The service and the UI both talk to
  * the engine through here.
@@ -173,6 +198,11 @@ object ProxyController {
     /** Distinct client devices (one per IP), tracked from the same events. */
     val devices: StateFlow<Int> = _devices.asStateFlow()
 
+    private val deniedClientsState = DeniedClients()
+    private val _deniedClients = MutableStateFlow<Set<String>>(emptySet())
+    /** Client IPs blocked until the proxy restarts (in-memory only). */
+    val deniedClients: StateFlow<Set<String>> = _deniedClients.asStateFlow()
+
     private val _sessionLog = MutableStateFlow<List<SessionLogEntry>>(emptyList())
     /** Last 500 closed connections (metadata only). In-memory only, never persisted. */
     val sessionLog: StateFlow<List<SessionLogEntry>> = _sessionLog.asStateFlow()
@@ -194,6 +224,26 @@ object ProxyController {
     /** Clear the restart flag (the banner's Restart button). */
     fun clearRestartNeeded() {
         _restartNeeded.value = false
+    }
+
+    /** Abort every open connection from this client IP (the client can reconnect). */
+    suspend fun disconnectClient(ip: String) {
+        engine.closeClient(ip)
+    }
+
+    /** Block a client until the proxy restarts: deny first, then close its connections. */
+    suspend fun denyClient(ip: String) {
+        engine.denyClient(ip)
+        engine.closeClient(ip)
+        deniedClientsState.deny(ip)
+        _deniedClients.value = deniedClientsState.snapshot()
+    }
+
+    /** Lift a block set by denyClient. */
+    suspend fun allowClient(ip: String) {
+        engine.allowClient(ip)
+        deniedClientsState.allow(ip)
+        _deniedClients.value = deniedClientsState.snapshot()
     }
 
     /** The engine diagnostics log text (see docs/ENGINE_API.md), read on IO. */
@@ -346,6 +396,8 @@ object ProxyController {
         _activeConns.value = 0
         deviceCounter.clear()
         _devices.value = 0
+        deniedClientsState.clear()
+        _deniedClients.value = emptySet()
         try {
             repo.ensurePassword()
             val settings = repo.settings.first()
@@ -410,6 +462,8 @@ object ProxyController {
                 _activeConns.value = 0
                 deviceCounter.clear()
                 _devices.value = 0
+                deniedClientsState.clear()
+                _deniedClients.value = emptySet()
                 selector?.select(OutboundMode.DEFAULT)
                 if (started) {
                     started = false

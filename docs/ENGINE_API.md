@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.4.2"`.
+- Returns the engine version string, e.g. `"engine 0.4.3"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -42,6 +42,9 @@ second parameter.
 | `nativeCreate(): Long` | creates an `Engine`, stores it in the global handle table | Returns the handle. |
 | `nativeStart(h: Long, cfg: String): String` | `Engine::start` | Parses the config and starts listening. Returns `""` on success, an error text on failure. Starting an already starting or running engine is a no-op returning `""`. |
 | `nativeStop(h: Long)` | `Engine::stop` | Stops listening, cancels the accept tasks and closes the sockets, waiting for all of them (at most 2 s each). Safe on a stopped engine. |
+| `nativeCloseClient(h: Long, ip: String)` | `Engine::close_client` | Aborts every open connection from that client IP (including ones still sniffing) and reports them closed. Safe on an unknown handle or a malformed IP (no-op). |
+| `nativeDenyClient(h: Long, ip: String)` | `Engine::deny_client` | Refuses the client until the proxy restarts. Existing connections stay open. Safe on an unknown handle or a malformed IP (no-op). |
+| `nativeAllowClient(h: Long, ip: String)` | `Engine::allow_client` | Lifts a block set by nativeDenyClient. Safe on an unknown handle or a malformed IP (no-op). |
 | `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
@@ -266,6 +269,8 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `max_connections` | whole number ≥ 1 | `64` | Most connections at once. |
 | `idle_timeout_s` | seconds ≥ 0 | `300` | Idle time before a connection is closed. |
 | `connect_timeout_s` | seconds ≥ 0 | `10` | Time allowed to connect to the target. |
+| `limit_down_kbps` | whole number ≥ 0 | `0` | Download speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
+| `limit_up_kbps` | whole number ≥ 0 | `0` | Upload speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
 
 Example:
 
@@ -351,6 +356,37 @@ ts_ms<TAB>LEVEL<TAB>message
   Kotlin redacts anything resembling credentials (`redactLog` in
   `engine/Engine.kt`) before the log is shared from Settings >
   Diagnostics.
+
+## Client control (0.4.3)
+
+- One abort handle per connection task, keyed by the pre-assigned
+  connection id (`Engine::close_client`): closing a client aborts
+  every open connection from that IP, including ones still sniffing
+  (no record yet). The aborted tasks are dropped at their next await
+  point, so their own unregister never runs: `close_client` removes
+  the records itself, folds the counters into the totals and emits
+  `ConnectionClosed` for each. A client that is only disconnected
+  can reconnect immediately.
+- `denied_clients`: a runtime-only set of client IPs (never
+  persisted), checked in the accept path before `allowed_clients`
+  and the connection limit. A denied client is closed without any
+  reply and without an event. Deny does NOT close existing
+  connections — the UI calls deny first, then close. `stop()` clears
+  the set: a block lasts until the proxy restarts. `allow_client`
+  lifts a block early.
+
+## Speed limit (0.4.3)
+
+- Config keys `limit_down_kbps` / `limit_up_kbps` (0 = unlimited)
+  apply to the TOTAL of all connections in one direction, through
+  one shared token bucket per direction (`rust/engine/src/relay.rs`,
+  `RateLimiter`): tokens refill at the configured bytes per second,
+  capped at max(rate, next chunk) so a chunk bigger than the rate can
+  never deadlock. Each pump takes its chunk from its direction's
+  bucket after the read and before the write; with no limit
+  configured no bucket exists and the pump does not wait.
+- UDP ASSOCIATE datagrams are NOT limited (they do not go through
+  the relay pumps) — the same carve-out as the blocked-domains check.
 
 ## Events
 

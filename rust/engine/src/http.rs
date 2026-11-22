@@ -18,6 +18,7 @@
 //! and the byte counts are recorded.
 
 use std::io;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -28,6 +29,7 @@ use crate::config::Config;
 use crate::connector::Connector;
 use crate::engine::ConnRecord;
 use crate::relay;
+use crate::relay::RateLimiter;
 
 /// How long the whole request head may take to arrive.
 const HEAD_TIMEOUT: Duration = Duration::from_secs(10);
@@ -179,6 +181,8 @@ pub async fn handle(
     outbound: &Connector,
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
+    up_limiter: Option<&Arc<RateLimiter>>,
+    down_limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
     let (head, body_prefix) =
         match tokio::time::timeout(HEAD_TIMEOUT, read_head(&mut client)).await {
@@ -248,6 +252,8 @@ pub async fn handle(
             &record.up,
             &record.down,
             Duration::from_secs(config.idle_timeout_s),
+            up_limiter,
+            down_limiter,
         )
         .await;
     }
@@ -295,6 +301,8 @@ pub async fn handle(
         &record.up,
         &record.down,
         Duration::from_secs(config.idle_timeout_s),
+        up_limiter,
+        down_limiter,
     )
     .await
 }

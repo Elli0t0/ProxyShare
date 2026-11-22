@@ -12,6 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -20,11 +21,12 @@ use socket2::{Domain, Protocol as SockProtocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 
 use crate::config::Config;
 use crate::connector::Connector;
 use crate::model::{snapshot_text, ConnInfo, EngineState, Event, EventSink, Protocol};
+use crate::relay::RateLimiter;
 use crate::sniffer;
 
 /// The global tokio runtime: 2 worker threads named "ps-worker".
@@ -99,6 +101,16 @@ struct EngineInner {
     accept_tasks: Vec<JoinHandle<()>>,
     shutdown_tx: Option<watch::Sender<bool>>,
     connections: HashMap<u64, std::sync::Arc<ConnRecord>>,
+    /// Abort handles of connection tasks, with the client IP: closing a
+    /// client aborts its tasks, including ones still sniffing (no
+    /// record yet). Keyed by the pre-assigned connection id.
+    handles: HashMap<u64, (AbortHandle, IpAddr)>,
+    /// Clients refused until the proxy restarts. Runtime-only, never
+    /// persisted; cleared by stop().
+    denied: HashSet<IpAddr>,
+    /// Shared speed limiters, one per direction (None = unlimited).
+    up_limiter: Option<std::sync::Arc<RateLimiter>>,
+    down_limiter: Option<std::sync::Arc<RateLimiter>>,
     next_conn_id: u64,
     total_up: u64,
     total_down: u64,
@@ -170,6 +182,10 @@ impl Engine {
                 accept_tasks: Vec::new(),
                 shutdown_tx: None,
                 connections: HashMap::new(),
+                handles: HashMap::new(),
+                denied: HashSet::new(),
+                up_limiter: None,
+                down_limiter: None,
                 next_conn_id: 1,
                 total_up: 0,
                 total_down: 0,
@@ -330,6 +346,24 @@ impl Engine {
         inner.accept_tasks = accept_tasks;
         inner.shutdown_tx = Some(shutdown_tx);
         let summary = config.summary();
+        // One shared bucket per direction (None = unlimited). Built
+        // from the config before it moves into the inner state.
+        let up_limiter = if config.limit_up_kbps > 0 {
+            Some(std::sync::Arc::new(RateLimiter::new(
+                config.limit_up_kbps.saturating_mul(1024),
+            )))
+        } else {
+            None
+        };
+        let down_limiter = if config.limit_down_kbps > 0 {
+            Some(std::sync::Arc::new(RateLimiter::new(
+                config.limit_down_kbps.saturating_mul(1024),
+            )))
+        } else {
+            None
+        };
+        inner.up_limiter = up_limiter;
+        inner.down_limiter = down_limiter;
         inner.config = Some(config);
         inner.state = EngineState::Running;
         drop(inner);
@@ -365,6 +399,8 @@ impl Engine {
                 inner.total_up += record.up.load(Ordering::Relaxed);
                 inner.total_down += record.down.load(Ordering::Relaxed);
             }
+            // A block lasts until the proxy restarts: a stop clears it.
+            inner.denied.clear();
             inner.state = EngineState::Stopped;
         }
         for task in accept_tasks {
@@ -405,6 +441,10 @@ impl Engine {
         allowed: std::sync::Arc<HashSet<Protocol>>,
         shutdown: watch::Receiver<bool>,
     ) {
+        if self.is_denied(&peer.ip()) {
+            crate::diag::log_info(format!("denied client {} tried to connect", peer.ip()));
+            return; // stream dropped: client blocked until restart, no event
+        }
         if !client_allowed(config, &peer.ip()) {
             return; // stream dropped: client not allowed, no event
         }
@@ -412,16 +452,105 @@ impl Engine {
             self.active.fetch_sub(1, Ordering::SeqCst);
             return; // stream dropped: at the limit, no event
         }
+        // The id is reserved here so the abort handle can be stored
+        // against it before the task registers (or ever registers).
+        let id = self.reserve_id();
         let engine = std::sync::Arc::clone(self);
-        tokio::task::spawn(async move {
-            handle_connection(engine, stream, peer, allowed, shutdown).await;
+        let cleanup = std::sync::Arc::clone(self);
+        let join = tokio::task::spawn(async move {
+            handle_connection(engine, stream, peer, allowed, shutdown, id).await;
+            cleanup.clear_handle(id);
         });
+        self.store_handle(id, join.abort_handle(), peer.ip());
     }
 
-    fn register(&self, client_ip: IpAddr, protocol: Protocol) -> std::sync::Arc<ConnRecord> {
+    /// Reserve the next connection id (also the abort-handle key).
+    fn reserve_id(&self) -> u64 {
         let mut inner = lock_inner(&self.inner);
         let id = inner.next_conn_id;
         inner.next_conn_id += 1;
+        id
+    }
+
+    fn store_handle(&self, id: u64, handle: AbortHandle, peer_ip: IpAddr) {
+        lock_inner(&self.inner)
+            .handles
+            .insert(id, (handle, peer_ip));
+    }
+
+    fn clear_handle(&self, id: u64) {
+        lock_inner(&self.inner).handles.remove(&id);
+    }
+
+    /// Abort every open connection from this client IP — including
+    /// ones still sniffing (no record yet) — and report the registered
+    /// ones closed. Unknown or malformed IPs are a no-op. The aborted
+    /// tasks are dropped at their next await point, so their own
+    /// unregister never runs: this removes the records, folds the
+    /// counters into the totals and emits ConnectionClosed itself.
+    /// Aborting first guarantees a task cannot emit its own close
+    /// afterwards: a poll runs to its next await without yielding.
+    pub fn close_client(&self, ip: &str) {
+        let Ok(addr) = ip.parse::<IpAddr>() else { return };
+        let mut ids = Vec::new();
+        let mut to_abort = Vec::new();
+        {
+            let mut inner = lock_inner(&self.inner);
+            let matching: Vec<u64> = inner
+                .handles
+                .iter()
+                .filter(|(_, (_, peer_ip))| *peer_ip == addr)
+                .map(|(id, _)| *id)
+                .collect();
+            for id in matching {
+                if let Some((handle, _)) = inner.handles.remove(&id) {
+                    ids.push(id);
+                    to_abort.push(handle);
+                }
+            }
+        }
+        for handle in to_abort {
+            handle.abort();
+        }
+        let mut closed = Vec::new();
+        {
+            let mut inner = lock_inner(&self.inner);
+            for id in ids {
+                if let Some(record) = inner.connections.remove(&id) {
+                    inner.total_up += record.up.load(Ordering::Relaxed);
+                    inner.total_down += record.down.load(Ordering::Relaxed);
+                    closed.push(record.to_conn_info());
+                }
+            }
+        }
+        for info in closed {
+            self.emit(Event::ConnectionClosed(info));
+        }
+    }
+
+    /// Refuse this client until the proxy restarts (runtime-only, never
+    /// persisted). Existing connections are NOT closed: call
+    /// close_client for that, or deny first and close after.
+    pub fn deny_client(&self, ip: &str) {
+        if let Ok(addr) = ip.parse::<IpAddr>() {
+            lock_inner(&self.inner).denied.insert(addr);
+        }
+    }
+
+    /// Lift a block set by deny_client.
+    pub fn allow_client(&self, ip: &str) {
+        if let Ok(addr) = ip.parse::<IpAddr>() {
+            lock_inner(&self.inner).denied.remove(&addr);
+        }
+    }
+
+    /// True when this IP is blocked until restart.
+    pub fn is_denied(&self, ip: &IpAddr) -> bool {
+        lock_inner(&self.inner).denied.contains(ip)
+    }
+
+    fn register(&self, id: u64, client_ip: IpAddr, protocol: Protocol) -> std::sync::Arc<ConnRecord> {
+        let mut inner = lock_inner(&self.inner);
         let record = std::sync::Arc::new(ConnRecord {
             id,
             client_ip,
@@ -587,6 +716,7 @@ async fn handle_connection(
     peer: SocketAddr,
     allowed: std::sync::Arc<HashSet<Protocol>>,
     mut shutdown: watch::Receiver<bool>,
+    id: u64,
 ) {
     let _guard = ActiveGuard(std::sync::Arc::clone(&engine));
     if engine.auth_guard.is_blocked(peer.ip(), Instant::now()) {
@@ -605,20 +735,34 @@ async fn handle_connection(
             None => return, // client closed, errored, or sent nothing in time
         },
     };
-    let config = match lock_inner(&engine.inner).config.clone() {
-        Some(config) => config,
-        None => return, // engine stopped while the sniff was running
+    let (config, up_limiter, down_limiter) = {
+        let inner = lock_inner(&engine.inner);
+        match inner.config.clone() {
+            Some(config) => (
+                config,
+                inner.up_limiter.clone(),
+                inner.down_limiter.clone(),
+            ),
+            None => return, // engine stopped while the sniff was running
+        }
     };
     if !allowed.contains(&protocol) {
         consume_one(&mut stream).await;
         return; // sniffed protocol is not served on this listener: close, no event
     }
-    let record = engine.register(peer.ip(), protocol);
+    let record = engine.register(id, peer.ip(), protocol);
     match protocol {
         Protocol::Socks5 => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let result =
-                crate::socks5::handle(stream, &engine.outbound, &config, &record).await;
+            let result = crate::socks5::handle(
+                stream,
+                &engine.outbound,
+                &config,
+                &record,
+                up_limiter.as_ref(),
+                down_limiter.as_ref(),
+            )
+            .await;
             engine.record_auth_failure(&record, &result);
             engine.unregister(record.id);
             // Unregistered first, so the snapshot already carries the
@@ -627,16 +771,30 @@ async fn handle_connection(
         }
         Protocol::Http => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let result =
-                crate::http::handle(stream, &engine.outbound, &config, &record).await;
+            let result = crate::http::handle(
+                stream,
+                &engine.outbound,
+                &config,
+                &record,
+                up_limiter.as_ref(),
+                down_limiter.as_ref(),
+            )
+            .await;
             engine.record_auth_failure(&record, &result);
             engine.unregister(record.id);
             engine.emit(Event::ConnectionClosed(record.to_conn_info()));
         }
         Protocol::Socks4 => {
             engine.emit(Event::ConnectionOpened(record.to_conn_info()));
-            let result =
-                crate::socks4::handle(stream, &engine.outbound, &config, &record).await;
+            let result = crate::socks4::handle(
+                stream,
+                &engine.outbound,
+                &config,
+                &record,
+                up_limiter.as_ref(),
+                down_limiter.as_ref(),
+            )
+            .await;
             engine.record_auth_failure(&record, &result);
             engine.unregister(record.id);
             engine.emit(Event::ConnectionClosed(record.to_conn_info()));
@@ -1398,6 +1556,118 @@ mod tests {
             "expected a 200 reply, got: {}",
             String::from_utf8_lossy(&response)
         );
+        drop(client);
+        engine.stop();
+    }
+
+    /// Open a SOCKS5 tunnel to the echo server and return the client.
+    async fn open_socks5_tunnel(port: u16, echo_port: u16) -> TcpStream {
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let req = [
+            0x05,
+            0x01,
+            0x00,
+            0x01,
+            127,
+            0,
+            0,
+            1,
+            (echo_port >> 8) as u8,
+            (echo_port & 0xff) as u8,
+        ];
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x00, "CONNECT succeeds, got {reply:?}");
+        client
+    }
+
+    #[tokio::test]
+    async fn close_client_aborts_open_connections() {
+        let (engine, sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let mut client = open_socks5_tunnel(port, echo_port).await;
+        assert!(
+            engine.snapshot().starts_with("running\t0\t0\t1"),
+            "{}",
+            engine.snapshot()
+        );
+        engine.close_client("127.0.0.1");
+        // The client side sees EOF, and the close event carries the client IP.
+        assert_closed(&mut client).await;
+        let closed = wait_closed(&sink).await;
+        assert_eq!(
+            closed.client_ip,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert!(
+            engine.snapshot().starts_with("running\t0\t0\t0"),
+            "{}",
+            engine.snapshot()
+        );
+        // A malformed IP and an unknown IP are no-ops, not panics.
+        engine.close_client("not an ip");
+        engine.close_client("10.9.9.9");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn deny_client_refuses_new_connections_until_allowed() {
+        let (engine, _sink, port) = start_test_engine("");
+        let blocked = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        engine.deny_client("127.0.0.1");
+        assert!(engine.is_denied(&blocked));
+        // A new connection is closed without any reply.
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_closed(&mut client).await;
+        drop(client);
+        // Allow again: the same client connects and negotiates normally.
+        engine.allow_client("127.0.0.1");
+        assert!(!engine.is_denied(&blocked));
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        drop(client);
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn deny_client_leaves_existing_connections_open() {
+        let (engine, _sink, port) = start_test_engine("");
+        let echo_port = start_echo_server().await;
+        let mut client = open_socks5_tunnel(port, echo_port).await;
+        engine.deny_client("127.0.0.1");
+        // The open tunnel still relays: the echo comes back.
+        client.write_all(b"ping").await.expect("write");
+        let mut echo = [0u8; 4];
+        read_exact(&mut client, &mut echo).await;
+        assert_eq!(&echo, b"ping");
+        // Only an explicit close ends it.
+        engine.close_client("127.0.0.1");
+        assert_closed(&mut client).await;
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn stop_clears_denied_clients() {
+        let (engine, _sink, port) = start_test_engine("");
+        let blocked = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        engine.deny_client("127.0.0.1");
+        assert!(engine.is_denied(&blocked));
+        engine.stop();
+        assert!(!engine.is_denied(&blocked));
+        // After a restart the client connects again.
+        engine
+            .start(&format!("port = {port}"))
+            .expect("restart");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
         drop(client);
         engine.stop();
     }

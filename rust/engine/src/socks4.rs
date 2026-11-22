@@ -12,6 +12,7 @@
 
 use std::io;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -21,6 +22,7 @@ use crate::config::Config;
 use crate::connector::Connector;
 use crate::engine::ConnRecord;
 use crate::relay;
+use crate::relay::RateLimiter;
 
 /// How long a negotiation read (head, USERID, hostname) may take.
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
@@ -70,6 +72,8 @@ pub async fn handle(
     outbound: &Connector,
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
+    up_limiter: Option<&Arc<RateLimiter>>,
+    down_limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
     let mut head = [0u8; 8];
     read_exact_timeout(&mut client, &mut head).await?;
@@ -134,6 +138,8 @@ pub async fn handle(
         &record.up,
         &record.down,
         Duration::from_secs(config.idle_timeout_s),
+        up_limiter,
+        down_limiter,
     )
     .await
 }

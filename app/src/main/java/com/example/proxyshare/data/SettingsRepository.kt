@@ -31,6 +31,10 @@ data class AppSettings(
     val maxConnections: Int = 64,
     val idleTimeoutS: Int = 300,
     val connectTimeoutS: Int = 10,
+    /** Download speed limit in KB/s, total across all connections. 0 = unlimited. Sent to the engine. */
+    val limitDownKbps: Int = 0,
+    /** Upload speed limit in KB/s, total across all connections. 0 = unlimited. Sent to the engine. */
+    val limitUpKbps: Int = 0,
     val themeMode: String = "system",
     val language: String = "system",
     val keepScreenOn: Boolean = false,
@@ -66,6 +70,8 @@ fun AppSettings.toEngineConfig(): String = buildString {
     appendLine("max_connections=$maxConnections")
     appendLine("idle_timeout_s=$idleTimeoutS")
     appendLine("connect_timeout_s=$connectTimeoutS")
+    if (limitDownKbps > 0) appendLine("limit_down_kbps=$limitDownKbps")
+    if (limitUpKbps > 0) appendLine("limit_up_kbps=$limitUpKbps")
 }
 
 /** The port each protocol listens on, or null when it is disabled. */
@@ -131,6 +137,8 @@ class SettingsRepository(context: Context) {
             maxConnections = prefs[Keys.MAX_CONNECTIONS] ?: defaults.maxConnections,
             idleTimeoutS = prefs[Keys.IDLE_TIMEOUT_S] ?: defaults.idleTimeoutS,
             connectTimeoutS = prefs[Keys.CONNECT_TIMEOUT_S] ?: defaults.connectTimeoutS,
+            limitDownKbps = prefs[Keys.LIMIT_DOWN_KBPS] ?: defaults.limitDownKbps,
+            limitUpKbps = prefs[Keys.LIMIT_UP_KBPS] ?: defaults.limitUpKbps,
             themeMode = prefs[Keys.THEME_MODE] ?: defaults.themeMode,
             language = prefs[Keys.LANGUAGE] ?: defaults.language,
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
@@ -213,6 +221,14 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.CONNECT_TIMEOUT_S] = value }
     }
 
+    suspend fun updateLimitDownKbps(value: Int) {
+        dataStore.edit { it[Keys.LIMIT_DOWN_KBPS] = value }
+    }
+
+    suspend fun updateLimitUpKbps(value: Int) {
+        dataStore.edit { it[Keys.LIMIT_UP_KBPS] = value }
+    }
+
     suspend fun updateThemeMode(value: String) {
         dataStore.edit { it[Keys.THEME_MODE] = value }
     }
@@ -261,6 +277,8 @@ class SettingsRepository(context: Context) {
         val MAX_CONNECTIONS = intPreferencesKey("max_connections")
         val IDLE_TIMEOUT_S = intPreferencesKey("idle_timeout_s")
         val CONNECT_TIMEOUT_S = intPreferencesKey("connect_timeout_s")
+        val LIMIT_DOWN_KBPS = intPreferencesKey("limit_down_kbps")
+        val LIMIT_UP_KBPS = intPreferencesKey("limit_up_kbps")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val LANGUAGE = stringPreferencesKey("language")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")

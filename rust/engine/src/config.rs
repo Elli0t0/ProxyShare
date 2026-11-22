@@ -47,6 +47,12 @@ pub struct Config {
     pub idle_timeout_s: u64,
     /// Seconds a connect to the target may take before it is aborted.
     pub connect_timeout_s: u64,
+    /// Download speed limit in KB/s, total across all connections.
+    /// 0 = unlimited.
+    pub limit_down_kbps: u64,
+    /// Upload speed limit in KB/s, total across all connections.
+    /// 0 = unlimited.
+    pub limit_up_kbps: u64,
 }
 
 impl Default for Config {
@@ -65,6 +71,8 @@ impl Default for Config {
             max_connections: 64,
             idle_timeout_s: 300,
             connect_timeout_s: 10,
+            limit_down_kbps: 0,
+            limit_up_kbps: 0,
         }
     }
 }
@@ -103,6 +111,12 @@ impl Config {
                 "connect_timeout_s" => {
                     config.connect_timeout_s = parse_u64(value, line_no, key)?
                 }
+                "limit_down_kbps" => {
+                    config.limit_down_kbps = parse_u64(value, line_no, key)?
+                }
+                "limit_up_kbps" => {
+                    config.limit_up_kbps = parse_u64(value, line_no, key)?
+                }
                 _ => { /* unknown keys are ignored */ }
             }
         }
@@ -127,8 +141,12 @@ impl Config {
         let mut protocols: Vec<&str> =
             self.protocols.iter().map(|p| p.as_str()).collect();
         protocols.sort_unstable();
+        let limits = match (self.limit_down_kbps, self.limit_up_kbps) {
+            (0, 0) => String::new(),
+            (d, u) => format!(", limits down {d}/up {u} KB/s"),
+        };
         format!(
-            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains",
+            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}",
             self.bind_addr,
             protocols.join("+"),
             self.private_only,
@@ -436,6 +454,19 @@ connect_timeout_s = 5
         let single = Config::default().summary();
         assert!(single.contains("port 1080"));
         assert!(!single.contains("http_port"));
+    }
+
+    #[test]
+    fn limits_parse_and_show_in_summary() {
+        let config = Config::parse("limit_down_kbps = 512\nlimit_up_kbps = 128")
+            .expect("limits parse");
+        assert_eq!(config.limit_down_kbps, 512);
+        assert_eq!(config.limit_up_kbps, 128);
+        assert!(config
+            .summary()
+            .contains("limits down 512/up 128 KB/s"));
+        assert!(!Config::default().summary().contains("limits"));
+        assert!(Config::parse("limit_down_kbps = abc").is_err());
     }
 
     #[test]

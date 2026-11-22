@@ -253,6 +253,30 @@ class Engine(
         pollOnce()
     }
 
+    /** Abort every open connection from one client IP. No-op after close. */
+    suspend fun closeClient(ip: String) {
+        if (closed) return
+        withContext(Dispatchers.IO) {
+            NativeEngine.nativeCloseClient(handle, ip)
+        }
+    }
+
+    /** Refuse a client until the proxy restarts (existing connections stay open). No-op after close. */
+    suspend fun denyClient(ip: String) {
+        if (closed) return
+        withContext(Dispatchers.IO) {
+            NativeEngine.nativeDenyClient(handle, ip)
+        }
+    }
+
+    /** Lift a block set by denyClient. No-op after close. */
+    suspend fun allowClient(ip: String) {
+        if (closed) return
+        withContext(Dispatchers.IO) {
+            NativeEngine.nativeAllowClient(handle, ip)
+        }
+    }
+
     /** Destroy the native handle. Safe to call more than once. */
     fun close() {
         if (closed) return

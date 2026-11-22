@@ -28,6 +28,18 @@ object NativeEngine {
     @JvmStatic
     external fun nativeSetOutboundNetwork(handle: Long, network: Long)
 
+    /** Abort every open connection from one client IP (see docs/ENGINE_API.md). */
+    @JvmStatic
+    external fun nativeCloseClient(handle: Long, ip: String)
+
+    /** Refuse a client until the proxy restarts (existing connections stay open). */
+    @JvmStatic
+    external fun nativeDenyClient(handle: Long, ip: String)
+
+    /** Lift a block set by nativeDenyClient. */
+    @JvmStatic
+    external fun nativeAllowClient(handle: Long, ip: String)
+
     /** Stop the engine if running and release its handle. */
     @JvmStatic
     external fun nativeDestroy(handle: Long)
