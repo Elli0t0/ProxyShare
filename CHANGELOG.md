@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.5 — launcher icon rebuilt as a proper adaptive icon
+
+- Launcher icon rebuilt exactly per spec, all vectors, no PNGs:
+  background is now a color resource
+  (res/values/ic_launcher_background.xml, #5890B0) instead of a
+  shape drawable; foreground is the spec's vector verbatim
+  (S-route, symbol box x 26.9..81.1, y 38.9..69.8, inside the
+  66dp safe zone, no scale/inset/padding); both
+  mipmap-anydpi-v26 adaptive-icon files rewritten to reference
+  @color/ic_launcher_background + @drawable/ic_launcher_foreground
+  with a monochrome layer. Manifest icon/roundIcon were already
+  correct. No mipmap PNG/WebP files existed to delete. The old
+  drawable/ic_launcher_background.xml shape is now unused and
+  will be removed in a cleanup commit. Nothing else changed.
+
 ## 0.3.4 — launcher icon: S-route on blue, to spec
 
 - Launcher icon is now the S-route from the reference image:
