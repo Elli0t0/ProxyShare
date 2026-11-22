@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.3 — Wi-Fi lock while clients are connected
+
+- ProxyService now holds a `WifiManager.WifiLock` (`WIFI_MODE_FULL_LOW_LATENCY`
+  on API 29+, `WIFI_MODE_FULL_HIGH_PERF` below) alongside the CPU wake
+  lock, so a phone acting as a Wi-Fi client (not a hotspot) does not
+  power-save the radio with the screen off. Acquired/released in the
+  same places as the CPU lock, so Battery saver still applies: released
+  60 s after the last client disconnects, re-acquired on the first
+  client; always released in `onDestroy`. No new permission (`WAKE_LOCK`
+  is enough) and no new setting or UI. Acquire/release are wrapped in
+  `runCatching`, so a missing `WifiManager` or Wi-Fi being off can
+  never crash the service. The hold decision is the pure function
+  `shouldHoldServiceLocks(clientCount, batterySaver)` (held when
+  `!batterySaver || clientCount > 0`), covered by
+  `ServiceLocksTest` (3 tests).
+
 ## 0.5.2 — single validation source + robustness tests
 
 - Validate once, in Rust: new `nativeValidate(kind, value)` JNI call

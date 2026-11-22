@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
@@ -29,16 +31,23 @@ import kotlinx.coroutines.runBlocking
 
 /**
  * Foreground service that keeps the proxy running: it holds a partial
- * wake lock, shows an ongoing notification with a Stop action, and
- * stops itself when the engine stops or errors.
+ * wake lock and a Wi-Fi lock while clients are connected, shows an
+ * ongoing notification with a Stop action, and stops itself when the
+ * engine stops or errors.
  *
  * Start it from the UI with
  * ContextCompat.startForegroundService(context, Intent(context, ProxyService::class.java)).
  */
+
+/** Hold the service locks (CPU wake lock + Wi-Fi lock) while a client is connected, or always while battery saver is off. */
+internal fun shouldHoldServiceLocks(clientCount: Int, batterySaver: Boolean): Boolean =
+    !batterySaver || clientCount > 0
+
 class ProxyService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var observing = false
     private var idleObserving = false
     private var vpnDropObserving = false
@@ -117,10 +126,10 @@ class ProxyService : Service() {
         }
     }
 
-    /** Acquire the wake lock when busy or battery saver is off; otherwise release it after the 60 s grace. */
+    /** Acquire the locks when busy or battery saver is off; otherwise release them after the 60 s grace. */
     private fun updateWakeLock() {
         val saver = ProxyController.settings.value.batterySaver
-        if (!saver || busy) {
+        if (shouldHoldServiceLocks(if (busy) 1 else 0, saver)) {
             wakeGraceJob?.cancel()
             wakeGraceJob = null
             acquireWakeLock()
@@ -360,11 +369,39 @@ class ProxyService : Service() {
             setReferenceCounted(false)
             acquire()
         }
+        setWifiLock(true)
     }
 
     private fun releaseWakeLock() {
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+        setWifiLock(false)
+    }
+
+    /**
+     * Hold the Wi-Fi radio awake while clients are connected, so a
+     * phone acting as a Wi-Fi client (not a hotspot) does not
+     * power-save the radio with the screen off. Created lazily;
+     * acquiring while Wi-Fi is off is harmless (no effect until it
+     * turns on) and any failure is swallowed, never a crash.
+     */
+    private fun setWifiLock(held: Boolean) = runCatching {
+        if (held) {
+            val wm = applicationContext.getSystemService(WifiManager::class.java)
+                ?: return@runCatching
+            @Suppress("DEPRECATION")
+            val mode = if (Build.VERSION.SDK_INT >= 29) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            val l = wifiLock ?: wm.createWifiLock(mode, "ProxyShare:wifi")
+                .apply { setReferenceCounted(false) }
+                .also { wifiLock = it }
+            if (!l.isHeld) l.acquire()
+        } else {
+            wifiLock?.takeIf { it.isHeld }?.release()
+        }
     }
 
     companion object {
