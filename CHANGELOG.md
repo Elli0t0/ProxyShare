@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.7 — bottom navigation order
+
+- Bottom navigation swapped: Logs now sits in the middle (Home,
+  Connections, Logs, Settings) and Settings moves to the bottom
+  right. The Connections menu's "View session log" jump follows the
+  new Logs position. No behavior or engine change; ENGINE_VERSION
+  bumped to 0.4.7 to stay equal to the app version.
+- Tests unchanged: Kotlin 138, Rust 125.
+
 ## 0.4.6 — VPN watchdog, client names, usage history
 
 - VPN watchdog: a new VpnWatcher (data/VpnWatcher.kt) exposes a

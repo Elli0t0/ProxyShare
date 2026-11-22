@@ -65,14 +65,14 @@ fun AppRoot() {
                     NavigationBarItem(
                         selected = tab == 2,
                         onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_settings)) },
+                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_logs)) },
                     )
                     NavigationBarItem(
                         selected = tab == 3,
                         onClick = { tab = 3 },
-                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_logs)) },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                        label = { Text(stringResource(R.string.nav_settings)) },
                     )
                 }
             }
@@ -82,10 +82,10 @@ fun AppRoot() {
                 1 -> ConnectionsScreen(
                     modifier = Modifier.padding(padding),
                     onGoHome = { tab = 0 },
-                    onGoLogs = { tab = 3 },
+                    onGoLogs = { tab = 2 },
                 )
-                2 -> SettingsScreen(modifier = Modifier.padding(padding))
-                else -> LogsScreen(modifier = Modifier.padding(padding))
+                2 -> LogsScreen(modifier = Modifier.padding(padding))
+                else -> SettingsScreen(modifier = Modifier.padding(padding))
             }
         }
         // Solid cover over the status-bar area: content scrolls under
