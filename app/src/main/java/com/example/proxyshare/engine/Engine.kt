@@ -39,6 +39,10 @@ data class Snapshot(
     val totalDown: Long,
     val active: Int,
     val connections: List<ConnInfo>,
+    /** Connections refused since start: the limit / a denied client / a client outside allowed_clients. */
+    val rejectedLimit: Long = 0,
+    val rejectedDenied: Long = 0,
+    val rejectedNotAllowed: Long = 0,
 ) {
     /**
      * Totals including active connections. The engine reports totalUp/
@@ -92,10 +96,12 @@ fun parseConnLine(line: String): ConnInfo? {
 
 /**
  * Parse the snapshot text from nativeSnapshot (see docs/ENGINE_API.md):
- * first line "state<TAB>total_up<TAB>total_down<TAB>active", then one
- * tab-separated line per connection: id, client, host, port, proto,
- * started_ms, up, down, blocked. Returns null when there is no usable head
- * line; a malformed connection line is skipped, never a crash.
+ * first line "state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed",
+ * then one tab-separated line per connection: id, client, host, port,
+ * proto, started_ms, up, down, blocked. The three rejected counts are
+ * optional (older snapshots lack them: 0). Returns null when there is
+ * no usable head line; a malformed connection line is skipped, never
+ * a crash.
  */
 fun parseSnapshot(text: String): Snapshot? {
     val lines = text.lineSequence().filter { it.isNotEmpty() }.toList()
@@ -108,6 +114,9 @@ fun parseSnapshot(text: String): Snapshot? {
         totalDown = head[2].toLongOrNull() ?: 0L,
         active = head[3].toIntOrNull() ?: 0,
         connections = conns,
+        rejectedLimit = head.getOrNull(4)?.toLongOrNull() ?: 0L,
+        rejectedDenied = head.getOrNull(5)?.toLongOrNull() ?: 0L,
+        rejectedNotAllowed = head.getOrNull(6)?.toLongOrNull() ?: 0L,
     )
 }
 

@@ -18,7 +18,7 @@ class SettingsRepositoryTest {
                 "auth_user=proxy\n" +
                 "auth_pass=secret\n" +
                 "private_only=true\n" +
-                "max_connections=64\n" +
+                "max_connections=256\n" +
                 "idle_timeout_s=300\n" +
                 "connect_timeout_s=10\n",
             config

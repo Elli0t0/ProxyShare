@@ -107,6 +107,7 @@ fun ConnectionsScreen(
     var showMenu by remember { mutableStateOf(false) }
     var blockTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var renameTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    var showRejectedInfo by remember { mutableStateOf(false) }
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -225,6 +226,19 @@ fun ConnectionsScreen(
                             fontFeatureSettings = "tnum",
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (snapshot.rejectedLimit > 0) {
+                    Text(
+                        text = stringResource(
+                            R.string.rejected_connections,
+                            snapshot.rejectedLimit,
+                        ),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFeatureSettings = "tnum",
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { showRejectedInfo = true },
                     )
                 }
             } else {
@@ -373,6 +387,18 @@ fun ConnectionsScreen(
                 renameTarget = null
                 scope.launch {
                     ProxyController.updateSettings { updateClientName(ip, name) }
+                }
+            },
+        )
+    }
+
+    if (showRejectedInfo) {
+        AlertDialog(
+            onDismissRequest = { showRejectedInfo = false },
+            text = { Text(stringResource(R.string.rejected_connections_info)) },
+            confirmButton = {
+                TextButton(onClick = { showRejectedInfo = false }) {
+                    Text(stringResource(R.string.ok))
                 }
             },
         )

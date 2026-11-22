@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.0 — engine robustness
+
+- Connection limit: default 64 -> 256 (engine config and Settings).
+  At start the engine raises the soft RLIMIT_NOFILE to min(hard,
+  65536) and caps the effective limit by the fd budget: each
+  proxied connection holds 2 fds, so effective_max =
+  min(config.max_connections, (nofile_soft - 128) / 2), never below
+  1. The resulting limit is logged at INFO. Expected: pages no
+  longer stall past 64 browser connections.
+- Never drop silently: refused connections are counted per reason
+  (limit / denied client / client outside allowed_clients) and the
+  snapshot carries the three totals as trailing fields. Each reason
+  logs at most once per 5 s: WARN "connection limit reached: N
+  rejected in the last 5 s (max M)". Connections shows "Rejected: N"
+  under the Peak line when > 0; tapping it explains "connection
+  limit reached — raise Max connections in Settings". Settings >
+  Limits "Max connections" now allows 1..2000 with the helper text
+  "Each connection uses 2 file descriptors".
+- Abort-handle race fixed: the handle slot is reserved BEFORE the
+  connection task is spawned and filled afterwards, so a task that
+  finishes fast can no longer leave a stale entry behind (close_client
+  aborts only the stored handles).
+- JNI events: worker threads attach permanently
+  (attach_current_thread_permanently) instead of attaching and
+  detaching on every event. Best-effort, never panics.
+- Handshake timeout verified (no change needed): the sniffer waits
+  5 s for the first byte, and SOCKS5 negotiation, SOCKS4 request
+  and the HTTP head each have a 10 s read timeout, so a silent
+  client can never hold a slot until the 300 s idle timeout.
+- Tests: Kotlin 138 -> 140 (rejected-count parsing), Rust 125 -> 132
+  (effective_max, snapshot fields, handle race, limit/denied/
+  disallowed rejections).
+
 ## 0.4.7 — bottom navigation order
 
 - Bottom navigation swapped: Logs now sits in the middle (Home,

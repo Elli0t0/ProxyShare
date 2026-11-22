@@ -72,7 +72,7 @@ impl Default for Config {
             allowed_clients: Vec::new(),
             blocked_domains: Vec::new(),
             private_only: true,
-            max_connections: 64,
+            max_connections: 256,
             idle_timeout_s: 300,
             connect_timeout_s: 10,
             limit_down_kbps: 0,
@@ -166,6 +166,16 @@ impl Config {
             self.blocked_domains.len(),
         )
     }
+}
+
+/// Cap the configured connection limit by the process fd budget: each
+/// proxied connection holds 2 fds (client + upstream), and 128 fds are
+/// kept for listeners, the runtime and everything else. Never 0, so a
+/// tiny fd budget still allows a single connection.
+pub fn effective_max_connections(configured: u32, nofile_soft: u64) -> u32 {
+    let budget = nofile_soft.saturating_sub(128) / 2;
+    let capped = (configured as u64).min(budget).max(1);
+    u32::try_from(capped).unwrap_or(u32::MAX)
 }
 
 fn opt_string(value: &str) -> Option<String> {
@@ -488,6 +498,31 @@ connect_timeout_s = 5
         assert!(config.require_vpn);
         assert!(config.summary().contains("require_vpn on"));
         assert!(Config::parse("require_vpn = maybe").is_err());
+    }
+
+    #[test]
+    fn default_max_connections_is_256() {
+        assert_eq!(Config::default().max_connections, 256);
+    }
+
+    #[test]
+    fn effective_max_uses_configured_when_fds_allow() {
+        assert_eq!(effective_max_connections(256, 65_536), 256);
+        assert_eq!(effective_max_connections(256, 1024), 256);
+        assert_eq!(effective_max_connections(64, 256), 64);
+    }
+
+    #[test]
+    fn effective_max_caps_by_fd_budget() {
+        // (1024 - 128) / 2 = 448 fds left for connections.
+        assert_eq!(effective_max_connections(2000, 1024), 448);
+        assert_eq!(effective_max_connections(256, 256), 64);
+    }
+
+    #[test]
+    fn effective_max_never_zero() {
+        assert_eq!(effective_max_connections(64, 128), 1);
+        assert_eq!(effective_max_connections(64, 0), 1);
     }
 
     #[test]

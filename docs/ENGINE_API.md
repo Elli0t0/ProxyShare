@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.4.7"`.
+- Returns the engine version string, e.g. `"engine 0.5.0"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -69,7 +69,8 @@ second parameter.
   (`allowed_clients` list, `private_only`); others are dropped with no
   event. The accept loop also enforces `max_connections` (counting every
   connection task currently running, including in-flight sniffs); further
-  connections are dropped with no event.
+  connections are dropped with no event. Every refusal is counted by
+  reason (see "Connection limits"), never dropped silently.
 - Each accepted connection is handled by its own tokio task: the first
   byte is peeked (up to 5 s) and classified — `0x04` SOCKS4, `0x05`
   SOCKS5, anything else HTTP. A sniffed protocol that this listener
@@ -297,7 +298,7 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `allowed_clients` | comma list of CIDRs | — (none) | Empty means any client, subject to `private_only`. |
 | `blocked_domains` | comma list of hosts / `*.suffix` wildcards | — (none) | Empty means none blocked. See "Blocked domains". |
 | `private_only` | `true` / `false` | `true` | Only private/link-local clients may connect. |
-| `max_connections` | whole number ≥ 1 | `64` | Most connections at once. |
+| `max_connections` | whole number ≥ 1 | `256` | Most connections at once. Capped by the fd budget at start: effective max = min(configured, (nofile_soft - 128) / 2), never below 1. See "Connection limits". |
 | `idle_timeout_s` | seconds ≥ 0 | `300` | Idle time before a connection is closed. |
 | `connect_timeout_s` | seconds ≥ 0 | `10` | Time allowed to connect to the target. |
 | `limit_down_kbps` | whole number ≥ 0 | `0` | Download speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
@@ -338,7 +339,7 @@ Parsing rules:
 text. First line:
 
 ```
-state<TAB>total_up<TAB>total_down<TAB>active
+state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed
 ```
 
 Then one line per connection:
@@ -351,6 +352,10 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blo
   message is not in the snapshot; it arrives through the event callback.
 - `total_up` / `total_down` are the engine's lifetime byte counts; `active`
   is the number of connection lines that follow.
+- `rejected_limit` / `rejected_denied` / `rejected_not_allowed` are the
+  lifetime totals of connections refused for the connection limit, for a
+  denied client, and for a client outside `allowed_clients`. The Kotlin
+  parser treats them as optional (older snapshots lack them: 0).
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
   milliseconds, `up` / `down` the connection's byte counts, `blocked`
@@ -442,6 +447,36 @@ ts_ms<TAB>LEVEL<TAB>message<TAB>count
   (fail-closed): with `require_vpn` on, everything is refused until
   Kotlin reports a VPN. UDP ASSOCIATE is refused the same way (the
   check sits in the SOCKS5 handler before the command dispatch).
+
+## Connection limits (0.5.0)
+
+- At start the engine raises the soft RLIMIT_NOFILE to min(hard,
+  65536) (`raise_nofile_limit` in `rust/engine/src/engine.rs`,
+  libc) and logs the result at INFO: "fd limit: nofile soft N,
+  effective max connections M". The effective limit is
+  min(config.max_connections, (nofile_soft - 128) / 2), never below
+  1 — each proxied connection holds 2 fds (client + upstream), and
+  128 fds are kept for listeners, the runtime and everything else.
+  The pure cap (`effective_max_connections` in config.rs) has unit
+  tests. When the limit cannot be read, the configured value is
+  used uncapped.
+- Refusals are never silent: the engine counts them per reason
+  (limit / denied client / client outside allowed_clients) and
+  exposes the three totals as trailing snapshot fields. Each reason
+  logs at most once per 5 s: WARN "connection limit reached: N
+  rejected in the last 5 s (max M)" (and analogous lines for the
+  other two reasons).
+- The abort-handle slot is reserved BEFORE the connection task is
+  spawned and filled afterwards, so a task that finishes fast can
+  no longer leave a stale handle behind; close_client aborts only
+  the stored handles.
+- JNI events: the worker threads attach permanently
+  (`attach_current_thread_permanently`) instead of attaching and
+  detaching on every event. Best-effort, never panics.
+- Handshake timeout (verified, no change needed): the sniffer waits
+  5 s for the first byte, and SOCKS5 negotiation, the SOCKS4
+  request and the HTTP head each have a 10 s read timeout, so a
+  silent client can never hold a slot until the 300 s idle timeout.
 
 ## Events
 

@@ -47,13 +47,15 @@ impl JniListener {
 impl EventSink for JniListener {
     fn on_event(&self, event: Event) {
         let (t, a, b) = event.to_callback();
-        // Attach this worker thread (a no-op if it is already attached);
-        // the guard detaches it again when it drops.
-        let mut guard = match self.vm.attach_current_thread() {
-            Ok(guard) => guard,
+        // Worker threads are long-lived: attach once permanently
+        // instead of attaching and detaching on every event. The
+        // thread detaches itself when it exits. Best-effort: a failed
+        // attach drops the event, never panics.
+        let mut env = match self.vm.attach_current_thread_permanently() {
+            Ok(env) => env,
             Err(_) => return, // The JVM is going away: drop the event.
         };
-        let env: &mut JNIEnv = &mut guard;
+        let env: &mut JNIEnv = &mut env;
         let a_str = match env.new_string(a.as_str()) {
             Ok(s) => s,
             Err(_) => {

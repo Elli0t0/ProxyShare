@@ -42,6 +42,22 @@ class EngineTest {
     }
 
     @Test
+    fun parsesRejectedCountsFromHeadLine() {
+        val snap = parseSnapshot("running\t0\t0\t1\t3\t1\t2\n")
+        assertEquals(3L, snap?.rejectedLimit)
+        assertEquals(1L, snap?.rejectedDenied)
+        assertEquals(2L, snap?.rejectedNotAllowed)
+    }
+
+    @Test
+    fun missingRejectedCountsDefaultToZero() {
+        val snap = parseSnapshot("running\t0\t0\t0\n")
+        assertEquals(0L, snap?.rejectedLimit)
+        assertEquals(0L, snap?.rejectedDenied)
+        assertEquals(0L, snap?.rejectedNotAllowed)
+    }
+
+    @Test
     fun shortHeadReturnsNull() {
         assertNull(parseSnapshot("running\t1024\n"))
     }

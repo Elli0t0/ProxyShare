@@ -168,20 +168,27 @@ impl Event {
 }
 
 /// The whole-engine snapshot text: first line
-/// "state\ttotal_up\ttotal_down\tactive", then one line per connection.
+/// "state\ttotal_up\ttotal_down\tactive\trejected_limit\trejected_denied\trejected_not_allowed",
+/// then one line per connection. The three rejected counts are the
+/// lifetime totals of connections refused for the connection limit,
+/// for a denied client, and for a client outside allowed_clients.
 /// See docs/ENGINE_API.md.
 pub fn snapshot_text(
     state: &EngineState,
     total_up: u64,
     total_down: u64,
     conns: &[ConnInfo],
+    rejected: (u64, u64, u64),
 ) -> String {
     let mut text = format!(
-        "{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
         state.as_str(),
         total_up,
         total_down,
-        conns.len()
+        conns.len(),
+        rejected.0,
+        rejected.1,
+        rejected.2,
     );
     for conn in conns {
         text.push('\n');
@@ -245,13 +252,13 @@ mod tests {
     #[test]
     fn snapshot_text_shape() {
         assert_eq!(
-            snapshot_text(&EngineState::Stopped, 0, 0, &[]),
-            "stopped\t0\t0\t0"
+            snapshot_text(&EngineState::Stopped, 0, 0, &[], (0, 0, 0)),
+            "stopped\t0\t0\t0\t0\t0\t0"
         );
         let conn = sample_conn();
         assert_eq!(
-            snapshot_text(&EngineState::Running, 1024, 2048, &[conn]),
-            "running\t1024\t2048\t1\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
+            snapshot_text(&EngineState::Running, 1024, 2048, &[conn], (3, 1, 2)),
+            "running\t1024\t2048\t1\t3\t1\t2\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
         );
     }
 

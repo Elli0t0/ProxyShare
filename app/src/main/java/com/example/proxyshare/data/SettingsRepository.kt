@@ -28,7 +28,7 @@ data class AppSettings(
     /** Domains refused before any outbound connect ("ads.example.com" or "*.example.com"). Sent to the engine. */
     val blockedDomains: List<String> = emptyList(),
     val privateOnly: Boolean = true,
-    val maxConnections: Int = 64,
+    val maxConnections: Int = 256,
     val idleTimeoutS: Int = 300,
     val connectTimeoutS: Int = 10,
     /** Download speed limit in KB/s, total across all connections. 0 = unlimited. Sent to the engine. */

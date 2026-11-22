@@ -102,11 +102,16 @@ struct EngineInner {
     connections: HashMap<u64, std::sync::Arc<ConnRecord>>,
     /// Abort handles of connection tasks, with the client IP: closing a
     /// client aborts its tasks, including ones still sniffing (no
-    /// record yet). Keyed by the pre-assigned connection id.
-    handles: HashMap<u64, (AbortHandle, IpAddr)>,
+    /// record yet). Keyed by the pre-assigned connection id. The
+    /// handle is None between the slot reservation and the spawn
+    /// returning it (see try_spawn_connection).
+    handles: HashMap<u64, (Option<AbortHandle>, IpAddr)>,
     /// Clients refused until the proxy restarts. Runtime-only, never
     /// persisted; cleared by stop().
     denied: HashSet<IpAddr>,
+    /// The connection limit in force: min(config.max_connections,
+    /// (nofile_soft - 128) / 2), computed at start().
+    effective_max: usize,
     /// Shared speed limiters, one per direction (None = unlimited).
     up_limiter: Option<std::sync::Arc<RateLimiter>>,
     down_limiter: Option<std::sync::Arc<RateLimiter>>,
@@ -128,6 +133,13 @@ pub struct Engine {
     /// `max_connections` is enforced on this count, so in-flight sniffs
     /// count too, not only registered connections.
     active: AtomicUsize,
+    /// Connections refused by reason: the connection limit, a denied
+    /// client, a client outside allowed_clients. Exposed in the
+    /// snapshot; each also logs at most once per 5 s (see
+    /// note_rejection).
+    rejected_limit: RejectStats,
+    rejected_denied: RejectStats,
+    rejected_not_allowed: RejectStats,
     /// The outbound used to dial targets. It holds the Android Network
     /// handle for outbound sockets (0 = default network).
     outbound: std::sync::Arc<Connector>,
@@ -144,6 +156,60 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Raise the soft RLIMIT_NOFILE to min(hard, 65536) so the engine can
+/// hold many connections, and return the resulting soft limit. None
+/// when the limit cannot be read (then the connection limit is not
+/// capped by fds). Unix only.
+#[cfg(unix)]
+pub fn raise_nofile_limit() -> Option<u64> {
+    unsafe {
+        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) != 0 {
+            return None;
+        }
+        let target = rl.rlim_max.min(65_536 as libc::rlim_t);
+        if rl.rlim_cur < target {
+            let new = libc::rlimit { rlim_cur: target, rlim_max: rl.rlim_max };
+            if libc::setrlimit(libc::RLIMIT_NOFILE, &new) == 0 {
+                return Some(target as u64);
+            }
+        }
+        Some(rl.rlim_cur as u64)
+    }
+}
+
+/// No fd budget to raise off Unix: the connection limit is not capped.
+#[cfg(not(unix))]
+pub fn raise_nofile_limit() -> Option<u64> {
+    None
+}
+
+/// Rejection counters for one reason: a running total (exposed in the
+/// snapshot) plus a 5 s window count for the throttled WARN log.
+struct RejectStats {
+    total: AtomicU64,
+    window: AtomicU64,
+    window_start_ms: AtomicU64,
+}
+
+impl RejectStats {
+    fn new() -> Self {
+        Self {
+            total: AtomicU64::new(0),
+            window: AtomicU64::new(0),
+            window_start_ms: AtomicU64::new(0),
+        }
+    }
+}
+
+/// Why a connection was refused in try_spawn_connection.
+#[derive(Clone, Copy)]
+enum RejectReason {
+    Limit,
+    Denied,
+    NotAllowed,
 }
 
 /// True when the address is private, loopback or link-local.
@@ -187,6 +253,7 @@ impl Engine {
                 connections: HashMap::new(),
                 handles: HashMap::new(),
                 denied: HashSet::new(),
+                effective_max: 256,
                 up_limiter: None,
                 down_limiter: None,
                 vpn_active: false,
@@ -195,6 +262,9 @@ impl Engine {
                 total_down: 0,
             }),
             active: AtomicUsize::new(0),
+            rejected_limit: RejectStats::new(),
+            rejected_denied: RejectStats::new(),
+            rejected_not_allowed: RejectStats::new(),
             outbound: std::sync::Arc::new(Connector::default()),
             auth_guard: crate::auth::AuthGuard::default(),
         }
@@ -291,6 +361,13 @@ impl Engine {
                 return Err(e);
             }
         };
+        // Raise the fd limit first: the effective connection limit
+        // depends on the soft nofile budget.
+        let nofile = raise_nofile_limit();
+        let effective_max = match nofile {
+            Some(soft) => crate::config::effective_max_connections(config.max_connections, soft),
+            None => config.max_connections,
+        };
         // A fresh start re-resolves everything: drop cached DNS from
         // the previous run (0.4.5), so stale entries can't point at
         // the old network.
@@ -301,6 +378,7 @@ impl Engine {
                 EngineState::Starting | EngineState::Running => return Ok(()),
                 _ => inner.state = EngineState::Starting,
             }
+            inner.effective_max = effective_max as usize;
         }
         self.emit(Event::StateChanged(EngineState::Starting));
 
@@ -389,6 +467,11 @@ impl Engine {
         inner.state = EngineState::Running;
         drop(inner);
         crate::diag::log_info(format!("started: {summary}"));
+        if let Some(soft) = nofile {
+            crate::diag::log_info(format!(
+                "fd limit: nofile soft {soft}, effective max connections {effective_max}"
+            ));
+        }
         self.emit(Event::StateChanged(EngineState::Running));
         Ok(())
     }
@@ -435,12 +518,17 @@ impl Engine {
 
     /// The snapshot text (see docs/ENGINE_API.md).
     pub fn snapshot(&self) -> String {
-        let (state, total_up, total_down, mut conns);
+        let (state, total_up, total_down, rejected, mut conns);
         {
             let inner = lock_inner(&self.inner);
             state = inner.state.clone();
             total_up = inner.total_up;
             total_down = inner.total_down;
+            rejected = (
+                self.rejected_limit.total.load(Ordering::Relaxed),
+                self.rejected_denied.total.load(Ordering::Relaxed),
+                self.rejected_not_allowed.total.load(Ordering::Relaxed),
+            );
             conns = inner
                 .connections
                 .values()
@@ -448,12 +536,54 @@ impl Engine {
                 .collect::<Vec<_>>();
         }
         conns.sort_by_key(|c| c.id);
-        snapshot_text(&state, total_up, total_down, &conns)
+        snapshot_text(&state, total_up, total_down, &conns, rejected)
+    }
+
+    /// The connection limit in force (see start()).
+    fn effective_max(&self) -> usize {
+        lock_inner(&self.inner).effective_max
+    }
+
+    /// Count a refused connection and log at most once per 5 s per
+    /// reason: "connection limit reached: N rejected in the last 5 s
+    /// (max M)". The first rejection always logs (the window starts
+    /// at 0). Never drops a rejection silently, never spams the log.
+    fn note_rejection(&self, reason: RejectReason) {
+        let stats = match reason {
+            RejectReason::Limit => &self.rejected_limit,
+            RejectReason::Denied => &self.rejected_denied,
+            RejectReason::NotAllowed => &self.rejected_not_allowed,
+        };
+        stats.total.fetch_add(1, Ordering::Relaxed);
+        let n = stats.window.fetch_add(1, Ordering::Relaxed) + 1;
+        let now = now_ms();
+        let start = stats.window_start_ms.load(Ordering::Relaxed);
+        if now.saturating_sub(start) >= 5_000
+            && stats
+                .window_start_ms
+                .compare_exchange(start, now, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            stats.window.store(0, Ordering::Relaxed);
+            match reason {
+                RejectReason::Limit => crate::diag::log_warn(format!(
+                    "connection limit reached: {n} rejected in the last 5 s (max {})",
+                    self.effective_max()
+                )),
+                RejectReason::Denied => crate::diag::log_warn(format!(
+                    "denied client connections rejected: {n} in the last 5 s"
+                )),
+                RejectReason::NotAllowed => crate::diag::log_warn(format!(
+                    "connections from disallowed clients rejected: {n} in the last 5 s"
+                )),
+            }
+        }
     }
 
     /// Accept a connection if the client is allowed and the connection
-    /// limit is not reached; otherwise drop it. The limit counts every
-    /// connection task currently running.
+    /// limit is not reached; otherwise drop it, count the refusal and
+    /// log it (throttled to once per 5 s per reason). The limit counts
+    /// every connection task currently running.
     fn try_spawn_connection(
         self: &std::sync::Arc<Self>,
         stream: TcpStream,
@@ -463,26 +593,41 @@ impl Engine {
         shutdown: watch::Receiver<bool>,
     ) {
         if self.is_denied(&peer.ip()) {
-            crate::diag::log_info(format!("denied client {} tried to connect", peer.ip()));
+            self.note_rejection(RejectReason::Denied);
             return; // stream dropped: client blocked until restart, no event
         }
         if !client_allowed(config, &peer.ip()) {
+            self.note_rejection(RejectReason::NotAllowed);
             return; // stream dropped: client not allowed, no event
         }
-        if self.active.fetch_add(1, Ordering::SeqCst) >= config.max_connections as usize {
+        if self.active.fetch_add(1, Ordering::SeqCst) >= self.effective_max() {
             self.active.fetch_sub(1, Ordering::SeqCst);
+            self.note_rejection(RejectReason::Limit);
             return; // stream dropped: at the limit, no event
         }
         // The id is reserved here so the abort handle can be stored
         // against it before the task registers (or ever registers).
         let id = self.reserve_id();
+        // Reserve the slot BEFORE spawning: a task that finishes fast
+        // calls clear_handle before the insert otherwise, leaving a
+        // stale entry forever.
+        {
+            let mut inner = lock_inner(&self.inner);
+            inner.handles.insert(id, (None, peer.ip()));
+        }
         let engine = std::sync::Arc::clone(self);
         let cleanup = std::sync::Arc::clone(self);
         let join = tokio::task::spawn(async move {
             handle_connection(engine, stream, peer, allowed, shutdown, id).await;
             cleanup.clear_handle(id);
         });
-        self.store_handle(id, join.abort_handle(), peer.ip());
+        {
+            let mut inner = lock_inner(&self.inner);
+            if let Some(slot) = inner.handles.get_mut(&id) {
+                slot.0 = Some(join.abort_handle());
+            }
+            // else: the task already finished and cleared the slot.
+        }
     }
 
     /// Reserve the next connection id (also the abort-handle key).
@@ -491,12 +636,6 @@ impl Engine {
         let id = inner.next_conn_id;
         inner.next_conn_id += 1;
         id
-    }
-
-    fn store_handle(&self, id: u64, handle: AbortHandle, peer_ip: IpAddr) {
-        lock_inner(&self.inner)
-            .handles
-            .insert(id, (handle, peer_ip));
     }
 
     fn clear_handle(&self, id: u64) {
@@ -526,7 +665,11 @@ impl Engine {
             for id in matching {
                 if let Some((handle, _)) = inner.handles.remove(&id) {
                     ids.push(id);
-                    to_abort.push(handle);
+                    // A None handle means the task spawned but its
+                    // abort handle was not stored yet: nothing to abort.
+                    if let Some(handle) = handle {
+                        to_abort.push(handle);
+                    }
                 }
             }
         }
@@ -979,6 +1122,114 @@ mod tests {
                 .all(|e| !matches!(e, Event::HandlerMissing(_))),
             "disabled protocol must not emit handler_missing"
         );
+        engine.stop();
+    }
+
+    /// The abort-handle race (0.5.0): 200 connections that fail
+    /// instantly (the client drops at once, so the task may finish
+    /// before the handle is stored) must leave no stale handle
+    /// behind. try_spawn_connection is called directly so all 200
+    /// spawns happen before the check: no false pass from a slow
+    /// accept loop.
+    #[tokio::test]
+    async fn abort_handles_do_not_leak_for_fast_connections() {
+        let engine = std::sync::Arc::new(Engine::new());
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("listener addr");
+        let config = Config::default();
+        let allowed = std::sync::Arc::new(HashSet::from([
+            Protocol::Http,
+            Protocol::Socks4,
+            Protocol::Socks5,
+        ]));
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        for _ in 0..200 {
+            let client = TcpStream::connect(addr).await.expect("connect");
+            let (stream, peer) = listener.accept().await.expect("accept");
+            drop(client); // instant EOF: the task finishes at once
+            engine.try_spawn_connection(
+                stream,
+                peer,
+                &config,
+                allowed.clone(),
+                shutdown_rx.clone(),
+            );
+        }
+        // Poll until every task settled (10 ms sleeps, 5 s deadline).
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let (handles, active) = {
+                let inner = lock_inner(&engine.inner);
+                (
+                    inner.handles.len(),
+                    engine.active.load(Ordering::SeqCst),
+                )
+            };
+            if handles == 0 && active == 0 {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "tasks did not settle: {handles} handles, {active} active"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(lock_inner(&engine.inner).handles.len(), 0);
+    }
+
+    /// A connection past the limit is counted, not dropped silently:
+    /// with max_connections = 1, the second client is refused and the
+    /// snapshot carries rejected_limit = 1.
+    #[tokio::test]
+    async fn limit_rejections_are_counted() {
+        let (engine, _sink, port) = start_test_engine("max_connections = 1");
+        // Hold the one slot: a SOCKS5 greeting, then silence.
+        let mut first = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let reply = socks5_greet(&mut first, 0x00).await;
+        assert_eq!(reply, [0x05, 0x00]);
+        // The second client is refused at once.
+        let mut second = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_closed(&mut second).await;
+        let head = engine.snapshot().lines().next().expect("snapshot head");
+        let fields: Vec<&str> = head.split('\t').collect();
+        assert_eq!(fields[3], "1", "one connection active: {head}");
+        assert_eq!(fields[4], "1", "one limit rejection: {head}");
+        assert_eq!(fields[5], "0", "no denied rejection: {head}");
+        assert_eq!(fields[6], "0", "no disallowed rejection: {head}");
+        engine.stop();
+    }
+
+    /// Denied and disallowed clients are counted separately in the
+    /// snapshot.
+    #[tokio::test]
+    async fn denied_and_disallowed_rejections_are_counted() {
+        // Disallowed: only 127.0.0.2 may connect; 127.0.0.1 may not.
+        let (engine, _sink, port) = start_test_engine("allowed_clients = 127.0.0.2/32");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_closed(&mut client).await;
+        let head = engine.snapshot().lines().next().expect("snapshot head");
+        let fields: Vec<&str> = head.split('\t').collect();
+        assert_eq!(fields[6], "1", "one disallowed rejection: {head}");
+        engine.stop();
+
+        // Denied: the IP is blocked until restart.
+        let (engine, _sink, port) = start_test_engine("");
+        engine.deny_client("127.0.0.1");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_closed(&mut client).await;
+        let head = engine.snapshot().lines().next().expect("snapshot head");
+        let fields: Vec<&str> = head.split('\t').collect();
+        assert_eq!(fields[5], "1", "one denied rejection: {head}");
         engine.stop();
     }
 

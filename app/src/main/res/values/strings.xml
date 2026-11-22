@@ -107,6 +107,9 @@
     <string name="traffic_chart_desc">Live traffic chart, upload %1$s per second, download %2$s per second</string>
     <string name="traffic_peak">Peak ↑ %1$s/s · ↓ %2$s/s</string>
     <string name="connections_blocked">Blocked: %1$d</string>
+    <string name="rejected_connections">Rejected: %1$d</string>
+    <string name="rejected_connections_info">Connection limit reached — raise Max connections in Settings.</string>
+    <string name="ok">OK</string>
     <string name="battery_saver_label">Battery saver</string>
     <string name="battery_saver_subtitle">Release the CPU lock when no client is connected</string>
     <string name="battery_optimization_label">Battery optimization</string>
@@ -175,6 +178,7 @@
     <string name="remove_domain">Remove domain</string>
     <string name="remove_client">Remove client</string>
     <string name="max_connections_label">Max connections</string>
+    <string name="max_connections_note">Each connection uses 2 file descriptors.</string>
     <string name="idle_timeout_label">Idle timeout (s)</string>
     <string name="idle_stop_label">Stop automatically when idle</string>
     <string name="idle_stop_off">Off</string>

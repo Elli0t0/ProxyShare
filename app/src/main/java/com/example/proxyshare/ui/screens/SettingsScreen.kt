@@ -497,8 +497,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     label = stringResource(R.string.max_connections_label),
                     value = settings.maxConnections,
                     errorText = stringResource(R.string.invalid_number),
-                    validate = { validateIntInRange(it, 1..512) },
+                    validate = { validateIntInRange(it, 1..2000) },
                     onValid = { saveRestart { updateMaxConnections(it) } },
+                )
+                Text(
+                    text = stringResource(R.string.max_connections_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 NumberField(
                     label = stringResource(R.string.idle_timeout_label),
