@@ -436,7 +436,7 @@ mod tests {
     /// negotiation timeout), and assert the parse fails within 2 s.
     async fn parse_fails_within_2s<F, Fut>(bytes: &[u8], parse: F)
     where
-        F: FnOnce(TcpStream) -> Fut + Send,
+        F: FnOnce(TcpStream) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = io::Result<()>> + Send,
     {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
