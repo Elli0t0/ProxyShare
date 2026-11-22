@@ -264,7 +264,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDia
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) {
-    let result = catch_unwind(AssertUnwindSafe(|| crate::diag::clear()));
+    let result = catch_unwind(AssertUnwindSafe(crate::diag::clear));
     if result.is_err() {
         let _ = env.exception_clear();
     }
