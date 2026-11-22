@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -61,12 +61,19 @@ pub struct ConnRecord {
     pub up: AtomicU64,
     /// Bytes written to the client so far.
     pub down: AtomicU64,
+    /// True when the connection was refused for a blocked domain.
+    pub blocked: AtomicBool,
 }
 
 impl ConnRecord {
     /// Fill in the target once a handler has parsed the request.
     pub fn set_target(&self, host: String, port: u16) {
         *self.target.lock().unwrap_or_else(|e| e.into_inner()) = (host, port);
+    }
+
+    /// Mark this connection as refused for a blocked domain.
+    pub fn mark_blocked(&self) {
+        self.blocked.store(true, Ordering::Relaxed);
     }
 
     fn to_conn_info(&self) -> ConnInfo {
@@ -80,6 +87,7 @@ impl ConnRecord {
             started_ms: self.started_ms,
             up: self.up.load(Ordering::Relaxed),
             down: self.down.load(Ordering::Relaxed),
+            blocked: self.blocked.load(Ordering::Relaxed),
         }
     }
 }
@@ -414,6 +422,7 @@ impl Engine {
             started_ms: now_ms(),
             up: AtomicU64::new(0),
             down: AtomicU64::new(0),
+            blocked: AtomicBool::new(false),
         });
         inner.connections.insert(id, std::sync::Arc::clone(&record));
         record
@@ -1269,6 +1278,112 @@ mod tests {
             "expected a 502 response, got: {}",
             String::from_utf8_lossy(&response)
         );
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_connect_to_blocked_domain_is_403() {
+        let (engine, sink, port) = start_test_engine("blocked_domains = blocked.example");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = connect_request("blocked.example", 443, None);
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 403"),
+            "expected a 403 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        let closed = wait_closed(&sink).await;
+        assert!(closed.blocked, "closed connection is marked blocked");
+        assert_eq!(closed.host, "blocked.example");
+        assert_eq!(closed.port, 443);
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn http_plain_to_blocked_domain_is_403() {
+        let (engine, sink, port) = start_test_engine("blocked_domains = blocked.example");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        client
+            .write_all(b"GET http://blocked.example/ HTTP/1.1\r\nHost: blocked.example\r\n\r\n")
+            .await
+            .expect("write");
+        let response = read_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 403"),
+            "expected a 403 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        let closed = wait_closed(&sink).await;
+        assert!(closed.blocked, "closed connection is marked blocked");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks5_connect_to_blocked_domain_is_0x02() {
+        let (engine, sink, port) = start_test_engine("blocked_domains = *.example");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let domain = b"a.example";
+        let mut req = vec![0x05, 0x01, 0x00, 0x03, domain.len() as u8];
+        req.extend_from_slice(domain);
+        req.extend_from_slice(&443u16.to_be_bytes());
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x02, "blocked domain gets 0x02, got {reply:?}");
+        assert_closed(&mut client).await;
+        let closed = wait_closed(&sink).await;
+        assert!(closed.blocked, "closed connection is marked blocked");
+        assert_eq!(closed.host, "a.example");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn socks4_connect_to_blocked_domain_is_0x5b() {
+        let (engine, sink, port) = start_test_engine("blocked_domains = blocked.example");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let reply = socks4_request_reply(
+            &mut client,
+            0x01,
+            [0, 0, 0, 1],
+            443,
+            "user",
+            Some("blocked.example"),
+        )
+        .await;
+        assert_eq!(reply[1], 0x5B, "blocked domain gets 0x5B, got {reply:?}");
+        assert_closed(&mut client).await;
+        let closed = wait_closed(&sink).await;
+        assert!(closed.blocked, "closed connection is marked blocked");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn unblocked_ip_literal_still_connects() {
+        let (engine, _sink, port) = start_test_engine("blocked_domains = blocked.example");
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!(
+            "CONNECT 127.0.0.1:{echo_port} HTTP/1.1\r\nHost: 127.0.0.1:{echo_port}\r\n\r\n"
+        );
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert_eq!(
+            response,
+            b"HTTP/1.1 200 Connection Established\r\n\r\n",
+            "expected a 200 reply, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        drop(client);
         engine.stop();
     }
 

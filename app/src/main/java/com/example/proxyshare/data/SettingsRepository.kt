@@ -25,6 +25,8 @@ data class AppSettings(
     val authUser: String = "proxy",
     val authPass: String = "",
     val allowedClients: List<String> = emptyList(),
+    /** Domains refused before any outbound connect ("ads.example.com" or "*.example.com"). Sent to the engine. */
+    val blockedDomains: List<String> = emptyList(),
     val privateOnly: Boolean = true,
     val maxConnections: Int = 64,
     val idleTimeoutS: Int = 300,
@@ -57,6 +59,7 @@ fun AppSettings.toEngineConfig(): String = buildString {
         appendLine("auth_pass=$authPass")
     }
     if (allowedClients.isNotEmpty()) appendLine("allowed_clients=${allowedClients.joinToString(",")}")
+    if (blockedDomains.isNotEmpty()) appendLine("blocked_domains=${blockedDomains.joinToString(",")}")
     appendLine("private_only=$privateOnly")
     appendLine("max_connections=$maxConnections")
     appendLine("idle_timeout_s=$idleTimeoutS")
@@ -113,6 +116,11 @@ class SettingsRepository(context: Context) {
             authUser = prefs[Keys.AUTH_USER] ?: defaults.authUser,
             authPass = prefs[Keys.AUTH_PASS] ?: defaults.authPass,
             allowedClients = prefs[Keys.ALLOWED_CLIENTS]
+                ?.split(",")
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?: emptyList(),
+            blockedDomains = prefs[Keys.BLOCKED_DOMAINS]
                 ?.split(",")
                 ?.map { it.trim() }
                 ?.filter { it.isNotEmpty() }
@@ -182,6 +190,10 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.ALLOWED_CLIENTS] = value.joinToString(",") }
     }
 
+    suspend fun updateBlockedDomains(value: List<String>) {
+        dataStore.edit { it[Keys.BLOCKED_DOMAINS] = value.joinToString(",") }
+    }
+
     suspend fun updatePrivateOnly(value: Boolean) {
         dataStore.edit { it[Keys.PRIVATE_ONLY] = value }
     }
@@ -237,6 +249,7 @@ class SettingsRepository(context: Context) {
         val AUTH_USER = stringPreferencesKey("auth_user")
         val AUTH_PASS = stringPreferencesKey("auth_pass")
         val ALLOWED_CLIENTS = stringPreferencesKey("allowed_clients")
+        val BLOCKED_DOMAINS = stringPreferencesKey("blocked_domains")
         val PRIVATE_ONLY = booleanPreferencesKey("private_only")
         val MAX_CONNECTIONS = intPreferencesKey("max_connections")
         val IDLE_TIMEOUT_S = intPreferencesKey("idle_timeout_s")

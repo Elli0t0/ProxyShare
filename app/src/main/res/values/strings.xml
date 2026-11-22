@@ -126,6 +126,11 @@
     <string name="allowed_clients_hint">e.g. 192.168.1.0/24</string>
     <string name="allowed_clients_add">Add</string>
     <string name="allowed_clients_invalid">Invalid CIDR or IP</string>
+    <string name="blocked_domains_label">Blocked domains</string>
+    <string name="blocked_domains_hint">e.g. ads.example.com or *.example.com</string>
+    <string name="blocked_domains_add">Add</string>
+    <string name="blocked_domains_invalid">Invalid domain</string>
+    <string name="remove_domain">Remove domain</string>
     <string name="remove_client">Remove client</string>
     <string name="max_connections_label">Max connections</string>
     <string name="idle_timeout_label">Idle timeout (s)</string>

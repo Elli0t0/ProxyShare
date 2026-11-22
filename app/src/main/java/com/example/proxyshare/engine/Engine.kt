@@ -28,6 +28,8 @@ data class ConnInfo(
     val startedMs: Long,
     val up: Long,
     val down: Long,
+    /** True when the connection was refused for a blocked domain. */
+    val blocked: Boolean = false,
 )
 
 /** The whole snapshot: totals plus one line per active connection. */
@@ -72,7 +74,7 @@ fun engineStateFromName(name: String, message: String = ""): EngineState = when 
     else -> EngineState.Stopped
 }
 
-/** Parse one connection line: the 8 tab-separated fields of a snapshot line, or the payload (b) of a type 2/3/4 event. Null when malformed. */
+/** Parse one connection line: the 9 tab-separated fields of a snapshot line, or the payload (b) of a type 2/3/4 event. The 9th field is "1" when the connection was refused for a blocked domain (absent in older lines: false). Null when malformed. */
 fun parseConnLine(line: String): ConnInfo? {
     val f = line.split('\t')
     if (f.size < 8) return null
@@ -84,6 +86,7 @@ fun parseConnLine(line: String): ConnInfo? {
         startedMs = f[5].toLongOrNull() ?: return null,
         up = f[6].toLongOrNull() ?: return null,
         down = f[7].toLongOrNull() ?: return null,
+        blocked = f.getOrNull(8) == "1",
     )
 }
 
@@ -91,7 +94,7 @@ fun parseConnLine(line: String): ConnInfo? {
  * Parse the snapshot text from nativeSnapshot (see docs/ENGINE_API.md):
  * first line "state<TAB>total_up<TAB>total_down<TAB>active", then one
  * tab-separated line per connection: id, client, host, port, proto,
- * started_ms, up, down. Returns null when there is no usable head
+ * started_ms, up, down, blocked. Returns null when there is no usable head
  * line; a malformed connection line is skipped, never a crash.
  */
 fun parseSnapshot(text: String): Snapshot? {

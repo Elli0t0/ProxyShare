@@ -7,10 +7,11 @@
 //! directions. It never looks at the payload: only the target host/port
 //! and the byte counts are recorded.
 //!
-//! Reply codes: 0x00 success, 0x04 host unreachable (the name did not
-//! resolve), 0x05 connection refused (no address accepted the
-//! connection), 0x07 command not supported (anything other than
-//! CONNECT), 0x08 address type not supported.
+//! Reply codes: 0x00 success, 0x02 connection not allowed by ruleset
+//! (blocked domain), 0x04 host unreachable (the name did not resolve),
+//! 0x05 connection refused (no address accepted the connection),
+//! 0x07 command not supported (anything other than CONNECT), 0x08
+//! address type not supported.
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -31,6 +32,7 @@ use crate::relay;
 const NEGOTIATE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const REP_SUCCESS: u8 = 0x00;
+const REP_NOT_ALLOWED: u8 = 0x02;
 const REP_HOST_UNREACHABLE: u8 = 0x04;
 const REP_CONNECTION_REFUSED: u8 = 0x05;
 const REP_COMMAND_NOT_SUPPORTED: u8 = 0x07;
@@ -269,6 +271,11 @@ async fn connect(
 ) -> io::Result<()> {
     let host = target.host();
     record.set_target(host.clone(), port);
+    if crate::config::domain_blocked(&config.blocked_domains, &host) {
+        record.mark_blocked();
+        let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
+        return Ok(());
+    }
     let upstream = match outbound
         .connect(
             &host,

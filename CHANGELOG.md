@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0 — blocked domains
+
+- New engine config `blocked_domains`: exact hosts ("ads.example.com")
+  or suffix wildcards ("*.example.com", which also matches example.com
+  itself). Case-insensitive, trailing dot ignored, IP literals never
+  match. Checked before any outbound connect: HTTP CONNECT / plain
+  HTTP get a 403, SOCKS5 gets 0x02 (not allowed by ruleset), SOCKS4
+  gets 0x5B. The refused connection is marked blocked and appears in
+  the session log.
+- Settings > Security has a "Blocked domains" list (same add/remove
+  UI as Allowed clients; validation rejects spaces, schemes and
+  paths). Stored in SettingsRepository, sent to the engine on start
+  (restart banner when changed, like other engine settings).
+- Snapshot lines carry a 9th field, "1" when the connection was
+  refused for a blocked domain, else "0". The session-log JSON
+  export includes `"blocked":true` on those entries.
+- Tests: Rust 88 -> 97 (domain_blocked unit tests, config parse,
+  snapshot line, 5 engine tests: 403/403/0x02/0x5B + an unblocked IP
+  literal still connecting); Kotlin 97 -> 102 (validation, config
+  join, parseConnLine flag, session-log flag). UDP ASSOCIATE
+  datagrams are NOT filtered (no refusal reply exists for them).
+
 ## 0.3.8 — update check
 
 - Settings > About has a manual "Check for updates" button (no

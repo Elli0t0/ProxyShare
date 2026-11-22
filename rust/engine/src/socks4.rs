@@ -4,7 +4,9 @@
 //! (null-terminated), and for 4a — DSTIP is 0.0.0.x with x != 0 — a
 //! null-terminated hostname after the USERID. USERID is read and
 //! ignored. Only CD = 1 (CONNECT) is implemented; anything else gets a
-//! 0x5B reply. The reply is [0x00, 0x5A, 0, 0, 0, 0, 0, 0] on success
+//! 0x5B reply. A target on the `blocked_domains` list also gets a 0x5B
+//! reply, before any outbound connect, and the connection is recorded
+//! as blocked. The reply is [0x00, 0x5A, 0, 0, 0, 0, 0, 0] on success
 //! and [0x00, 0x5B, ...] on failure. It never looks at the payload:
 //! only the target host/port and the byte counts are recorded.
 
@@ -105,6 +107,11 @@ pub async fn handle(
         ));
     }
     record.set_target(host.clone(), port);
+    if crate::config::domain_blocked(&config.blocked_domains, &host) {
+        record.mark_blocked();
+        let _ = send_reply(&mut client, REP_FAILURE).await;
+        return Ok(());
+    }
     let upstream = match outbound
         .connect(&host, port, Duration::from_secs(config.connect_timeout_s))
         .await

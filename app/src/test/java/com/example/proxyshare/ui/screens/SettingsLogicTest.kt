@@ -31,4 +31,17 @@ class SettingsLogicTest {
         assertNull(validateIntInRange("0", 1..512))
         assertNull(validateIntInRange("abc", 1..512))
     }
+
+    @Test
+    fun blockedDomainValidation() {
+        assertTrue(validateBlockedDomain("ads.example.com"))
+        assertTrue(validateBlockedDomain("*.example.com"))
+        assertFalse(validateBlockedDomain("ads .example.com"))
+        assertFalse(validateBlockedDomain("http://ads.example.com"))
+        assertFalse(validateBlockedDomain("https://example.com"))
+        assertFalse(validateBlockedDomain("ads.example.com/path"))
+        assertFalse(validateBlockedDomain("ads.example.com:8080"))
+        assertFalse(validateBlockedDomain(""))
+        assertFalse(validateBlockedDomain("   "))
+    }
 }

@@ -412,6 +412,31 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 CidrAddRow(onAdd = { saveRestart { updateAllowedClients(settings.allowedClients + it) } })
+                Text(
+                    text = stringResource(R.string.blocked_domains_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                for (domain in settings.blockedDomains) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = domain,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = {
+                            saveRestart { updateBlockedDomains(settings.blockedDomains - domain) }
+                        }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = stringResource(R.string.remove_domain),
+                            )
+                        }
+                    }
+                }
+                DomainAddRow(onAdd = { saveRestart { updateBlockedDomains(settings.blockedDomains + it) } })
             }
 
             // Limits.
@@ -625,6 +650,45 @@ private fun CidrAddRow(onAdd: (String) -> Unit) {
         if (invalid) {
             Text(
                 text = stringResource(R.string.allowed_clients_invalid),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DomainAddRow(onAdd: (String) -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    var invalid by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it; invalid = false },
+                label = { Text(stringResource(R.string.blocked_domains_hint)) },
+                isError = invalid,
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = {
+                if (validateBlockedDomain(text.trim())) {
+                    onAdd(text.trim())
+                    text = ""
+                    invalid = false
+                } else {
+                    invalid = true
+                }
+            }) {
+                Text(stringResource(R.string.blocked_domains_add))
+            }
+        }
+        if (invalid) {
+            Text(
+                text = stringResource(R.string.blocked_domains_invalid),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )

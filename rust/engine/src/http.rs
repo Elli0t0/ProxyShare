@@ -7,13 +7,15 @@
 //! bytes the client already sent after the head are forwarded, then
 //! both directions are relayed untouched. Any other method must carry
 //! an absolute URI (`http://host[:port]/path`); anything else gets a
-//! 400. The request is rewritten to origin-form, the hop-by-hop
-//! headers are dropped, `Connection: close` is added (no keep-alive in
-//! this version), the engine connects to `host:port` (default 80) and
-//! sends the rewritten head plus any body bytes already read, then
-//! relays both directions untouched. A target that cannot be reached
-//! gets a 502. Bodies are never parsed or logged: only the target
-//! host/port and the byte counts are recorded.
+//! 400. A target on the `blocked_domains` list gets a 403 before any
+//! outbound connect, and the connection is recorded as blocked. The
+//! request is rewritten to origin-form, the hop-by-hop headers are
+//! dropped, `Connection: close` is added (no keep-alive in this
+//! version), the engine connects to `host:port` (default 80) and sends
+//! the rewritten head plus any body bytes already read, then relays
+//! both directions untouched. A target that cannot be reached gets a
+//! 502. Bodies are never parsed or logged: only the target host/port
+//! and the byte counts are recorded.
 
 use std::io;
 use std::sync::atomic::Ordering;
@@ -211,6 +213,11 @@ pub async fn handle(
             }
         };
         record.set_target(host.clone(), port);
+        if crate::config::domain_blocked(&config.blocked_domains, &host) {
+            record.mark_blocked();
+            let _ = send_status(&mut client, 403, "Forbidden").await;
+            return Ok(());
+        }
         let mut upstream = match outbound
             .connect(&host, port, Duration::from_secs(config.connect_timeout_s))
             .await
@@ -253,6 +260,11 @@ pub async fn handle(
         }
     };
     record.set_target(host.clone(), port);
+    if crate::config::domain_blocked(&config.blocked_domains, &host) {
+        record.mark_blocked();
+        let _ = send_status(&mut client, 403, "Forbidden").await;
+        return Ok(());
+    }
     let mut upstream = match outbound
         .connect(&host, port, Duration::from_secs(config.connect_timeout_s))
         .await

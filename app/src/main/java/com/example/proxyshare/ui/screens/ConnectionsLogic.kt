@@ -93,6 +93,8 @@ data class SessionLogEntry(
     val down: Long,
     val durationMs: Long,
     val closedAtMs: Long,
+    /** True when the connection was refused for a blocked domain. */
+    val blocked: Boolean = false,
 )
 
 /** Build a log entry from a closed connection (type 3 event payload, parsed as a connection line). */
@@ -106,6 +108,7 @@ fun sessionLogEntry(conn: ConnInfo, closedAtMs: Long): SessionLogEntry =
         down = conn.down,
         durationMs = (closedAtMs - conn.startedMs).coerceAtLeast(0),
         closedAtMs = closedAtMs,
+        blocked = conn.blocked,
     )
 
 /** Append an entry, keeping only the last `max` (500) entries. */
@@ -128,7 +131,9 @@ fun sessionLogJson(log: List<SessionLogEntry>): String = buildString {
         append("\"up\":${e.up},")
         append("\"down\":${e.down},")
         append("\"durationMs\":${e.durationMs},")
-        append("\"closedAtMs\":${e.closedAtMs}}")
+        append("\"closedAtMs\":${e.closedAtMs}")
+        if (e.blocked) append(",\"blocked\":true")
+        append("}")
     }
     append(']')
 }

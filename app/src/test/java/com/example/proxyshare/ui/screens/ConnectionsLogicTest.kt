@@ -135,6 +135,26 @@ class ConnectionsLogicTest {
         assertEquals(4000L, entry.down)
         assertEquals(3000L, entry.durationMs)
         assertEquals(4000L, entry.closedAtMs)
+        assertEquals(false, entry.blocked)
+    }
+
+    @Test
+    fun sessionLogEntryCopiesBlockedFlag() {
+        assertEquals(true, sessionLogEntry(conn().copy(blocked = true), closedAtMs = 4000).blocked)
+        assertEquals(false, sessionLogEntry(conn(), closedAtMs = 4000).blocked)
+    }
+
+    @Test
+    fun sessionLogJsonFlagsBlockedEntries() {
+        val json = sessionLogJson(
+            listOf(
+                sessionLogEntry(conn(), closedAtMs = 4000),
+                sessionLogEntry(conn().copy(blocked = true), closedAtMs = 5000),
+            )
+        )
+        assertTrue(json.contains("\"blocked\":true"))
+        // Only the blocked entry carries the flag.
+        assertEquals(1, json.split("\"blocked\":true").size - 1)
     }
 
     @Test

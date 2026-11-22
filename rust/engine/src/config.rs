@@ -35,6 +35,10 @@ pub struct Config {
     /// Client networks allowed in. Empty means: any client, subject to
     /// private_only.
     pub allowed_clients: Vec<Cidr>,
+    /// Domains refused before any outbound connect. Empty means none
+    /// blocked. Entries are exact hosts ("ads.example.com") or suffix
+    /// wildcards ("*.example.com", which also matches example.com).
+    pub blocked_domains: Vec<String>,
     /// When true, only private/link-local clients may connect.
     pub private_only: bool,
     /// Most connections at once.
@@ -56,6 +60,7 @@ impl Default for Config {
             auth_user: None,
             auth_pass: None,
             allowed_clients: Vec::new(),
+            blocked_domains: Vec::new(),
             private_only: true,
             max_connections: 64,
             idle_timeout_s: 300,
@@ -89,6 +94,7 @@ impl Config {
                 "auth_user" => config.auth_user = opt_string(value),
                 "auth_pass" => config.auth_pass = opt_string(value),
                 "allowed_clients" => config.allowed_clients = parse_cidrs(value, line_no, key)?,
+                "blocked_domains" => config.blocked_domains = parse_strings(value),
                 "private_only" => config.private_only = parse_bool(value, line_no, key)?,
                 "max_connections" => {
                     config.max_connections = parse_u32_min(value, line_no, key, 1)?
@@ -169,6 +175,41 @@ fn parse_cidrs(value: &str, line_no: usize, key: &str) -> Result<Vec<Cidr>, Stri
     Ok(cidrs)
 }
 
+/// A comma list of plain strings: split, trim, drop empties.
+/// Never an error: any non-empty token is kept as-is.
+fn parse_strings(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+/// True when `host` is blocked by the domain list: an exact entry, or
+/// a "*.suffix" entry matching the suffix itself and anything under
+/// it. Case-insensitive; a trailing dot is ignored. IP literals never
+/// match, and neither does an empty host or an empty list.
+pub fn domain_blocked(list: &[String], host: &str) -> bool {
+    if IpAddr::from_str(host).is_ok() {
+        return false;
+    }
+    let host = normalize_host(host);
+    if host.is_empty() {
+        return false;
+    }
+    list.iter().any(|entry| {
+        let entry = normalize_host(entry);
+        match entry.strip_prefix("*.") {
+            Some(suffix) => host == suffix || host.ends_with(&format!(".{suffix}")),
+            None => host == entry,
+        }
+    })
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
 fn parse_bool(value: &str, line_no: usize, key: &str) -> Result<bool, String> {
     match value.to_ascii_lowercase().as_str() {
         "true" => Ok(true),
@@ -210,6 +251,7 @@ protocols = http, socks5
 auth_user = alice
 auth_pass = secret
 allowed_clients = 192.168.1.0/24, ::1/128
+blocked_domains = ads.example.com, *.tracker.example
 private_only = false
 max_connections = 10
 idle_timeout_s = 60
@@ -229,6 +271,10 @@ connect_timeout_s = 5
         assert_eq!(config.auth_pass.as_deref(), Some("secret"));
         assert_eq!(config.allowed_clients.len(), 2);
         assert_eq!(config.allowed_clients[0].to_string(), "192.168.1.0/24");
+        assert_eq!(
+            config.blocked_domains,
+            vec!["ads.example.com".to_string(), "*.tracker.example".to_string()]
+        );
         assert!(!config.private_only);
         assert_eq!(config.max_connections, 10);
         assert_eq!(config.idle_timeout_s, 60);
@@ -285,6 +331,59 @@ connect_timeout_s = 5
         assert!(err.contains("true or false"), "{err}");
         let err = Config::parse("max_connections = 0").expect_err("max 0 is an error");
         assert!(err.contains(">= 1"), "{err}");
+    }
+
+    #[test]
+    fn blocked_domains_parse() {
+        let config =
+            Config::parse("blocked_domains = ads.example.com , , *.tracker.example ")
+                .expect("blocked domains parse");
+        assert_eq!(
+            config.blocked_domains,
+            vec!["ads.example.com".to_string(), "*.tracker.example".to_string()]
+        );
+        let config = Config::parse("blocked_domains = ").expect("empty value parses");
+        assert!(config.blocked_domains.is_empty());
+        let config = Config::parse("").expect("empty config parses");
+        assert!(config.blocked_domains.is_empty());
+    }
+
+    #[test]
+    fn domain_blocked_exact_and_wildcard() {
+        let list = vec![
+            "ads.example.com".to_string(),
+            "*.tracker.example".to_string(),
+        ];
+        assert!(domain_blocked(&list, "ads.example.com"));
+        assert!(domain_blocked(&list, "ADS.EXAMPLE.COM"));
+        assert!(domain_blocked(&list, "ads.example.com."));
+        assert!(domain_blocked(&list, "a.tracker.example"));
+        assert!(domain_blocked(&list, "tracker.example"));
+        assert!(domain_blocked(&list, "a.b.tracker.example"));
+        assert!(!domain_blocked(&list, "sub.ads.example.com"));
+        assert!(!domain_blocked(&list, "adtracker.example"));
+        assert!(!domain_blocked(&list, "notexample.com"));
+        assert!(!domain_blocked(&list, "example.com"));
+    }
+
+    #[test]
+    fn domain_blocked_wildcard_matches_base_domain() {
+        let list = vec!["*.example.com".to_string()];
+        assert!(domain_blocked(&list, "example.com"));
+        assert!(domain_blocked(&list, "a.example.com"));
+        assert!(!domain_blocked(&list, "notexample.com"));
+        assert!(!domain_blocked(&list, "badexample.com"));
+    }
+
+    #[test]
+    fn domain_blocked_never_matches_ips_or_empty() {
+        let list = vec!["*.example.com".to_string(), "1.2.3.4".to_string()];
+        assert!(!domain_blocked(&list, "1.2.3.4"));
+        assert!(!domain_blocked(&list, "2001:db8::1"));
+        assert!(!domain_blocked(&list, "::1"));
+        assert!(!domain_blocked(&list, ""));
+        assert!(!domain_blocked(&[], "example.com"));
+        assert!(!domain_blocked(&[], "1.2.3.4"));
     }
 
     #[test]

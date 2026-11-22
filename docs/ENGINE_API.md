@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.3.0"`.
+- Returns the engine version string, e.g. `"engine 0.4.0"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -89,6 +89,24 @@ second parameter.
   a handler reports an auth failure as a `PermissionDenied` error,
   which the engine records against the connection's client IP.
 
+## Blocked domains (0.4.0)
+
+- Config key `blocked_domains`: a comma list of exact hosts
+  (`ads.example.com`) or suffix wildcards (`*.example.com`, which
+  also matches `example.com` itself). Matching is case-insensitive
+  and ignores a trailing dot; IP literals never match, and neither
+  does an empty host or an empty list. The pure function is
+  `config::domain_blocked(list, host)`.
+- Checked before any outbound connect, after the request is parsed
+  (and after auth): HTTP CONNECT and plain HTTP get a 403, SOCKS5
+  CONNECT gets 0x02 (connection not allowed by ruleset), SOCKS4
+  CONNECT gets 0x5B. The refused connection is marked blocked on
+  its record, so its `ConnectionClosed` event (type 3) — and the
+  session log built from it — carry the flag; the connection is
+  otherwise closed normally (no error event).
+- UDP ASSOCIATE datagrams are NOT filtered: there is no refusal
+  reply for a datagram, so the block applies to TCP connects only.
+
 ## Authentication (0.0.9)
 
 - When the config has both `auth_user` and `auth_pass`, every protocol
@@ -108,7 +126,10 @@ second parameter.
 
 ## SOCKS4/4a (0.0.8)
 
-- CONNECT only (CD = 1); anything else gets a 0x5B reply. Request:
+- CONNECT only (CD = 1); anything else gets a 0x5B reply. A target
+  on the `blocked_domains` list also gets a 0x5B reply, before any
+  outbound connect, and the connection is recorded as blocked.
+  Request:
   VN = 4, CD, DSTPORT, DSTIP, USERID (null-terminated), and for 4a
   (DSTIP is 0.0.0.x with x != 0) a null-terminated hostname after the
   USERID. USERID is read and ignored. Reply is [0x00, 0x5A, 0, 0, 0, 0,
@@ -128,7 +149,8 @@ second parameter.
   recorded on the connection as soon as the request is parsed, so the
   snapshot shows them while the relay runs.
 - Reply codes: 0x00 success (with the bound address of the upstream
-  socket), 0x04 host unreachable (the name did not resolve), 0x05
+  socket), 0x02 connection not allowed by ruleset (blocked domain),
+  0x04 host unreachable (the name did not resolve), 0x05
   connection refused (no address accepted the connection), 0x07
   command not supported (anything other than CONNECT and UDP
   ASSOCIATE), 0x08 address type not supported. An error reply is sent before the connection
@@ -166,7 +188,10 @@ second parameter.
   target is parsed, DNS or connect failure gets a 502, success replies
   `HTTP/1.1 200 Connection Established` and any bytes the client
   already sent after the head are forwarded, then both directions are
-  relayed untouched with the same counters as SOCKS5.
+  relayed untouched with the same counters as SOCKS5. A target on the
+  `blocked_domains` list gets a 403 before any outbound connect, and
+  the connection is recorded as blocked; plain HTTP forwarding gets
+  the same 403 for a blocked host.
 - Plain HTTP forwarding, every method other than CONNECT: the request
   line must carry an absolute URI (`http://host[:port]/path`); anything
   else gets a 400. A CONNECT request (authority-form) is a tunnel, not
@@ -235,6 +260,7 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `auth_user` | string | — (none) | Needs `auth_pass` too. |
 | `auth_pass` | string | — (none) | Needs `auth_user` too. |
 | `allowed_clients` | comma list of CIDRs | — (none) | Empty means any client, subject to `private_only`. |
+| `blocked_domains` | comma list of hosts / `*.suffix` wildcards | — (none) | Empty means none blocked. See "Blocked domains". |
 | `private_only` | `true` / `false` | `true` | Only private/link-local clients may connect. |
 | `max_connections` | whole number ≥ 1 | `64` | Most connections at once. |
 | `idle_timeout_s` | seconds ≥ 0 | `300` | Idle time before a connection is closed. |
@@ -280,7 +306,7 @@ state<TAB>total_up<TAB>total_down<TAB>active
 Then one line per connection:
 
 ```
-id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down
+id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked
 ```
 
 - `state` is one of `stopped`, `starting`, `running`, `error`. The error
@@ -289,15 +315,16 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down
   is the number of connection lines that follow.
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
-  milliseconds, `up` / `down` the connection's byte counts. For a SOCKS5
-  connection the host and port are empty / 0 until the request is parsed;
+  milliseconds, `up` / `down` the connection's byte counts, `blocked`
+  "1" when the connection was refused for a blocked domain, else "0".
+  For a SOCKS5 connection the host and port are empty / 0 until the request is parsed;
   after that they are the target the client asked for.
 
 Example:
 
 ```
 running	1024	2048	1
-1	192.168.1.5	example.com	443	http	1794500000000	1024	2048
+1	192.168.1.5	example.com	443	http	1794500000000	1024	2048	0
 ```
 
 ## Events

@@ -15,3 +15,13 @@ fun validateCidr(text: String): Boolean {
 /** A whole number inside [range], or null when not a number or out of range. */
 fun validateIntInRange(text: String, range: IntRange): Int? =
     text.toIntOrNull()?.takeIf { it in range }
+
+/** A domain to block: "ads.example.com" or "*.example.com". No spaces, no scheme, no path. */
+fun validateBlockedDomain(text: String): Boolean {
+    val t = text.trim()
+    if (t.isEmpty()) return false
+    if (t.any { it.isWhitespace() }) return false
+    if (t.contains('/')) return false
+    if (t.contains(':')) return false
+    return true
+}

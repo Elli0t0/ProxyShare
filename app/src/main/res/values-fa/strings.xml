@@ -126,6 +126,11 @@
     <string name="allowed_clients_hint">مثال: 192.168.1.0/24</string>
     <string name="allowed_clients_add">افزودن</string>
     <string name="allowed_clients_invalid">CIDR یا IP نامعتبر است</string>
+    <string name="blocked_domains_label">دامنه‌های مسدود</string>
+    <string name="blocked_domains_hint">مثال: ads.example.com یا *.example.com</string>
+    <string name="blocked_domains_add">افزودن</string>
+    <string name="blocked_domains_invalid">دامنه نامعتبر است</string>
+    <string name="remove_domain">حذف دامنه</string>
     <string name="remove_client">حذف کلاینت</string>
     <string name="max_connections_label">حداکثر اتصال‌ها</string>
     <string name="idle_timeout_label">مهلت بیکاری (ثانیه)</string>

@@ -9,8 +9,8 @@ phone's active VPN. No root.
 - HTTP, SOCKS4 and SOCKS5 proxy on one port, with optional authentication
   (SOCKS5 RFC 1929, HTTP Basic) and a failed-auth throttle.
 - Live Connections monitor: per-client traffic, speeds, durations.
-- Settings: port, bind address, protocols, auth, allowed clients, limits,
-  theme (System/Light/Dark).
+- Settings: port, bind address, protocols, auth, allowed clients, blocked
+  domains, limits, theme (System/Light/Dark).
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill
   switch, and an exit-IP check.
 - "Connect your laptop" sheet with copyable curl/terminal commands and

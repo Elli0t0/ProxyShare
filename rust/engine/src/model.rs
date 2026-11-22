@@ -68,15 +68,27 @@ pub struct ConnInfo {
     pub up: u64,
     /// Bytes written to the client so far.
     pub down: u64,
+    /// True when the connection was refused for a blocked domain.
+    pub blocked: bool,
 }
 
 impl ConnInfo {
-    /// One snapshot line: "id\tclient\thost\tport\tproto\tstarted_ms\tup\tdown".
+    /// One snapshot line:
+    /// "id\tclient\thost\tport\tproto\tstarted_ms\tup\tdown\tblocked"
+    /// (blocked is "1" when the connection was refused for a blocked
+    /// domain, else "0").
     pub fn snapshot_line(&self) -> String {
         format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            self.id, self.client_ip, self.host, self.port, self.protocol, self.started_ms,
-            self.up, self.down
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            self.id,
+            self.client_ip,
+            self.host,
+            self.port,
+            self.protocol,
+            self.started_ms,
+            self.up,
+            self.down,
+            if self.blocked { "1" } else { "0" }
         )
     }
 }
@@ -194,6 +206,7 @@ mod tests {
             started_ms: 1_794_500_000_000,
             up: 1024,
             down: 2048,
+            blocked: false,
         }
     }
 
@@ -219,7 +232,13 @@ mod tests {
     fn conn_snapshot_line() {
         assert_eq!(
             sample_conn().snapshot_line(),
-            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048"
+            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
+        );
+        let mut blocked = sample_conn();
+        blocked.blocked = true;
+        assert_eq!(
+            blocked.snapshot_line(),
+            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t1"
         );
     }
 
@@ -232,7 +251,7 @@ mod tests {
         let conn = sample_conn();
         assert_eq!(
             snapshot_text(&EngineState::Running, 1024, 2048, &[conn]),
-            "running\t1024\t2048\t1\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048"
+            "running\t1024\t2048\t1\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
         );
     }
 

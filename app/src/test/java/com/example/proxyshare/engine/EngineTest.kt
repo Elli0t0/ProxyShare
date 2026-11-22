@@ -87,6 +87,16 @@ class EngineTest {
     }
 
     @Test
+    fun parseConnLineReadsBlockedFlag() {
+        val blocked = parseConnLine("7\t192.168.1.10\tads.example.com\t443\thttps\t1700000000000\t500\t4000\t1")
+        assertEquals(true, blocked?.blocked)
+        assertEquals("ads.example.com", blocked?.host)
+        // An 8-field line (older engine) has no flag: not blocked.
+        val plain = parseConnLine("7\t192.168.1.10\texample.com\t443\thttps\t1700000000000\t500\t4000")
+        assertEquals(false, plain?.blocked)
+    }
+
+    @Test
     fun parseConnLineRejectsShortAndBadLines() {
         assertEquals(null, parseConnLine("7\t192.168.1.10\texample.com"))
         assertEquals(null, parseConnLine("x\t192.168.1.10\texample.com\t443\thttps\t1\t2\t3"))
