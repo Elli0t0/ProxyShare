@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 — new launcher icon (share mark)
+
+- Launcher icon is now the share mark from the new logo (three
+  circles joined by two lines, no text). Traced from the logo's
+  measured geometry and scaled to fit the 66dp safe zone with margin
+  (x 26..82, y 24..84): the 0.3.1 S-route ran to x=89 and the
+  launcher mask clipped the right circle. Nothing else changed.
+
 ## 0.3.1 — launcher icon redraw
 
 - Launcher icon redrawn from the logo's real geometry (measured off

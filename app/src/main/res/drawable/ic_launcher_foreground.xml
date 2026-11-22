@@ -3,19 +3,24 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- White S-route mark from the app logo, traced from its real
-         geometry: long horizontal arms, one steep S-rise in the middle,
-         big circles at both ends. -->
+    <!-- Share mark from the new logo (three circles joined by two
+         lines), scaled to fit the 66dp safe zone with margin: the old
+         S-route ran to x=89 and the launcher mask clipped the right
+         circle, so the whole mark now stays inside x 26..82, y 24..84. -->
     <path
-        android:pathData="M 27,65 L 39,65 C 50,65 43,42 54,42 L 81,42"
-        android:strokeWidth="7"
+        android:pathData="M 71,34 L 36,54 L 72,74"
+        android:strokeWidth="5.5"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
+        android:strokeLineJoin="round"
         android:fillColor="#00000000" />
     <path
-        android:pathData="M 35,65 a 8,8 0 1,1 -0.1,0 Z"
+        android:pathData="M 46,54 a 10,10 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
     <path
-        android:pathData="M 89,42 a 8,8 0 1,1 -0.1,0 Z"
+        android:pathData="M 81,34 a 10,10 0 1,1 -0.1,0 Z"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:pathData="M 82,74 a 10,10 0 1,1 -0.1,0 Z"
         android:fillColor="#FFFFFF" />
 </vector>
