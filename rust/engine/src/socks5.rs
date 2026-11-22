@@ -265,6 +265,10 @@ pub async fn handle(
 }
 
 /// CONNECT: dial the target and relay both directions.
+// 8 args: the two rate limiters are separate params so the call sites
+// stay symmetric with socks4/http handle(); grouping them would touch
+// every handler signature for no behaviour gain.
+#[allow(clippy::too_many_arguments)]
 async fn connect(
     mut client: TcpStream,
     outbound: &Connector,
