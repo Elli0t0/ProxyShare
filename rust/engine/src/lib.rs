@@ -286,7 +286,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeHis
 /// unknown.
 #[no_mangle]
 pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSessionLog<'local>(
-    mut env: JNIEnv<'local>,
+    env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
     since_id: jlong,

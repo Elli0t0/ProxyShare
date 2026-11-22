@@ -16,7 +16,6 @@
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 

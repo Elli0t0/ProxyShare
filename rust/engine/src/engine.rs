@@ -764,7 +764,7 @@ impl Engine {
             let running = inner
                 .sampler_task
                 .as_ref()
-                .map_or(false, |h| !h.is_finished());
+                .is_some_and(|h| !h.is_finished());
             if !running {
                 inner.sampler_task = Some(tokio::task::spawn(sampler_loop(
                     std::sync::Arc::clone(self),
@@ -827,7 +827,7 @@ impl Engine {
         if inner
             .idle_stop_task
             .as_ref()
-            .map_or(false, |h| h.is_finished())
+            .is_some_and(|h| h.is_finished())
         {
             inner.idle_stop_task = None;
         }

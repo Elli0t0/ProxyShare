@@ -19,7 +19,6 @@
 
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

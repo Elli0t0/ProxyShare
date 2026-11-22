@@ -62,6 +62,12 @@ impl SessionLog {
     }
 }
 
+impl Default for SessionLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
