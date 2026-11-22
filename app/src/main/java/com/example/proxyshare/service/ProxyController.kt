@@ -88,6 +88,12 @@ data class SamplerState(
 fun rebaseline(liveUp: Long, liveDown: Long, nowMs: Long): SamplerState =
     SamplerState(liveUp, liveDown, nowMs, SpeedSample(0, 0))
 
+/** Result of the user-triggered exit-IP check. */
+sealed interface ExitIpResult {
+    data class Success(val ip: String) : ExitIpResult
+    data class Failure(val failure: ExitIpFailure) : ExitIpResult
+}
+
 /**
  * App-scoped singleton that owns the one [Engine], the settings and
  * their coroutine scope. No Hilt. The service and the UI both talk to
@@ -348,28 +354,22 @@ object ProxyController {
         repository?.block()
     }
 
-/** Result of the user-triggered exit-IP check. */
-sealed interface ExitIpResult {
-    data class Success(val ip: String) : ExitIpResult
-    data class Failure(val failure: ExitIpFailure) : ExitIpResult
-}
-
-/**
- * User-triggered exit-IP check, bound to the selected network when
- * there is one. The custom URL (if set) is tried first, then the
- * built-in endpoints.
- */
-suspend fun checkExitIp(): ExitIpResult {
-    val repo = repository ?: return ExitIpResult.Failure(ExitIpFailure.UNREACHABLE)
-    val settings = repo.settings.first()
-    val urls = (listOfNotNull(settings.exitIpUrl.trim().takeIf { it.isNotEmpty() }) +
-        EXIT_IP_ENDPOINTS).distinct()
-    return try {
-        ExitIpResult.Success(checkExitIp(urls, network.value))
-    } catch (e: ExitIpCheckException) {
-        ExitIpResult.Failure(e.failure)
-    } catch (_: Exception) {
-        ExitIpResult.Failure(ExitIpFailure.UNREACHABLE)
+    /**
+     * User-triggered exit-IP check, bound to the selected network when
+     * there is one. The custom URL (if set) is tried first, then the
+     * built-in endpoints.
+     */
+    suspend fun checkExitIp(): ExitIpResult {
+        val repo = repository ?: return ExitIpResult.Failure(ExitIpFailure.UNREACHABLE)
+        val settings = repo.settings.first()
+        val urls = (listOfNotNull(settings.exitIpUrl.trim().takeIf { it.isNotEmpty() }) +
+            EXIT_IP_ENDPOINTS).distinct()
+        return try {
+            ExitIpResult.Success(checkExitIp(urls, network.value))
+        } catch (e: ExitIpCheckException) {
+            ExitIpResult.Failure(e.failure)
+        } catch (_: Exception) {
+            ExitIpResult.Failure(ExitIpFailure.UNREACHABLE)
+        }
     }
-}
 }
