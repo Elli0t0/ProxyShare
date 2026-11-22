@@ -17,6 +17,14 @@
         <item quantity="one">%1$d client</item>
         <item quantity="other">%1$d clients</item>
     </plurals>
+    <plurals name="notif_devices">
+        <item quantity="one">%1$d device</item>
+        <item quantity="other">%1$d devices</item>
+    </plurals>
+    <plurals name="notif_connections">
+        <item quantity="one">%1$d connection</item>
+        <item quantity="other">%1$d connections</item>
+    </plurals>
     <string name="notif_stop">Stop</string>
     <string name="notif_explain_title">Notifications</string>
     <string name="notif_explain_text">ProxyShare shows an ongoing notification while the proxy runs, with a Stop action. Allow notifications to see it.</string>
@@ -57,10 +65,12 @@
     <string name="exit_ip_unreachable">Could not reach any check service</string>
     <string name="exit_ip_url_label">Exit IP check URL</string>
     <string name="exit_ip_url_hint">Empty = built-in list</string>
+    <string name="check_url_label">Check URL (optional)</string>
     <string name="connections_speed">↑ %1$s/s · ↓ %2$s/s</string>
     <string name="connections_empty">No clients yet</string>
     <string name="connections_count">%1$d connections</string>
     <string name="settings_server">Server</string>
+    <string name="settings_battery_startup">Battery &amp; startup</string>
     <string name="settings_protocols">Protocols</string>
     <string name="settings_security">Security</string>
     <string name="settings_limits">Limits</string>
@@ -76,7 +86,7 @@
     <string name="mobile_unreachable">carrier address, usually not reachable from your laptop</string>
     <string name="mobile_only_hint">Turn on the hotspot or join the same Wi-Fi as your laptop.</string>
     <string name="retry">Retry</string>
-    <string name="stat_clients">Clients</string>
+    <string name="stat_devices">Devices</string>
     <string name="stat_upload">Upload</string>
     <string name="stat_download">Download</string>
     <string name="stat_session_upload">Session ↑</string>
@@ -84,6 +94,7 @@
     <string name="traffic_title">Live traffic</string>
     <string name="traffic_chart_desc">Live traffic chart, upload %1$s per second, download %2$s per second</string>
     <string name="traffic_peak">Peak ↑ %1$s/s · ↓ %2$s/s</string>
+    <string name="connections_blocked">Blocked: %1$d</string>
     <string name="battery_saver_label">Battery saver</string>
     <string name="battery_saver_subtitle">Release the CPU lock when no client is connected</string>
     <string name="battery_optimization_label">Battery optimization</string>
@@ -104,6 +115,7 @@
     <string name="private_only_subtitle">Only allow clients on private networks</string>
     <string name="keep_screen_on_subtitle">Keep the screen on while the proxy runs</string>
     <string name="protocol_http_subtitle">Plain web requests</string>
+    <string name="protocol_at_least_one">At least one protocol must stay on</string>
     <string name="protocol_socks4_subtitle">Older SOCKS protocol</string>
     <string name="protocol_socks5_subtitle">SOCKS with UDP support</string>
     <string name="about_title">About</string>
@@ -127,6 +139,11 @@
     <string name="allowed_clients_add">Add</string>
     <string name="allowed_clients_invalid">Invalid CIDR or IP</string>
     <string name="blocked_domains_label">Blocked domains</string>
+    <string name="blocked_domains_subtitle">Works for clients that send the hostname to the proxy (SOCKS5 with remote DNS, HTTP/HTTPS proxy). Clients that resolve DNS themselves send an IP and bypass the list.</string>
+    <string name="paste_list">Paste list</string>
+    <string name="paste_list_hint">One domain per line. Lines starting with # are ignored.</string>
+    <string name="paste_list_result">%1$d added, %2$d invalid</string>
+    <string name="paste_list_done">Done</string>
     <string name="blocked_domains_hint">e.g. ads.example.com or *.example.com</string>
     <string name="blocked_domains_add">Add</string>
     <string name="blocked_domains_invalid">Invalid domain</string>

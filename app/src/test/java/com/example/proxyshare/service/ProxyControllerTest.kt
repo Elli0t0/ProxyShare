@@ -59,6 +59,36 @@ class ProxyControllerTest {
     }
 
     @Test
+    fun deviceCounterCountsDistinctIps() {
+        val counter = DeviceCounter()
+        assertEquals(0, counter.devices)
+        counter.onOpen("192.168.1.5")
+        assertEquals(1, counter.devices)
+        counter.onOpen("192.168.1.5") // second connection, same device
+        assertEquals(1, counter.devices)
+        counter.onOpen("192.168.1.9")
+        assertEquals(2, counter.devices)
+        counter.onClose("192.168.1.5")
+        assertEquals(2, counter.devices) // one connection left
+        counter.onClose("192.168.1.5")
+        assertEquals(1, counter.devices)
+        counter.onClose("192.168.1.9")
+        assertEquals(0, counter.devices)
+        counter.onClose("192.168.1.9") // closing an unknown IP is a no-op
+        assertEquals(0, counter.devices)
+    }
+
+    @Test
+    fun deviceCounterResyncAndClear() {
+        val counter = DeviceCounter()
+        counter.onOpen("10.0.0.1")
+        counter.resync(listOf("192.168.1.5", "192.168.1.5", "192.168.1.9"))
+        assertEquals(2, counter.devices)
+        counter.clear()
+        assertEquals(0, counter.devices)
+    }
+
+    @Test
     fun pushSampleRespectsMaxParam() {
         val history = listOf(SpeedSample(1, 0), SpeedSample(2, 0), SpeedSample(3, 0))
         assertEquals(

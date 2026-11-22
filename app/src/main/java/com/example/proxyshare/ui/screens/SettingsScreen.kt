@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,9 +29,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -63,6 +61,7 @@ import com.example.proxyshare.data.randomPassword
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.engine.NativeEngine
 import com.example.proxyshare.service.ProxyController
+import com.example.proxyshare.ui.components.OptionRow
 import com.example.proxyshare.ui.components.SectionCard
 import com.example.proxyshare.ui.components.SettingRow
 import kotlinx.coroutines.launch
@@ -82,6 +81,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
     var changedWhileRunning by rememberSaveable { mutableStateOf(false) }
+    var showPasteList by rememberSaveable { mutableStateOf(false) }
     // Manual update check: transient state, reset on rotation.
     var updateState by remember { mutableStateOf(UpdateCheckState.IDLE) }
     var latestRelease by remember { mutableStateOf<LatestRelease?>(null) }
@@ -253,6 +253,10 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         Text(text = label, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+            }
+
+            // Battery & startup.
+            SectionCard(title = stringResource(R.string.settings_battery_startup)) {
                 // Battery saver applies live (no restart banner).
                 SettingRow(
                     title = stringResource(R.string.battery_saver_label),
@@ -294,16 +298,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         )
                     },
                 )
-                // Exit-IP check URL: empty means the built-in endpoint
-                // list. Applies to the next check, no restart needed.
-                OutlinedTextField(
-                    value = settings.exitIpUrl,
-                    onValueChange = { saveLive { updateExitIpUrl(it) } },
-                    label = { Text(stringResource(R.string.exit_ip_url_label)) },
-                    placeholder = { Text(stringResource(R.string.exit_ip_url_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
 
             // Protocols.
@@ -326,28 +320,25 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         },
                     )
                 }
+                if (settings.protocols.size == 1) {
+                    Text(
+                        text = stringResource(R.string.protocol_at_least_one),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             // Security.
             SectionCard(title = stringResource(R.string.settings_security)) {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val modes = listOf(
-                        true to R.string.password_label,
-                        false to R.string.auth_no_password,
-                    )
-                    modes.forEachIndexed { index, (enabled, labelRes) ->
-                        SegmentedButton(
-                            selected = settings.authEnabled == enabled,
-                            onClick = { saveRestart { updateAuthEnabled(enabled) } },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = modes.size,
-                            ),
-                        ) {
-                            Text(text = stringResource(labelRes))
-                        }
-                    }
-                }
+                OptionRow(
+                    options = listOf(
+                        true to stringResource(R.string.password_label),
+                        false to stringResource(R.string.auth_no_password),
+                    ),
+                    selected = settings.authEnabled,
+                    onSelect = { saveRestart { updateAuthEnabled(it) } },
+                )
                 if (!settings.authEnabled) {
                     Text(
                         text = stringResource(R.string.auth_no_password_note),
@@ -416,6 +407,11 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     text = stringResource(R.string.blocked_domains_label),
                     style = MaterialTheme.typography.bodyLarge,
                 )
+                Text(
+                    text = stringResource(R.string.blocked_domains_subtitle),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 for (domain in settings.blockedDomains) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -437,6 +433,17 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 DomainAddRow(onAdd = { saveRestart { updateBlockedDomains(settings.blockedDomains + it) } })
+                TextButton(onClick = { showPasteList = true }) {
+                    Text(stringResource(R.string.paste_list))
+                }
+            }
+
+            if (showPasteList) {
+                PasteListDialog(
+                    existing = settings.blockedDomains,
+                    onDismiss = { showPasteList = false },
+                    onAdd = { saveRestart { updateBlockedDomains((settings.blockedDomains + it).distinct()) } },
+                )
             }
 
             // Limits.
@@ -470,25 +477,15 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     text = stringResource(R.string.theme_label),
                     style = MaterialTheme.typography.bodyLarge,
                 )
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val modes = listOf(
-                        "system" to R.string.theme_system,
-                        "light" to R.string.theme_light,
-                        "dark" to R.string.theme_dark,
-                    )
-                    modes.forEachIndexed { index, (mode, labelRes) ->
-                        SegmentedButton(
-                            selected = settings.themeMode == mode,
-                            onClick = { saveLive { updateThemeMode(mode) } },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = modes.size,
-                            ),
-                        ) {
-                            Text(text = stringResource(labelRes))
-                        }
-                    }
-                }
+                OptionRow(
+                    options = listOf(
+                        "system" to stringResource(R.string.theme_system),
+                        "light" to stringResource(R.string.theme_light),
+                        "dark" to stringResource(R.string.theme_dark),
+                    ),
+                    selected = settings.themeMode,
+                    onSelect = { saveLive { updateThemeMode(it) } },
+                )
                 SettingRow(
                     title = stringResource(R.string.keep_screen_on_label),
                     subtitle = stringResource(R.string.keep_screen_on_subtitle),
@@ -694,4 +691,52 @@ private fun DomainAddRow(onAdd: (String) -> Unit) {
             )
         }
     }
+}
+
+/** Bulk-add blocked domains: one per line, blanks and #-comments ignored. */
+@Composable
+private fun PasteListDialog(
+    existing: List<String>,
+    onDismiss: () -> Unit,
+    onAdd: (List<String>) -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf("") }
+    // Transient: the result of the last Add, reset on rotation.
+    var result by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.paste_list)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it; result = null },
+                    label = { Text(stringResource(R.string.paste_list_hint)) },
+                    minLines = 5,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                result?.let { (added, invalid) ->
+                    Text(
+                        text = stringResource(R.string.paste_list_result, added, invalid),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val (added, invalid) = parseBlockedList(text, existing)
+                if (added.isNotEmpty()) onAdd(added)
+                result = added.size to invalid
+                text = ""
+            }) {
+                Text(stringResource(R.string.blocked_domains_add))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.paste_list_done))
+            }
+        },
+    )
 }

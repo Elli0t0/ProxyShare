@@ -39,9 +39,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -55,7 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -80,6 +77,7 @@ import com.example.proxyshare.service.ProxyService
 import com.example.proxyshare.service.toOutboundMode
 import com.example.proxyshare.ui.components.CopyChip
 import com.example.proxyshare.ui.components.InfoChip
+import com.example.proxyshare.ui.components.OptionRow
 import com.example.proxyshare.ui.components.PowerButton
 import com.example.proxyshare.ui.components.SectionCard
 import com.example.proxyshare.ui.components.StatTile
@@ -92,6 +90,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
+    val devices by ProxyController.devices.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
@@ -239,8 +238,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 ) {
                     StatTile(
-                        label = stringResource(R.string.stat_clients),
-                        value = snapshot.active.toString(),
+                        label = stringResource(R.string.stat_devices),
+                        value = devices.toString(),
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                     StatTile(
@@ -309,6 +308,10 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 checking = exitIpChecking,
                 exitIpText = exitIpText,
                 exitIpOk = exitIpOk,
+                exitIpUrl = settings.exitIpUrl,
+                onExitIpUrlChange = { url ->
+                    scope.launch { ProxyController.updateSettings { updateExitIpUrl(url) } }
+                },
                 onCheckExitIp = {
                     exitIpChecking = true
                     scope.launch {
@@ -608,43 +611,17 @@ private fun OutboundCard(
     checking: Boolean,
     exitIpText: String?,
     exitIpOk: Boolean,
+    exitIpUrl: String,
+    onExitIpUrlChange: (String) -> Unit,
     onCheckExitIp: () -> Unit,
 ) {
     SectionCard(title = stringResource(R.string.outbound_title)) {
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                OutboundMode.entries.forEachIndexed { index, item ->
-                    SegmentedButton(
-                        selected = mode == item,
-                        onClick = { onModeSelected(item) },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = OutboundMode.entries.size,
-                        ),
-                        enabled = enabled,
-                        // Explicit colors: the defaults read inverted
-                        // here — the selected segment came out dim grey
-                        // while the unselected ones showed a bright
-                        // outline. (Theme.kt defines no
-                        // secondaryContainer/outlineVariant of its own,
-                        // so the defaults fall back to the baseline
-                        // scheme; on dynamic color the wallpaper-derived
-                        // secondaryContainer is dim against a near-black
-                        // surface.) Selected keeps its container and
-                        // blends its border into it; unselected uses the
-                        // dimmer outlineVariant/onSurfaceVariant.
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            activeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            activeBorderColor = MaterialTheme.colorScheme.secondaryContainer,
-                            inactiveContainerColor = Color.Transparent,
-                            inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        ),
-                    ) {
-                        Text(text = stringResource(modeLabel(item)))
-                    }
-                }
-            }
+            OptionRow(
+                options = OutboundMode.entries.map { it to stringResource(modeLabel(it)) },
+                selected = mode,
+                onSelect = onModeSelected,
+                enabled = enabled,
+            )
             Button(
                 onClick = onCheckExitIp,
                 enabled = !checking,
@@ -688,6 +665,15 @@ private fun OutboundCard(
                     }
                 }
             }
+            // Check URL (optional): empty means the built-in list.
+            OutlinedTextField(
+                value = exitIpUrl,
+                onValueChange = onExitIpUrlChange,
+                label = { Text(stringResource(R.string.check_url_label)) },
+                supportingText = { Text(stringResource(R.string.exit_ip_url_hint)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
     }
 }
 

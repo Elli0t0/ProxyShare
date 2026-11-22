@@ -95,6 +95,37 @@ sealed interface ExitIpResult {
 }
 
 /**
+ * Distinct client IPs with a refcount per IP: one device per IP,
+ * however many connections it has open. Pure: no coroutines, no
+ * flows. A device counts once while any of its connections is open.
+ */
+class DeviceCounter {
+    private val counts = HashMap<String, Int>()
+
+    /** Distinct devices currently connected. */
+    val devices: Int get() = counts.size
+
+    fun onOpen(ip: String) {
+        counts.merge(ip, 1, Int::plus)
+    }
+
+    fun onClose(ip: String) {
+        val n = (counts[ip] ?: return) - 1
+        if (n <= 0) counts.remove(ip) else counts[ip] = n
+    }
+
+    /** Rebuild from the snapshot's client IPs (events can be dropped). */
+    fun resync(ips: List<String>) {
+        counts.clear()
+        ips.forEach { counts.merge(it, 1, Int::plus) }
+    }
+
+    fun clear() {
+        counts.clear()
+    }
+}
+
+/**
  * App-scoped singleton that owns the one [Engine], the settings and
  * their coroutine scope. No Hilt. The service and the UI both talk to
  * the engine through here.
@@ -134,6 +165,11 @@ object ProxyController {
     private val _activeConns = MutableStateFlow(0)
     /** Active connections, tracked from engine events (type 2 opened, 3 closed). */
     val activeConns: StateFlow<Int> = _activeConns.asStateFlow()
+
+    private val deviceCounter = DeviceCounter()
+    private val _devices = MutableStateFlow(0)
+    /** Distinct client devices (one per IP), tracked from the same events. */
+    val devices: StateFlow<Int> = _devices.asStateFlow()
 
     private val _sessionLog = MutableStateFlow<List<SessionLogEntry>>(emptyList())
     /** Last 500 closed connections (metadata only). In-memory only, never persisted. */
@@ -225,13 +261,21 @@ object ProxyController {
         scope.launch {
             events.collect { e ->
                 when (e.type) {
-                    2 -> _activeConns.update { it + 1 }
+                    2 -> {
+                        _activeConns.update { it + 1 }
+                        parseConnLine(e.b)?.let { conn ->
+                            deviceCounter.onOpen(conn.client)
+                            _devices.value = deviceCounter.devices
+                        }
+                    }
                     3 -> {
                         _activeConns.update { (it - 1).coerceAtLeast(0) }
                         // Type 3 payload (b) is the connection's snapshot
                         // line: id, client, host, port, proto, started_ms,
                         // up, down. Only metadata, never payloads.
                         parseConnLine(e.b)?.let { conn ->
+                            deviceCounter.onClose(conn.client)
+                            _devices.value = deviceCounter.devices
                             _sessionLog.update { log ->
                                 pushLogEntry(log, sessionLogEntry(conn, System.currentTimeMillis()))
                             }
@@ -242,7 +286,11 @@ object ProxyController {
         }
         scope.launch {
             uiVisible.collect { visible ->
-                if (visible) _activeConns.value = engine.snapshot.value.active
+                if (visible) {
+                    _activeConns.value = engine.snapshot.value.active
+                    deviceCounter.resync(engine.snapshot.value.connections.map { it.client })
+                    _devices.value = deviceCounter.devices
+                }
             }
         }
     }
@@ -275,6 +323,8 @@ object ProxyController {
         val selector = selector ?: return
         started = true
         _activeConns.value = 0
+        deviceCounter.clear()
+        _devices.value = 0
         try {
             repo.ensurePassword()
             val settings = repo.settings.first()
@@ -298,6 +348,8 @@ object ProxyController {
                         // Kill switch: never fall back to the default network.
                         started = false
                         _activeConns.value = 0
+                        deviceCounter.clear()
+                        _devices.value = 0
                         runCatching { engine.stop() }
                         stopSpeedSampler()
                         engine.setError("VPN lost — proxy stopped")
@@ -333,6 +385,8 @@ object ProxyController {
                 networkJob = null
                 stopSpeedSampler()
                 _activeConns.value = 0
+                deviceCounter.clear()
+                _devices.value = 0
                 selector?.select(OutboundMode.DEFAULT)
                 if (started) {
                     started = false

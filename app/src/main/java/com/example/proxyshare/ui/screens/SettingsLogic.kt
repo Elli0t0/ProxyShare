@@ -25,3 +25,23 @@ fun validateBlockedDomain(text: String): Boolean {
     if (t.contains(':')) return false
     return true
 }
+
+/**
+ * Split pasted text into the entries to add and the invalid count:
+ * one per line, blank lines and #-comments ignored, duplicates
+ * (within the paste and against [existing]) dropped silently.
+ */
+fun parseBlockedList(text: String, existing: List<String> = emptyList()): Pair<List<String>, Int> {
+    val added = mutableListOf<String>()
+    var invalid = 0
+    for (raw in text.lines()) {
+        val line = raw.trim()
+        if (line.isEmpty() || line.startsWith("#")) continue
+        if (!validateBlockedDomain(line)) {
+            invalid++
+        } else if (line !in existing && line !in added) {
+            added += line
+        }
+    }
+    return added to invalid
+}

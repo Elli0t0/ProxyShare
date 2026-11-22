@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.4.1 — bugs and visual fixes
+
+- The app is English-only now: res/values-fa/ is deleted, and no
+  translations are added anywhere.
+- "Clients" counted connections, not devices: a new DeviceCounter
+  refcounts distinct client IPs from the engine events (type 2 open /
+  type 3 close), cleared on start/stop and resynced from the snapshot
+  when the UI becomes visible. The Home tile is now "Devices", and
+  the notification reads "1 device · 45 connections · SOCKS :1080"
+  (the connections part is dropped when 0).
+- Status-bar collision fixed: AppRoot wraps the Scaffold in a Box
+  with a solid surface cover over the status-bar area, so scrolled
+  content no longer overlaps the clock/icons (all three tabs, light
+  and dark).
+- One shared OptionRow component (ui/components/OptionRow.kt)
+  replaces all three M3 segmented controls (Home outbound, Settings
+  security, Settings theme). The selected segment is filled in
+  primaryContainer — the M3 defaults read inverted with dynamic
+  color. The old SegmentedButton-colors comment in HomeScreen is
+  gone.
+- Settings: the Server card is split — Server (ports, listen
+  address) and a new "Battery & startup" card (Battery saver,
+  Battery optimization, Start on boot). The Exit IP check URL field
+  moved next to the Outbound card on Home ("Check URL (optional)",
+  supporting text "Empty = built-in list"). When only one protocol
+  is enabled its switch is disabled and the card notes "At least one
+  protocol must stay on".
+- Blocked domains polish: a subtitle explains the list only works
+  for clients that send the hostname (SOCKS5 with remote DNS,
+  HTTP/HTTPS proxy); the laptop sheet's SOCKS5 curl example now uses
+  socks5h:// (the old --socks5-hostname form and the separate quick
+  test are folded into the one command) plus a Firefox line about
+  "Proxy DNS when using SOCKS v5"; "Paste list" bulk-adds domains
+  (one per line, blanks and #-comments ignored, duplicates dropped)
+  and reports "N added, M invalid"; Connections shows "Blocked: N"
+  under the Peak line when any session-log entry is blocked.
+- Tests: Kotlin 102 -> 105 (DeviceCounter refcounts/resync, pasted
+  list parsing; laptop commands updated for the socks5h + Firefox
+  change). Rust unchanged at 97.
+
 ## 0.4.0 — blocked domains
 
 - New engine config `blocked_domains`: exact hosts ("ads.example.com")

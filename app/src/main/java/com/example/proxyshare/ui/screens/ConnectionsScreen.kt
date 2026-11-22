@@ -193,6 +193,16 @@ fun ConnectionsScreen(
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                val blockedCount = sessionLog.count { it.blocked }
+                if (blockedCount > 0) {
+                    Text(
+                        text = stringResource(R.string.connections_blocked, blockedCount),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFeatureSettings = "tnum",
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             } else {
                 // Stopped: dimmed chart with an overlay, no radar state.
                 Box(contentAlignment = Alignment.Center) {

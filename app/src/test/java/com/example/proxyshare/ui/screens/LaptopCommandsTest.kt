@@ -22,12 +22,12 @@ class LaptopCommandsTest {
         )
         assertEquals("curl (SOCKS5)", cmds[2].title)
         assertEquals(
-            "curl --socks5-hostname proxy:s3cret@192.168.1.5:1080 https://ifconfig.me",
+            "curl --proxy socks5h://proxy:s3cret@192.168.1.5:1080 https://ifconfig.me",
             cmds[2].text,
         )
-        assertEquals("curl (SOCKS5 quick test)", cmds[3].title)
+        assertEquals("Firefox", cmds[3].title)
         assertEquals(
-            "curl --proxy socks5h://proxy:s3cret@192.168.1.5:1080 https://ifconfig.me",
+            "Enable \"Proxy DNS when using SOCKS v5\" in Settings → Network Settings",
             cmds[3].text,
         )
         assertEquals("Chromium / Chrome", cmds[4].title)
@@ -51,9 +51,10 @@ class LaptopCommandsTest {
         assertEquals(6, cmds.size)
         assertEquals("curl -x http://192.168.1.5:8080 https://ifconfig.me", cmds[0].text)
         assertEquals(
-            "curl --socks5-hostname 192.168.1.5:1080 https://ifconfig.me",
+            "curl --proxy socks5h://192.168.1.5:1080 https://ifconfig.me",
             cmds[2].text,
         )
+        assertEquals("Firefox", cmds[3].title)
         assertFalse(cmds.any { "@" in it.text })
         assertFalse(cmds[5].text.contains("authentication-"))
     }
@@ -70,6 +71,7 @@ class LaptopCommandsTest {
         assertEquals(4, cmds.size)
         assertEquals("curl (SOCKS5)", cmds[0].title)
         assertTrue(cmds[0].text.contains(":1080"))
+        assertEquals("Firefox", cmds[1].title)
         assertEquals("GNOME proxy settings", cmds[3].title)
         assertTrue(cmds[3].text.contains("socks port 1080"))
         assertFalse(cmds[3].text.contains("org.gnome.system.proxy.http"))

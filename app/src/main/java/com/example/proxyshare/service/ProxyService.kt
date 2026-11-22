@@ -52,7 +52,11 @@ class ProxyService : Service() {
         createChannel()
         ServiceCompat.startForeground(
             this, NOTIF_ID, buildNotification(
-                notificationText(ProxyController.settings.value, ProxyController.activeConns.value),
+                notificationText(
+                    ProxyController.settings.value,
+                    ProxyController.devices.value,
+                    ProxyController.activeConns.value,
+                ),
             ),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
@@ -121,21 +125,46 @@ class ProxyService : Service() {
                     getSystemService(NotificationManager::class.java)?.notify(
                         NOTIF_ID,
                         buildNotification(
-                            notificationText(settings, ProxyController.activeConns.value),
+                            notificationText(
+                                settings,
+                                ProxyController.devices.value,
+                                ProxyController.activeConns.value,
+                            ),
                         ),
                     )
                 }
             }
         }
-        // Live client count in the notification, on count changes only
-        // (no timer, no polling): the count is event-driven already.
+        // Live device/connection counts in the notification, on count
+        // changes only (no timer, no polling): the counts are
+        // event-driven already.
         serviceScope.launch {
-            ProxyController.activeConns.collect { n ->
+            ProxyController.activeConns.collect {
                 if (ProxyController.state.value is EngineState.Running) {
                     getSystemService(NotificationManager::class.java)?.notify(
                         NOTIF_ID,
                         buildNotification(
-                            notificationText(ProxyController.settings.value, n),
+                            notificationText(
+                                ProxyController.settings.value,
+                                ProxyController.devices.value,
+                                ProxyController.activeConns.value,
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
+        serviceScope.launch {
+            ProxyController.devices.collect {
+                if (ProxyController.state.value is EngineState.Running) {
+                    getSystemService(NotificationManager::class.java)?.notify(
+                        NOTIF_ID,
+                        buildNotification(
+                            notificationText(
+                                ProxyController.settings.value,
+                                ProxyController.devices.value,
+                                ProxyController.activeConns.value,
+                            ),
                         ),
                     )
                 }
@@ -143,8 +172,8 @@ class ProxyService : Service() {
         }
     }
 
-    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. With clients connected, the count leads: "2 clients · SOCKS :1080". */
-    private fun notificationText(settings: AppSettings, clients: Int): String {
+    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. With devices connected, the counts lead: "1 device · 45 connections · SOCKS :1080" (the connections part is dropped when 0). */
+    private fun notificationText(settings: AppSettings, devices: Int, connections: Int): String {
         val base = if (!settings.separatePorts) {
             getString(R.string.notif_running, settings.port)
         } else {
@@ -161,9 +190,17 @@ class ProxyService : Service() {
                 else -> getString(R.string.notif_running, settings.port)
             }
         }
-        if (clients <= 0) return base
-        val count = resources.getQuantityString(R.plurals.notif_clients, clients, clients)
-        return "$count · $base"
+        val parts = mutableListOf<String>()
+        if (devices > 0) {
+            parts += resources.getQuantityString(R.plurals.notif_devices, devices, devices)
+        }
+        if (connections > 0) {
+            parts += resources.getQuantityString(
+                R.plurals.notif_connections, connections, connections
+            )
+        }
+        if (parts.isEmpty()) return base
+        return (parts + base).joinToString(" · ")
     }
 
     /** Show the error text (kept visible) and stop the service. */

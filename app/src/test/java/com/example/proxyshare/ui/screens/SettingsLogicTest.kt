@@ -44,4 +44,27 @@ class SettingsLogicTest {
         assertFalse(validateBlockedDomain(""))
         assertFalse(validateBlockedDomain("   "))
     }
+
+    @Test
+    fun blockedListParsing() {
+        val (added, invalid) = parseBlockedList(
+            "ads.example.com\n" +
+                "# a comment\n" +
+                "\n" +
+                "  *.tracker.example  \n" +
+                "not a domain\n" +
+                "ads.example.com\n" +
+                "http://x.example.com\n",
+            existing = listOf("old.example.com"),
+        )
+        assertEquals(listOf("ads.example.com", "*.tracker.example"), added)
+        assertEquals(2, invalid)
+        // Duplicates against existing and within the paste are dropped, not invalid.
+        val (added2, invalid2) = parseBlockedList(
+            "old.example.com\nads.example.com\nads.example.com\n",
+            existing = listOf("old.example.com"),
+        )
+        assertEquals(listOf("ads.example.com"), added2)
+        assertEquals(0, invalid2)
+    }
 }

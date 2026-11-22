@@ -67,11 +67,11 @@ fun laptopCommands(
     if (socksPort != null) {
         cmds += Cmd(
             "curl (SOCKS5)",
-            "curl --socks5-hostname $auth$host:$socksPort https://ifconfig.me",
+            "curl --proxy socks5h://$auth$host:$socksPort https://ifconfig.me",
         )
         cmds += Cmd(
-            "curl (SOCKS5 quick test)",
-            "curl --proxy socks5h://$auth$host:$socksPort https://ifconfig.me",
+            "Firefox",
+            "Enable \"Proxy DNS when using SOCKS v5\" in Settings → Network Settings",
         )
         cmds += Cmd(
             "Chromium / Chrome",
