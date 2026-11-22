@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.6 — VPN watchdog, client names, usage history
+
+- VPN watchdog: a new VpnWatcher (data/VpnWatcher.kt) exposes a
+  shared Flow<Boolean> for "a VPN network is active", collected
+  only while the service runs or the UI is visible (WhileSubscribed
+  5 s). While the proxy runs in Default or VPN-only mode with no VPN
+  active, Home shows a red banner ("VPN is not connected — laptop
+  traffic may bypass it", or "…sharing is paused" in VPN-only
+  mode), and the service posts one notification when the VPN drops
+  while clients are connected (separate channel, default
+  importance). New setting "Block traffic when VPN is down"
+  (default OFF, Default mode only, in Home's Outbound card): while
+  on and no VPN is active, the engine refuses new connections with
+  SOCKS5 0x02 / SOCKS4 0x5B / HTTP 403 and closes nothing existing.
+  Plumbing: engine config `require_vpn` plus a runtime JNI setter
+  nativeSetVpnActive (the live VPN state is pushed by
+  ProxyController while running; the flag defaults to fail-closed).
+- Client names: the Connections client card ⋮ menu has "Rename".
+  Names (ip -> name, max 50, trimmed to 24 chars) live in
+  SettingsRepository as a JSON string. A named client shows its
+  name as the card title (IP stays on the secondary line) and in
+  the session log rows; with exactly one device connected, the
+  notification shows its name instead of "1 device".
+- Usage history: per-day up/down totals are persisted in DataStore
+  as a JSON map "yyyy-MM-dd" -> [up, down] (35 days kept), flushed
+  at engine stop, service destroy, and when the UI goes to
+  background while running — never polled. Logs gets a third tab
+  "Usage": today, last 7 days as a Canvas bar chart (up/down bars
+  per day, forced LTR), this month's total, and a "Reset usage"
+  button with a confirm dialog.
+- Tests: Kotlin 122 -> 138 (client names, usage history, require_vpn
+  config). Rust 122 -> 125 (require_vpn refusal: SOCKS5 0x02,
+  HTTP 403, plus the VPN toggle).
+
 ## 0.4.5 — engine performance and IPv6 fail-fast
 
 - TCP_NODELAY on the client side too: the accept loop sets it on

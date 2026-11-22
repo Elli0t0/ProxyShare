@@ -30,6 +30,11 @@ phone's active VPN. No root.
 - Client control: disconnect one client, or block it until the proxy
   restarts (Connections card menu); per-direction speed limits
   (Settings > Limits), shown as a dashed line on the traffic chart.
+- VPN watchdog: a red Home banner and one notification when the VPN
+  drops while clients are connected; optional "Block traffic when
+  VPN is down" (Default mode) refuses new connections until the VPN
+  is back. Client names (Connections card menu > Rename) and per-day
+  usage history (Logs tab > Usage: today, last 7 days, this month).
 - Outbound DNS runs on the selected network (API 29+), addresses are
   tried IPv4 first with each attempt capped at 5 s.
 

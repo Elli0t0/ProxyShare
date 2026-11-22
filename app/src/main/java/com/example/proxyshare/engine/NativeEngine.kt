@@ -28,6 +28,10 @@ object NativeEngine {
     @JvmStatic
     external fun nativeSetOutboundNetwork(handle: Long, network: Long)
 
+    /** Tell the engine whether a VPN network is active (only read when the config sets require_vpn). */
+    @JvmStatic
+    external fun nativeSetVpnActive(handle: Long, active: Boolean)
+
     /** Abort every open connection from one client IP (see docs/ENGINE_API.md). */
     @JvmStatic
     external fun nativeCloseClient(handle: Long, ip: String)

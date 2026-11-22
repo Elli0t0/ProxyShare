@@ -72,6 +72,7 @@ pub async fn handle(
     outbound: &Connector,
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
+    vpn_down: bool,
     up_limiter: Option<&Arc<RateLimiter>>,
     down_limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
@@ -114,6 +115,13 @@ pub async fn handle(
     if crate::config::domain_blocked(&config.blocked_domains, &host) {
         record.mark_blocked();
         crate::diag::log_info(format!("blocked {host} from {}", record.client_ip));
+        let _ = send_reply(&mut client, REP_FAILURE).await;
+        return Ok(());
+    }
+    if vpn_down {
+        crate::diag::log_info(format!(
+            "refused {host}:{port}: VPN is down (require_vpn)"
+        ));
         let _ = send_reply(&mut client, REP_FAILURE).await;
         return Ok(());
     }

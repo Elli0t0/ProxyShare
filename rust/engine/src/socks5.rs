@@ -248,11 +248,21 @@ pub async fn handle(
     outbound: &Connector,
     config: &Config,
     record: &std::sync::Arc<ConnRecord>,
+    vpn_down: bool,
     up_limiter: Option<&Arc<RateLimiter>>,
     down_limiter: Option<&Arc<RateLimiter>>,
 ) -> io::Result<()> {
     negotiate(&mut client, config).await?;
     let (cmd, target, port) = read_request(&mut client).await?;
+    if vpn_down {
+        crate::diag::log_info(format!(
+            "refused socks5 {}:{}: VPN is down (require_vpn)",
+            target.host(),
+            port
+        ));
+        let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
+        return Ok(());
+    }
     match cmd {
         0x01 => connect(client, outbound, config, record, target, port, up_limiter, down_limiter).await,
         0x03 => associate(client, config, record).await,

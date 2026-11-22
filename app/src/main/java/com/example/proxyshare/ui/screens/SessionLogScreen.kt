@@ -111,6 +111,7 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
                     ) { entry ->
                         SessionLogRow(
                             entry = entry,
+                            name = settings.clientNames[entry.client],
                             onCopyHost = { copyText(context, entry.host) },
                             onBlock = { blockTarget = entry.host },
                         )
@@ -154,6 +155,7 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
 @Composable
 private fun SessionLogRow(
     entry: SessionLogEntry,
+    name: String?,
     onCopyHost: () -> Unit,
     onBlock: () -> Unit,
 ) {
@@ -188,7 +190,7 @@ private fun SessionLogRow(
                     fontFamily = FontFamily.Monospace,
                 )
                 Text(
-                    text = "${entry.proto.uppercase()} · ${entry.client} · " +
+                    text = "${entry.proto.uppercase()} · ${name ?: entry.client} · " +
                         formatDuration(entry.durationMs),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

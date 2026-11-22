@@ -213,4 +213,24 @@
     <string name="auth_no_password">No password</string>
     <string name="auth_no_password_note">Anyone who can reach this port can use your connection. Keep \'Private networks only\' on.</string>
     <string name="no_password_private">No password · private networks only</string>
+    <string name="vpn_down_bypass">VPN is not connected — laptop traffic may bypass it</string>
+    <string name="vpn_down_paused">VPN is not connected — sharing is paused</string>
+    <string name="notif_vpn_channel_name">VPN watchdog</string>
+    <string name="vpn_dropped_notification">VPN disconnected while clients were connected</string>
+    <string name="require_vpn_label">Block traffic when VPN is down</string>
+    <string name="require_vpn_subtitle">In Default mode: refuse new connections while no VPN is active. Existing connections stay open.</string>
+    <string name="rename_client">Rename</string>
+    <string name="rename_client_title">Rename client</string>
+    <string name="rename_client_hint">Name (empty clears it)</string>
+    <string name="rename_client_save">Save</string>
+    <string name="logs_usage">Usage</string>
+    <string name="usage_today">Today</string>
+    <string name="usage_last_7_days">Last 7 days</string>
+    <string name="usage_this_month">This month</string>
+    <string name="usage_reset">Reset usage</string>
+    <string name="usage_reset_title">Reset usage history?</string>
+    <string name="usage_reset_text">This deletes all recorded usage totals.</string>
+    <string name="usage_empty">No usage recorded yet</string>
+    <string name="usage_up">Up</string>
+    <string name="usage_down">Down</string>
 </resources>

@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.example.proxyshare.R
 import com.example.proxyshare.data.AppSettings
+import com.example.proxyshare.data.VpnWatcher
 import com.example.proxyshare.engine.EngineState
 import com.example.proxyshare.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Foreground service that keeps the proxy running: it holds a partial
@@ -40,6 +42,7 @@ class ProxyService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var observing = false
     private var idleObserving = false
+    private var vpnDropObserving = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -57,6 +60,7 @@ class ProxyService : Service() {
                     ProxyController.settings.value,
                     ProxyController.devices.value,
                     ProxyController.activeConns.value,
+                    singleDeviceName(ProxyController.settings.value),
                 ),
             ),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
@@ -64,12 +68,17 @@ class ProxyService : Service() {
         observeWakeLock()
         observeState()
         observeIdleStop()
+        observeVpnDrop()
         ProxyController.start()
         return START_STICKY
     }
 
     override fun onDestroy() {
         observing = false
+        // Persist the usage totals before the process goes away: the
+        // controller's stop() normally flushes, but a system kill can
+        // skip that path. A DataStore edit is a small local write.
+        runBlocking { ProxyController.flushUsage() }
         serviceScope.cancel()
         releaseWakeLock()
         super.onDestroy()
@@ -122,6 +131,53 @@ class ProxyService : Service() {
         }
     }
 
+    /**
+     * One notification when the VPN drops while clients are connected
+     * (Default or VPN-only mode). Only the true->false transition
+     * fires: a client connecting later, while the VPN is already down,
+     * does not re-notify. Separate channel, default importance.
+     */
+    private fun observeVpnDrop() {
+        if (vpnDropObserving) return
+        vpnDropObserving = true
+        serviceScope.launch {
+            var wasActive = VpnWatcher.active.value
+            VpnWatcher.active.collect { active ->
+                val mode = ProxyController.settings.value.outboundMode.toOutboundMode()
+                if (!active && wasActive &&
+                    (mode == OutboundMode.DEFAULT || mode == OutboundMode.VPN_ONLY) &&
+                    ProxyController.state.value is EngineState.Running &&
+                    ProxyController.activeConns.value > 0
+                ) {
+                    showVpnDropped()
+                }
+                wasActive = active
+            }
+        }
+    }
+
+    private fun showVpnDropped() {
+        getSystemService(NotificationManager::class.java)?.createNotificationChannel(
+            NotificationChannel(
+                VPN_CHANNEL_ID,
+                getString(R.string.notif_vpn_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+        val tapIntent = Intent(this, MainActivity::class.java)
+        val tapPending = PendingIntent.getActivity(
+            this, 0, tapIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, VPN_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_proxy_status)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.vpn_dropped_notification))
+            .setContentIntent(tapPending)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)?.notify(VPN_NOTIF_ID, notification)
+    }
+
     /** One-line notification after an idle auto-stop. A separate, non-ongoing notification (no Stop action: the proxy is already stopped) that survives the service going away. */
     private fun showIdleStopped() {
         val tapIntent = Intent(this, MainActivity::class.java)
@@ -171,6 +227,7 @@ class ProxyService : Service() {
                                 settings,
                                 ProxyController.devices.value,
                                 ProxyController.activeConns.value,
+                                singleDeviceName(settings),
                             ),
                         ),
                     )
@@ -190,6 +247,7 @@ class ProxyService : Service() {
                                 ProxyController.settings.value,
                                 ProxyController.devices.value,
                                 ProxyController.activeConns.value,
+                                singleDeviceName(ProxyController.settings.value),
                             ),
                         ),
                     )
@@ -206,6 +264,7 @@ class ProxyService : Service() {
                                 ProxyController.settings.value,
                                 ProxyController.devices.value,
                                 ProxyController.activeConns.value,
+                                singleDeviceName(ProxyController.settings.value),
                             ),
                         ),
                     )
@@ -214,8 +273,13 @@ class ProxyService : Service() {
         }
     }
 
-    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. With devices connected, the counts lead: "1 device · 45 connections · SOCKS :1080" (the connections part is dropped when 0). */
-    private fun notificationText(settings: AppSettings, devices: Int, connections: Int): String {
+    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. With devices connected, the counts lead: "1 device · 45 connections · SOCKS :1080" (the connections part is dropped when 0). With exactly one device and a name for it, the name leads instead of "1 device". */
+    private fun notificationText(
+        settings: AppSettings,
+        devices: Int,
+        connections: Int,
+        singleDeviceName: String? = null,
+    ): String {
         val base = if (!settings.separatePorts) {
             getString(R.string.notif_running, settings.port)
         } else {
@@ -233,7 +297,9 @@ class ProxyService : Service() {
             }
         }
         val parts = mutableListOf<String>()
-        if (devices > 0) {
+        if (devices == 1 && singleDeviceName != null) {
+            parts += singleDeviceName
+        } else if (devices > 0) {
             parts += resources.getQuantityString(R.plurals.notif_devices, devices, devices)
         }
         if (connections > 0) {
@@ -243,6 +309,14 @@ class ProxyService : Service() {
         }
         if (parts.isEmpty()) return base
         return (parts + base).joinToString(" · ")
+    }
+
+    /** The stored name of the one connected device, if exactly one device is connected and it has a name. */
+    private fun singleDeviceName(settings: AppSettings): String? {
+        if (ProxyController.devices.value != 1) return null
+        val ip = ProxyController.snapshot.value.connections.firstOrNull()?.client
+            ?: return null
+        return settings.clientNames[ip]
     }
 
     /** Show the error text (kept visible) and stop the service. */
@@ -302,6 +376,8 @@ class ProxyService : Service() {
         const val ACTION_STOP = "com.example.proxyshare.STOP"
         const val NOTIF_ID = 1
         const val IDLE_NOTIF_ID = 2
+        const val VPN_NOTIF_ID = 3
         const val CHANNEL_ID = "proxy_running"
+        const val VPN_CHANNEL_ID = "vpn_watchdog"
     }
 }

@@ -110,6 +110,10 @@ struct EngineInner {
     /// Shared speed limiters, one per direction (None = unlimited).
     up_limiter: Option<std::sync::Arc<RateLimiter>>,
     down_limiter: Option<std::sync::Arc<RateLimiter>>,
+    /// Whether a VPN network is active right now (pushed from Kotlin
+    /// via set_vpn_active). False by default: fail-closed when the
+    /// config sets require_vpn.
+    vpn_active: bool,
     next_conn_id: u64,
     total_up: u64,
     total_down: u64,
@@ -185,6 +189,7 @@ impl Engine {
                 denied: HashSet::new(),
                 up_limiter: None,
                 down_limiter: None,
+                vpn_active: false,
                 next_conn_id: 1,
                 total_up: 0,
                 total_down: 0,
@@ -210,6 +215,19 @@ impl Engine {
     /// opened after the call.
     pub fn set_outbound_network(&self, handle: u64) {
         self.outbound.set_network(handle);
+    }
+
+    /// Tell the engine whether a VPN network is active right now.
+    /// Only consulted when the config sets require_vpn.
+    pub fn set_vpn_active(&self, active: bool) {
+        lock_inner(&self.inner).vpn_active = active;
+    }
+
+    /// True when new connections must be refused: require_vpn is on
+    /// and no VPN is active. Existing connections are unaffected.
+    pub fn vpn_down_refused(&self) -> bool {
+        let inner = lock_inner(&self.inner);
+        matches!(inner.config.as_ref(), Some(c) if c.require_vpn) && !inner.vpn_active
     }
 
     /// Send an event to the sink, if one is registered. Never called with
@@ -750,6 +768,9 @@ async fn handle_connection(
             None => return, // engine stopped while the sniff was running
         }
     };
+    // Read once here, not in each handler: the flag is live state,
+    // and every handler for this connection must agree on it.
+    let vpn_down = engine.vpn_down_refused();
     if !allowed.contains(&protocol) {
         consume_one(&mut stream).await;
         return; // sniffed protocol is not served on this listener: close, no event
@@ -763,6 +784,7 @@ async fn handle_connection(
                 &engine.outbound,
                 &config,
                 &record,
+                vpn_down,
                 up_limiter.as_ref(),
                 down_limiter.as_ref(),
             )
@@ -780,6 +802,7 @@ async fn handle_connection(
                 &engine.outbound,
                 &config,
                 &record,
+                vpn_down,
                 up_limiter.as_ref(),
                 down_limiter.as_ref(),
             )
@@ -795,6 +818,7 @@ async fn handle_connection(
                 &engine.outbound,
                 &config,
                 &record,
+                vpn_down,
                 up_limiter.as_ref(),
                 down_limiter.as_ref(),
             )
@@ -1480,6 +1504,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn require_vpn_refuses_http_connect_with_403() {
+        let (engine, _sink, port) = start_test_engine("require_vpn = true");
+        let echo_port = start_echo_server().await;
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = connect_request("127.0.0.1", echo_port, None);
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 403"),
+            "expected a 403 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        drop(client);
+        // VPN comes up: the same CONNECT now succeeds.
+        engine.set_vpn_active(true);
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 200"),
+            "expected a 200 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        drop(client);
+        engine.stop();
+    }
+
+    #[tokio::test]
     async fn http_plain_to_blocked_domain_is_403() {
         let (engine, sink, port) = start_test_engine("blocked_domains = blocked.example");
         let mut client = TcpStream::connect(("127.0.0.1", port))
@@ -1517,6 +1573,41 @@ mod tests {
         let closed = wait_closed(&sink).await;
         assert!(closed.blocked, "closed connection is marked blocked");
         assert_eq!(closed.host, "a.example");
+        engine.stop();
+    }
+
+    #[tokio::test]
+    async fn require_vpn_refuses_socks5_connect_with_0x02() {
+        let (engine, sink, port) = start_test_engine("require_vpn = true");
+        let echo_port = start_echo_server().await;
+        // No VPN active yet (the default): the CONNECT is refused.
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let req = [
+            0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1,
+            (echo_port >> 8) as u8,
+            (echo_port & 0xff) as u8,
+        ];
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x02, "VPN down gets 0x02, got {reply:?}");
+        assert_closed(&mut client).await;
+        let closed = wait_closed(&sink).await;
+        assert!(!closed.blocked, "a VPN refusal is not a blocked domain");
+        // VPN comes up: the same CONNECT now succeeds.
+        engine.set_vpn_active(true);
+        let tunnel = open_socks5_tunnel(port, echo_port).await;
+        drop(tunnel);
+        // VPN drops again: refused once more.
+        engine.set_vpn_active(false);
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        assert_eq!(socks5_greet(&mut client, 0x00).await, [0x05, 0x00]);
+        let reply = socks5_request_reply(&mut client, &req).await;
+        assert_eq!(reply[1], 0x02, "VPN down again gets 0x02, got {reply:?}");
+        drop(client);
         engine.stop();
     }
 

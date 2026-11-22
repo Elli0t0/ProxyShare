@@ -41,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,6 +65,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxyshare.R
 import com.example.proxyshare.data.NetworkWatcher
+import com.example.proxyshare.data.VpnWatcher
 import com.example.proxyshare.data.enabledPorts
 import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetIf
@@ -80,6 +82,7 @@ import com.example.proxyshare.ui.components.InfoChip
 import com.example.proxyshare.ui.components.OptionRow
 import com.example.proxyshare.ui.components.PowerButton
 import com.example.proxyshare.ui.components.SectionCard
+import com.example.proxyshare.ui.components.SettingRow
 import com.example.proxyshare.ui.components.StatTile
 import com.example.proxyshare.ui.components.toPowerState
 import kotlinx.coroutines.launch
@@ -93,6 +96,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val devices by ProxyController.devices.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
+    val vpnActive by VpnWatcher.active.collectAsStateWithLifecycle()
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
     var exitIpOk by rememberSaveable { mutableStateOf(false) }
     var exitIpChecking by rememberSaveable { mutableStateOf(false) }
@@ -273,6 +277,34 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 }
             }
 
+            // VPN banner: in Default or VPN-only mode the laptop's
+            // traffic silently bypasses a dropped VPN.
+            val outboundMode = settings.outboundMode.toOutboundMode()
+            if (running && !vpnActive &&
+                (outboundMode == OutboundMode.DEFAULT || outboundMode == OutboundMode.VPN_ONLY)
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (outboundMode == OutboundMode.VPN_ONLY) {
+                                R.string.vpn_down_paused
+                            } else {
+                                R.string.vpn_down_bypass
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+
             // Address card: first ranked interface is primary, with one
             // row per enabled protocol; the rest expand under "Other addresses".
             AddressCard(
@@ -304,6 +336,10 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 enabled = state is EngineState.Stopped,
                 onModeSelected = { mode ->
                     scope.launch { ProxyController.setOutboundMode(mode) }
+                },
+                requireVpn = settings.requireVpn,
+                onRequireVpnChange = { value ->
+                    scope.launch { ProxyController.updateSettings { updateRequireVpn(value) } }
                 },
                 checking = exitIpChecking,
                 exitIpText = exitIpText,
@@ -616,6 +652,8 @@ private fun OutboundCard(
     mode: OutboundMode,
     enabled: Boolean,
     onModeSelected: (OutboundMode) -> Unit,
+    requireVpn: Boolean,
+    onRequireVpnChange: (Boolean) -> Unit,
     checking: Boolean,
     exitIpText: String?,
     exitIpOk: Boolean,
@@ -630,6 +668,22 @@ private fun OutboundCard(
                 onSelect = onModeSelected,
                 enabled = enabled,
             )
+            // Default mode only: in VPN-only mode the kill switch
+            // already stops the proxy when the VPN drops. Disabled
+            // while running (an engine setting: applies at next start).
+            if (mode == OutboundMode.DEFAULT) {
+                SettingRow(
+                    title = stringResource(R.string.require_vpn_label),
+                    subtitle = stringResource(R.string.require_vpn_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = requireVpn,
+                            onCheckedChange = onRequireVpnChange,
+                            enabled = enabled,
+                        )
+                    },
+                )
+            }
             Button(
                 onClick = onCheckExitIp,
                 enabled = !checking,

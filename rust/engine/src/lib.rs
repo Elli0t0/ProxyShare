@@ -39,14 +39,14 @@ pub mod udp;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use jni::objects::{JClass, JObject, JString};
-use jni::sys::{jlong, jstring};
+use jni::sys::{jboolean, jlong, jstring};
 use jni::JNIEnv;
 
 use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
-/// The engine version string, e.g. "engine 0.4.4".
-pub const ENGINE_VERSION: &str = "engine 0.4.5";
+/// The engine version string, e.g. "engine 0.4.6".
+pub const ENGINE_VERSION: &str = "engine 0.4.6";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -202,6 +202,21 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSet
 ) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         with_engine(handle, |engine| engine.set_outbound_network(network as u64));
+    }));
+}
+
+/// Tell the engine whether a VPN network is active right now (see
+/// docs/ENGINE_API.md). Only consulted when the config sets
+/// require_vpn. Safe on a stopped or unknown handle (no-op).
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSetVpnActive<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    active: jboolean,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        with_engine(handle, |engine| engine.set_vpn_active(active != 0));
     }));
 }
 

@@ -7,8 +7,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.lifecycleScope
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.ui.theme.ProxyShareTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +36,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         ProxyController.setUiVisible(false)
+        // The UI going to the background is one of the usage flush
+        // points (the others are engine stop and service destroy):
+        // persist the bytes moved since the last flush.
+        lifecycleScope.launch { ProxyController.flushUsage() }
         super.onStop()
     }
 }

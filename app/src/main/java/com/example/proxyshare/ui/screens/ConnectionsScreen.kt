@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,6 +106,7 @@ fun ConnectionsScreen(
     val scope = rememberCoroutineScope()
     var showMenu by remember { mutableStateOf(false) }
     var blockTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -318,6 +320,7 @@ fun ConnectionsScreen(
                             group = group,
                             speeds = speeds,
                             denied = group.client in deniedClients,
+                            name = settings.clientNames[group.client],
                             onDisconnect = {
                                 scope.launch { ProxyController.disconnectClient(group.client) }
                             },
@@ -325,6 +328,7 @@ fun ConnectionsScreen(
                             onUnblock = {
                                 scope.launch { ProxyController.allowClient(group.client) }
                             },
+                            onRename = { renameTarget = group.client },
                         )
                     }
                 }
@@ -358,6 +362,21 @@ fun ConnectionsScreen(
             },
         )
     }
+
+    if (renameTarget != null) {
+        RenameClientDialog(
+            ip = renameTarget ?: "",
+            currentName = settings.clientNames[renameTarget] ?: "",
+            onDismiss = { renameTarget = null },
+            onSave = { name ->
+                val ip = renameTarget ?: return@RenameClientDialog
+                renameTarget = null
+                scope.launch {
+                    ProxyController.updateSettings { updateClientName(ip, name) }
+                }
+            },
+        )
+    }
 }
 
 /** Write the session log as JSON into the cache dir and share it via FileProvider. */
@@ -386,9 +405,11 @@ private fun ClientCard(
     group: ClientGroup,
     speeds: Map<Long, Speed>,
     denied: Boolean,
+    name: String?,
     onDisconnect: () -> Unit,
     onBlock: () -> Unit,
     onUnblock: () -> Unit,
+    onRename: () -> Unit,
 ) {
     var expanded by rememberSaveable(group.client) { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -419,7 +440,8 @@ private fun ClientCard(
                         ),
                 ) {
                     Text(
-                        text = group.client.substringAfterLast('.', group.client),
+                        text = name?.firstOrNull()?.uppercase()
+                            ?: group.client.substringAfterLast('.', group.client),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
@@ -430,16 +452,17 @@ private fun ClientCard(
                         .padding(start = 12.dp),
                 ) {
                     Text(
-                        text = group.client,
+                        text = name ?: group.client,
                         style = MaterialTheme.typography.titleMedium,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = if (name == null) FontFamily.Monospace else null,
+                    )
+                    val countText = LocalContext.current.resources.getQuantityString(
+                        R.plurals.connections_count,
+                        group.connections.size,
+                        group.connections.size,
                     )
                     Text(
-                        text = LocalContext.current.resources.getQuantityString(
-                            R.plurals.connections_count,
-                            group.connections.size,
-                            group.connections.size,
-                        ),
+                        text = if (name == null) countText else "${group.client} · $countText",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -464,6 +487,13 @@ private fun ClientCard(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false },
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.rename_client)) },
+                            onClick = {
+                                showMenu = false
+                                onRename()
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.disconnect_client)) },
                             onClick = {
@@ -503,6 +533,47 @@ private fun ClientCard(
             }
         }
     }
+}
+
+/** Rename dialog for one client IP. An empty name clears the stored name. */
+@Composable
+private fun RenameClientDialog(
+    ip: String,
+    currentName: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember(currentName) { mutableStateOf(currentName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.rename_client_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = ip,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(stringResource(R.string.rename_client_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(text) }) {
+                Text(stringResource(R.string.rename_client_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 /** Small error-colored "Blocked" chip (a blocked client, not a blocked domain). */

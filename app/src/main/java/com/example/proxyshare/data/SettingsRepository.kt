@@ -38,6 +38,10 @@ data class AppSettings(
     val themeMode: String = "system",
     val language: String = "system",
     val keepScreenOn: Boolean = false,
+    /** Refuse new connections while no VPN is active (Default mode). Sent to the engine. */
+    val requireVpn: Boolean = false,
+    /** Client names by IP (shown instead of the raw IP). Kotlin-only: never sent to the engine. */
+    val clientNames: Map<String, String> = emptyMap(),
     /** Release the CPU wake lock when no client is connected (default ON). Kotlin-only: never sent to the engine. */
     val batterySaver: Boolean = true,
     /** Start the proxy automatically after boot (default OFF). Kotlin-only: never sent to the engine. */
@@ -72,6 +76,7 @@ fun AppSettings.toEngineConfig(): String = buildString {
     appendLine("connect_timeout_s=$connectTimeoutS")
     if (limitDownKbps > 0) appendLine("limit_down_kbps=$limitDownKbps")
     if (limitUpKbps > 0) appendLine("limit_up_kbps=$limitUpKbps")
+    if (requireVpn) appendLine("require_vpn=true")
 }
 
 /** The port each protocol listens on, or null when it is disabled. */
@@ -142,6 +147,8 @@ class SettingsRepository(context: Context) {
             themeMode = prefs[Keys.THEME_MODE] ?: defaults.themeMode,
             language = prefs[Keys.LANGUAGE] ?: defaults.language,
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
+            requireVpn = prefs[Keys.REQUIRE_VPN] ?: defaults.requireVpn,
+            clientNames = parseClientNames(prefs[Keys.CLIENT_NAMES] ?: ""),
             batterySaver = prefs[Keys.BATTERY_SAVER] ?: defaults.batterySaver,
             startOnBoot = prefs[Keys.START_ON_BOOT] ?: defaults.startOnBoot,
             idleStopMinutes = prefs[Keys.IDLE_STOP_MINUTES] ?: defaults.idleStopMinutes,
@@ -241,6 +248,19 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.KEEP_SCREEN_ON] = value }
     }
 
+    suspend fun updateRequireVpn(value: Boolean) {
+        dataStore.edit { it[Keys.REQUIRE_VPN] = value }
+    }
+
+    suspend fun updateClientName(ip: String, name: String) {
+        dataStore.edit { prefs ->
+            val names = putClientName(
+                parseClientNames(prefs[Keys.CLIENT_NAMES] ?: ""), ip, name
+            )
+            prefs[Keys.CLIENT_NAMES] = clientNamesJson(names)
+        }
+    }
+
     suspend fun updateBatterySaver(value: Boolean) {
         dataStore.edit { it[Keys.BATTERY_SAVER] = value }
     }
@@ -282,6 +302,8 @@ class SettingsRepository(context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val LANGUAGE = stringPreferencesKey("language")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+        val REQUIRE_VPN = booleanPreferencesKey("require_vpn")
+        val CLIENT_NAMES = stringPreferencesKey("client_names")
         val BATTERY_SAVER = booleanPreferencesKey("battery_saver")
         val START_ON_BOOT = booleanPreferencesKey("start_on_boot")
         val IDLE_STOP_MINUTES = intPreferencesKey("idle_stop_minutes")

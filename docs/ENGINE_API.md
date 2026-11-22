@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.4.5"`.
+- Returns the engine version string, e.g. `"engine 0.4.6"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -46,6 +46,7 @@ second parameter.
 | `nativeDenyClient(h: Long, ip: String)` | `Engine::deny_client` | Refuses the client until the proxy restarts. Existing connections stay open. Safe on an unknown handle or a malformed IP (no-op). |
 | `nativeAllowClient(h: Long, ip: String)` | `Engine::allow_client` | Lifts a block set by nativeDenyClient. Safe on an unknown handle or a malformed IP (no-op). |
 | `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
+| `nativeSetVpnActive(h: Long, active: Boolean)` | `Engine::set_vpn_active` | Tells the engine whether a VPN network is active right now. Only consulted when the config sets `require_vpn` (see "VPN watchdog"). Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
 | `nativeDiagLog(): String` | reads the diagnostics ring buffer | The log text (below), or `""` when empty. Takes no handle: the buffer is global, not per-engine. |
@@ -301,6 +302,7 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `connect_timeout_s` | seconds ≥ 0 | `10` | Time allowed to connect to the target. |
 | `limit_down_kbps` | whole number ≥ 0 | `0` | Download speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
 | `limit_up_kbps` | whole number ≥ 0 | `0` | Upload speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
+| `require_vpn` | `true` / `false` | `false` | Refuse new connections while no VPN is active (the live state arrives through `nativeSetVpnActive`). Existing connections are never closed. See "VPN watchdog". |
 
 Example:
 
@@ -421,6 +423,25 @@ ts_ms<TAB>LEVEL<TAB>message<TAB>count
   configured no bucket exists and the pump does not wait.
 - UDP ASSOCIATE datagrams are NOT limited (they do not go through
   the relay pumps) — the same carve-out as the blocked-domains check.
+
+## VPN watchdog (0.4.6)
+
+- Config key `require_vpn` (default `false`). When it is on, new
+  connections are refused while no VPN is active: SOCKS5 gets reply
+  0x02 (connection not allowed by ruleset), SOCKS4 gets 0x5B, HTTP
+  (CONNECT and plain) gets 403. The refusal happens after the target
+  is set, next to the blocked-domains check, and is logged
+  ("refused {host}:{port}: VPN is down (require_vpn)"). Refused
+  connections are NOT marked blocked (that flag is for blocked
+  domains only) and still appear in the session log with 0 bytes.
+  Existing connections are never closed by a VPN drop.
+- The live VPN state is pushed from Kotlin through
+  `nativeSetVpnActive(h, active)` (see the lifecycle table); the
+  controller pushes the current state when the proxy starts and
+  every change while it runs. The engine defaults to "no VPN active"
+  (fail-closed): with `require_vpn` on, everything is refused until
+  Kotlin reports a VPN. UDP ASSOCIATE is refused the same way (the
+  check sits in the SOCKS5 handler before the command dispatch).
 
 ## Events
 

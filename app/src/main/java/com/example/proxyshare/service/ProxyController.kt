@@ -6,6 +6,8 @@ import android.net.Network
 import android.os.SystemClock
 import com.example.proxyshare.data.AppSettings
 import com.example.proxyshare.data.SettingsRepository
+import com.example.proxyshare.data.UsageHistoryStore
+import com.example.proxyshare.data.VpnWatcher
 import com.example.proxyshare.engine.Engine
 import com.example.proxyshare.engine.EngineEvent
 import com.example.proxyshare.engine.EngineState
@@ -176,6 +178,18 @@ object ProxyController {
     private var started = false
     private var networkJob: Job? = null
     private var speedJob: Job? = null
+    private var vpnJob: Job? = null
+
+    private var usageStore: UsageHistoryStore? = null
+    private val usageMutex = Mutex()
+    private var flushedUp = 0L
+    private var flushedDown = 0L
+
+    private val _usageHistory =
+        MutableStateFlow<Map<String, Pair<Long, Long>>>(emptyMap())
+    /** Per-day up/down totals (last 35 days), persisted. */
+    val usageHistory: StateFlow<Map<String, Pair<Long, Long>>> =
+        _usageHistory.asStateFlow()
 
     private val _settings = MutableStateFlow(AppSettings())
     /** The current settings (defaults until the DataStore read lands). */
@@ -210,6 +224,11 @@ object ProxyController {
     /** Clear the session log (Connections overflow menu). */
     fun clearSessionLog() {
         _sessionLog.value = emptyList()
+    }
+
+    /** Drop all recorded usage history (Logs > Usage > Reset usage). */
+    fun clearUsage() {
+        scope.launch { usageStore?.clear() }
     }
 
     private val _restartNeeded = MutableStateFlow(false)
@@ -325,12 +344,47 @@ object ProxyController {
         _uiVisible.value = v
     }
 
+    /** Persist the bytes moved since the last flush into today's usage totals. No-op when nothing moved. Safe to call when stopped. Serialized: stop() and the service's onDestroy can flush at the same time, and a delta must never be counted twice. */
+    suspend fun flushUsage() {
+        usageMutex.withLock {
+            val store = usageStore ?: return
+            val snap = snapshot.value
+            val up = (snap.liveUp - flushedUp).coerceAtLeast(0)
+            val down = (snap.liveDown - flushedDown).coerceAtLeast(0)
+            if (up > 0 || down > 0) {
+                store.add(up, down)
+            }
+            flushedUp = snap.liveUp
+            flushedDown = snap.liveDown
+        }
+    }
+
+    /** Push the live VPN state into the engine while running (require_vpn reads it). */
+    private fun startVpnJob() {
+        vpnJob?.cancel()
+        vpnJob = scope.launch {
+            VpnWatcher.active.collect { active ->
+                engine.setVpnActive(active)
+            }
+        }
+    }
+
+    private fun stopVpnJob() {
+        vpnJob?.cancel()
+        vpnJob = null
+    }
+
     /** Called once from ProxyShareApp.onCreate. Safe to call twice. */
     fun init(context: Context) {
         if (repository != null) return
         val appContext = context.applicationContext
         val repo = SettingsRepository(appContext)
         repository = repo
+        val store = UsageHistoryStore(appContext)
+        usageStore = store
+        scope.launch {
+            store.history.collect { _usageHistory.value = it }
+        }
         val selector = NetworkSelector(
             appContext.getSystemService(ConnectivityManager::class.java)
         )
@@ -394,9 +448,11 @@ object ProxyController {
             startMutex.withLock {
                 if (!started) return@withLock
                 runCatching { engine.stop() }
+                flushUsage()
                 networkJob?.cancel()
                 networkJob = null
                 stopSpeedSampler()
+                stopVpnJob()
                 started = false
                 startLocked()
             }
@@ -439,7 +495,9 @@ object ProxyController {
                         deviceCounter.clear()
                         _devices.value = 0
                         runCatching { engine.stop() }
+                        flushUsage()
                         stopSpeedSampler()
+                        stopVpnJob()
                         engine.setError("VPN lost — proxy stopped")
                         networkJob?.cancel()
                         return@collect
@@ -453,16 +511,21 @@ object ProxyController {
                 networkJob?.cancel()
                 networkJob = null
                 stopSpeedSampler()
+                stopVpnJob()
             } else {
                 // A fresh start applies the current settings.
                 _restartNeeded.value = false
+                flushedUp = 0L
+                flushedDown = 0L
                 startSpeedSampler()
+                startVpnJob()
             }
         } catch (_: Exception) {
             started = false
             networkJob?.cancel()
             networkJob = null
             stopSpeedSampler()
+            stopVpnJob()
             runCatching { engine.stop() }
         }
     }
@@ -474,6 +537,7 @@ object ProxyController {
                 networkJob?.cancel()
                 networkJob = null
                 stopSpeedSampler()
+                stopVpnJob()
                 _activeConns.value = 0
                 deviceCounter.clear()
                 _devices.value = 0
@@ -483,6 +547,7 @@ object ProxyController {
                 if (started) {
                     started = false
                     runCatching { engine.stop() }
+                    flushUsage()
                 } else if (engine.state.value is EngineState.Error) {
                     runCatching { engine.stop() }
                 }

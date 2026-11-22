@@ -212,6 +212,12 @@ class Engine(
         NativeEngine.nativeSetOutboundNetwork(handle, network)
     }
 
+    /** Tell the engine whether a VPN network is active right now (only read when require_vpn is on). No-op after close. */
+    fun setVpnActive(active: Boolean) {
+        if (closed) return
+        NativeEngine.nativeSetVpnActive(handle, active)
+    }
+
     /**
      * Start the engine with these settings. Returns "" on success, or
      * an error text. On success the snapshot is polled until stop().

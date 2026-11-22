@@ -163,4 +163,17 @@ class SettingsRepositoryTest {
         assertTrue(config.contains("limit_down_kbps=512\n"))
         assertTrue(config.contains("limit_up_kbps=128\n"))
     }
+
+    @Test
+    fun requireVpnDefaultsToOffAndIsOmitted() {
+        val config = AppSettings().toEngineConfig()
+        assertFalse(AppSettings().requireVpn)
+        assertTrue(!config.contains("require_vpn"))
+    }
+
+    @Test
+    fun requireVpnIsSentWhenOn() {
+        val config = AppSettings(requireVpn = true).toEngineConfig()
+        assertTrue(config.contains("require_vpn=true\n"))
+    }
 }

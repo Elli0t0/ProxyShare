@@ -1,13 +1,16 @@
 package com.example.proxyshare.ui.screens
 
 import android.content.Context
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,16 +18,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -34,10 +41,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ShareCompat
@@ -46,6 +58,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.proxyshare.R
+import com.example.proxyshare.data.barFractions
+import com.example.proxyshare.data.todayKey
+import com.example.proxyshare.data.usageLast7Days
+import com.example.proxyshare.data.usageMonthTotal
+import com.example.proxyshare.data.usageToday
 import com.example.proxyshare.engine.DiagLine
 import com.example.proxyshare.engine.parseDiagLog
 import com.example.proxyshare.engine.redactLog
@@ -89,9 +106,10 @@ private fun shareDiagLog(context: Context, text: String) {
 }
 
 /**
- * Logs tab: the session log and the engine diagnostics log, switched
- * with an OptionRow. The ⋮ menu shares or clears whichever tab is
- * shown.
+ * Logs tab: the session log, the engine diagnostics log and usage
+ * history, switched with an OptionRow. The ⋮ menu shares or clears
+ * whichever of the first two tabs is shown; Usage has its own Reset
+ * button instead (nothing to share there).
  */
 @Composable
 fun LogsScreen(modifier: Modifier = Modifier) {
@@ -100,7 +118,12 @@ fun LogsScreen(modifier: Modifier = Modifier) {
     var showMenu by remember { mutableStateOf(false) }
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
     val diagText by ProxyController.diagLogText.collectAsStateWithLifecycle()
-    val canShare = if (tab == 0) sessionLog.isNotEmpty() else diagText.isNotBlank()
+    // Usage has no shareable content (its Reset lives in the tab itself).
+    val canShare = when (tab) {
+        0 -> sessionLog.isNotEmpty()
+        1 -> diagText.isNotBlank()
+        else -> false
+    }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -153,14 +176,15 @@ fun LogsScreen(modifier: Modifier = Modifier) {
                 options = listOf(
                     0 to stringResource(R.string.nav_connections),
                     1 to stringResource(R.string.logs_engine),
+                    2 to stringResource(R.string.logs_usage),
                 ),
                 selected = tab,
                 onSelect = { tab = it },
             )
-            if (tab == 0) {
-                SessionLogContent(modifier = Modifier.weight(1f))
-            } else {
-                EngineLogContent(modifier = Modifier.weight(1f))
+            when (tab) {
+                0 -> SessionLogContent(modifier = Modifier.weight(1f))
+                1 -> EngineLogContent(modifier = Modifier.weight(1f))
+                else -> UsageContent(modifier = Modifier.weight(1f))
             }
         }
     }
@@ -316,5 +340,171 @@ private fun LevelBadge(level: String) {
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         )
+    }
+}
+
+/**
+ * Usage history: today, the last 7 days as a bar chart (up/down per
+ * day, forced LTR), this month's total, and a Reset button. Reads
+ * ProxyController.usageHistory: no polling.
+ */
+@Composable
+private fun UsageContent(modifier: Modifier = Modifier) {
+    val history by ProxyController.usageHistory.collectAsStateWithLifecycle()
+    var showReset by remember { mutableStateOf(false) }
+    val today = todayKey()
+    val days = remember(history, today) { usageLast7Days(history, today) }
+    val (todayUp, todayDown) = usageToday(history, today)
+    val (monthUp, monthDown) = remember(history, today) {
+        usageMonthTotal(history, today.substring(0, 7))
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (history.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.usage_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            Text(
+                text = stringResource(R.string.usage_today),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "↑ ${formatBytes(todayUp)} · ↓ ${formatBytes(todayDown)}",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFeatureSettings = "tnum",
+                ),
+            )
+            Text(
+                text = stringResource(R.string.usage_last_7_days),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            UsageChart(days = days)
+            Text(
+                text = stringResource(R.string.usage_this_month),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "↑ ${formatBytes(monthUp)} · ↓ ${formatBytes(monthDown)}",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFeatureSettings = "tnum",
+                ),
+            )
+            OutlinedButton(onClick = { showReset = true }) {
+                Text(stringResource(R.string.usage_reset))
+            }
+        }
+    }
+
+    if (showReset) {
+        AlertDialog(
+            onDismissRequest = { showReset = false },
+            title = { Text(stringResource(R.string.usage_reset_title)) },
+            text = { Text(stringResource(R.string.usage_reset_text)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showReset = false
+                    ProxyController.clearUsage()
+                }) {
+                    Text(stringResource(R.string.usage_reset))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReset = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+/** Two thin bars per day (up in tertiary, down in primary), forced LTR, no library. */
+@Composable
+private fun UsageChart(days: List<Pair<String, Pair<Long, Long>>>) {
+    val fractions = remember(days) {
+        barFractions(days.flatMap { listOf(it.second.first, it.second.second) })
+    }
+    val upColor = MaterialTheme.colorScheme.tertiary
+    val downColor = MaterialTheme.colorScheme.primary
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Canvas(
+                modifier = Modifier.fillMaxWidth().height(120.dp),
+            ) {
+                val groupWidth = size.width / 7
+                val barWidth = 8.dp.toPx()
+                val gap = 2.dp.toPx()
+                for (i in 0..6) {
+                    val centerX = groupWidth * i + groupWidth / 2
+                    val upF = fractions.getOrNull(i * 2) ?: 0f
+                    val downF = fractions.getOrNull(i * 2 + 1) ?: 0f
+                    drawRect(
+                        color = upColor,
+                        topLeft = Offset(
+                            centerX - barWidth - gap / 2,
+                            size.height - upF * size.height,
+                        ),
+                        size = Size(barWidth, upF * size.height),
+                    )
+                    drawRect(
+                        color = downColor,
+                        topLeft = Offset(
+                            centerX + gap / 2,
+                            size.height - downF * size.height,
+                        ),
+                        size = Size(barWidth, downF * size.height),
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                for ((date, _) in days) {
+                    Text(
+                        text = date.substring(8, 10),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Canvas(modifier = Modifier.size(8.dp)) {
+                        drawCircle(color = upColor)
+                    }
+                    Text(
+                        text = stringResource(R.string.usage_up),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Canvas(modifier = Modifier.size(8.dp)) {
+                        drawCircle(color = downColor)
+                    }
+                    Text(
+                        text = stringResource(R.string.usage_down),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }

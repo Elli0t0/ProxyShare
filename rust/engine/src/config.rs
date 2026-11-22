@@ -53,6 +53,10 @@ pub struct Config {
     /// Upload speed limit in KB/s, total across all connections.
     /// 0 = unlimited.
     pub limit_up_kbps: u64,
+    /// Refuse new connections while no VPN is active (the live VPN
+    /// state arrives through set_vpn_active; false here means the
+    /// flag is ignored). Existing connections are never closed.
+    pub require_vpn: bool,
 }
 
 impl Default for Config {
@@ -73,6 +77,7 @@ impl Default for Config {
             connect_timeout_s: 10,
             limit_down_kbps: 0,
             limit_up_kbps: 0,
+            require_vpn: false,
         }
     }
 }
@@ -117,6 +122,7 @@ impl Config {
                 "limit_up_kbps" => {
                     config.limit_up_kbps = parse_u64(value, line_no, key)?
                 }
+                "require_vpn" => config.require_vpn = parse_bool(value, line_no, key)?,
                 _ => { /* unknown keys are ignored */ }
             }
         }
@@ -145,8 +151,13 @@ impl Config {
             (0, 0) => String::new(),
             (d, u) => format!(", limits down {d}/up {u} KB/s"),
         };
+        let vpn = if self.require_vpn {
+            ", require_vpn on"
+        } else {
+            ""
+        };
         format!(
-            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}",
+            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}",
             self.bind_addr,
             protocols.join("+"),
             self.private_only,
@@ -467,6 +478,16 @@ connect_timeout_s = 5
             .contains("limits down 512/up 128 KB/s"));
         assert!(!Config::default().summary().contains("limits"));
         assert!(Config::parse("limit_down_kbps = abc").is_err());
+    }
+
+    #[test]
+    fn require_vpn_parses_and_shows_in_summary() {
+        assert!(!Config::default().require_vpn);
+        assert!(!Config::default().summary().contains("require_vpn"));
+        let config = Config::parse("require_vpn = true").expect("require_vpn parse");
+        assert!(config.require_vpn);
+        assert!(config.summary().contains("require_vpn on"));
+        assert!(Config::parse("require_vpn = maybe").is_err());
     }
 
     #[test]
