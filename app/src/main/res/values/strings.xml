@@ -110,6 +110,12 @@
     <string name="about_app_version">App version</string>
     <string name="about_engine_version">Engine version</string>
     <string name="about_repo">Repository</string>
+    <string name="check_updates">Check for updates</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_up_to_date">You\'re up to date (%1$s)</string>
+    <string name="update_available">%1$s is available</string>
+    <string name="update_open">Open</string>
+    <string name="update_failed">Couldn\'t check</string>
     <string name="bind_label">Listen address</string>
     <string name="bind_all">All interfaces</string>
     <string name="auth_label">Authentication</string>

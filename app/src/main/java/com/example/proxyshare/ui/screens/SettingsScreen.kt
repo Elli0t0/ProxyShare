@@ -2,12 +2,14 @@ package com.example.proxyshare.ui.screens
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,6 +25,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
@@ -49,8 +52,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxyshare.R
+import com.example.proxyshare.data.GITHUB_REPO
 import com.example.proxyshare.data.IfKind
+import com.example.proxyshare.data.LatestRelease
 import com.example.proxyshare.data.SettingsRepository
+import com.example.proxyshare.data.fetchLatestRelease
+import com.example.proxyshare.data.isNewer
 import com.example.proxyshare.data.networkInterfaces
 import com.example.proxyshare.data.randomPassword
 import com.example.proxyshare.engine.EngineState
@@ -75,6 +82,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
     var changedWhileRunning by rememberSaveable { mutableStateOf(false) }
+    // Manual update check: transient state, reset on rotation.
+    var updateState by remember { mutableStateOf(UpdateCheckState.IDLE) }
+    var latestRelease by remember { mutableStateOf<LatestRelease?>(null) }
     val running = state is EngineState.Running
     val appVersion = remember {
         runCatching {
@@ -478,8 +488,63 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 )
                 SettingRow(
                     title = stringResource(R.string.about_repo),
-                    subtitle = "github.com/Elli0t0/ProxyShare",
+                    subtitle = "github.com/$GITHUB_REPO",
                 )
+                // Manual update check: one tap, no background polling.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val statusText = when (updateState) {
+                        UpdateCheckState.CHECKING -> stringResource(R.string.update_checking)
+                        UpdateCheckState.UP_TO_DATE ->
+                            stringResource(R.string.update_up_to_date, appVersion)
+                        UpdateCheckState.AVAILABLE ->
+                            stringResource(
+                                R.string.update_available,
+                                latestRelease?.tag?.removePrefix("v") ?: "?",
+                            )
+                        UpdateCheckState.FAILED -> stringResource(R.string.update_failed)
+                        UpdateCheckState.IDLE -> null
+                    }
+                    if (statusText != null) {
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                    if (updateState == UpdateCheckState.AVAILABLE) {
+                        OutlinedButton(onClick = {
+                            val url = latestRelease?.url ?: return@OutlinedButton
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }) {
+                            Text(stringResource(R.string.update_open))
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            updateState = UpdateCheckState.CHECKING
+                            scope.launch {
+                                val release = fetchLatestRelease(GITHUB_REPO)
+                                if (release == null) {
+                                    updateState = UpdateCheckState.FAILED
+                                } else if (isNewer(release.tag, appVersion)) {
+                                    latestRelease = release
+                                    updateState = UpdateCheckState.AVAILABLE
+                                } else {
+                                    updateState = UpdateCheckState.UP_TO_DATE
+                                }
+                            }
+                        },
+                        enabled = updateState != UpdateCheckState.CHECKING,
+                    ) {
+                        Text(stringResource(R.string.check_updates))
+                    }
+                }
             }
         }
     }
@@ -491,6 +556,9 @@ private fun protocolSubtitle(key: String): Int = when (key) {
     "socks4" -> R.string.protocol_socks4_subtitle
     else -> R.string.protocol_socks5_subtitle
 }
+
+/** Transient state of the manual update check (not saved across rotations). */
+private enum class UpdateCheckState { IDLE, CHECKING, UP_TO_DATE, AVAILABLE, FAILED }
 
 @Composable
 private fun NumberField(

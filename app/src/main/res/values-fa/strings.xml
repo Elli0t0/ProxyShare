@@ -110,6 +110,12 @@
     <string name="about_app_version">نسخه برنامه</string>
     <string name="about_engine_version">نسخه موتور</string>
     <string name="about_repo">مخزن</string>
+    <string name="check_updates">بررسی به‌روزرسانی</string>
+    <string name="update_checking">در حال بررسی…</string>
+    <string name="update_up_to_date">به‌روز هستید (%1$s)</string>
+    <string name="update_available">%1$s در دسترس است</string>
+    <string name="update_open">باز کردن</string>
+    <string name="update_failed">بررسی ممکن نشد</string>
     <string name="bind_label">آدرس شنود</string>
     <string name="bind_all">همه اینترفیس‌ها</string>
     <string name="auth_label">احراز هویت</string>

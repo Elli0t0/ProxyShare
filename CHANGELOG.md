@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.8 — update check
+
+- Settings > About has a manual "Check for updates" button (no
+  background polling, no new permission — INTERNET was already
+  there). It GETs /repos/Elli0t0/ProxyShare/releases/latest (8 s
+  timeout, User-Agent set — GitHub requires it), parses tag_name
+  and html_url with org.json, and shows "Checking…", "You're up to
+  date (0.3.8)", "0.3.9 is available" with an "Open" button (opens
+  the release page), or "Couldn't check" on any failure. The repo
+  is now one constant (GITHUB_REPO) shared by the About row and the
+  check. isNewer() compares major.minor.patch numerically (0.3.10
+  > 0.3.9, equal -> false, garbage -> false). Tests: 5 new
+  (isNewer + parseLatestRelease); org.json:json is a test-only
+  dependency so the parser test can run on the JVM (android.jar's
+  org.json is a stub in unit tests) — zero APK cost.
+
 ## 0.3.7 — exit-IP check, engine speed, notification
 
 - Exit-IP check is robust now: it tries the custom URL first (if
@@ -19,8 +35,9 @@
   more than a few hundred KB). libproxyshare_engine.so in the
   published APK, before (v0.3.6, opt-level "z"): arm64-v8a 606,776
   B (592.6 KB), armeabi-v7a 433,888 B (423.7 KB), x86_64 652,032 B
-  (636.8 KB). After (v0.3.7, opt-level 3): measured from the
-  published APK once this build goes green.
+  (636.8 KB). After (v0.3.7, opt-level 3): arm64-v8a 729,112 B
+  (712.0 KB), armeabi-v7a 537,176 B (524.6 KB), x86_64 780,240 B
+  (762.0 KB) — about +20% per ABI, as expected for -O3.
 - Notification shows the live client count without polling: it
   rebuilds on activeConns changes only ("2 clients · SOCKS :1080",
   plurals resource en+fa, 0 clients shows the old text) and

@@ -169,4 +169,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
+    // Test-only: the real org.json, so parseLatestRelease can run on
+    // the JVM (android.jar's org.json is a stub in unit tests).
+    testImplementation(libs.org.json)
 }
