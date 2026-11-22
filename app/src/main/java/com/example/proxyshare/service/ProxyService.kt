@@ -51,7 +51,9 @@ class ProxyService : Service() {
         }
         createChannel()
         ServiceCompat.startForeground(
-            this, NOTIF_ID, buildNotification(notificationText(ProxyController.settings.value)),
+            this, NOTIF_ID, buildNotification(
+                notificationText(ProxyController.settings.value, ProxyController.activeConns.value),
+            ),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
         observeWakeLock()
@@ -118,28 +120,50 @@ class ProxyService : Service() {
                 if (ProxyController.state.value is EngineState.Running) {
                     getSystemService(NotificationManager::class.java)?.notify(
                         NOTIF_ID,
-                        buildNotification(notificationText(settings)),
+                        buildNotification(
+                            notificationText(settings, ProxyController.activeConns.value),
+                        ),
+                    )
+                }
+            }
+        }
+        // Live client count in the notification, on count changes only
+        // (no timer, no polling): the count is event-driven already.
+        serviceScope.launch {
+            ProxyController.activeConns.collect { n ->
+                if (ProxyController.state.value is EngineState.Running) {
+                    getSystemService(NotificationManager::class.java)?.notify(
+                        NOTIF_ID,
+                        buildNotification(
+                            notificationText(ProxyController.settings.value, n),
+                        ),
                     )
                 }
             }
         }
     }
 
-    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. */
-    private fun notificationText(settings: AppSettings): String {
-        if (!settings.separatePorts) return getString(R.string.notif_running, settings.port)
-        val http = if ("http" in settings.protocols) settings.httpPort else null
-        val socks = if ("socks4" in settings.protocols || "socks5" in settings.protocols) {
-            settings.socksPort
+    /** "HTTP :8080 · SOCKS :1080", only the enabled protocols, or the single port. With clients connected, the count leads: "2 clients · SOCKS :1080". */
+    private fun notificationText(settings: AppSettings, clients: Int): String {
+        val base = if (!settings.separatePorts) {
+            getString(R.string.notif_running, settings.port)
         } else {
-            null
+            val http = if ("http" in settings.protocols) settings.httpPort else null
+            val socks = if ("socks4" in settings.protocols || "socks5" in settings.protocols) {
+                settings.socksPort
+            } else {
+                null
+            }
+            when {
+                http != null && socks != null -> getString(R.string.notif_running_ports, http, socks)
+                http != null -> getString(R.string.notif_running_http, http)
+                socks != null -> getString(R.string.notif_running_socks, socks)
+                else -> getString(R.string.notif_running, settings.port)
+            }
         }
-        return when {
-            http != null && socks != null -> getString(R.string.notif_running_ports, http, socks)
-            http != null -> getString(R.string.notif_running_http, http)
-            socks != null -> getString(R.string.notif_running_socks, socks)
-            else -> getString(R.string.notif_running, settings.port)
-        }
+        if (clients <= 0) return base
+        val count = resources.getQuantityString(R.plurals.notif_clients, clients, clients)
+        return "$count · $base"
     }
 
     /** Show the error text (kept visible) and stop the service. */
@@ -175,6 +199,8 @@ class ProxyService : Service() {
             .setContentText(text)
             .setContentIntent(tapPending)
             .setOngoing(ongoing)
+            // Count updates must never buzz.
+            .setOnlyAlertOnce(true)
             .addAction(R.drawable.ic_proxy_status, getString(R.string.notif_stop), stopPending)
             .build()
     }

@@ -284,6 +284,16 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         )
                     },
                 )
+                // Exit-IP check URL: empty means the built-in endpoint
+                // list. Applies to the next check, no restart needed.
+                OutlinedTextField(
+                    value = settings.exitIpUrl,
+                    onValueChange = { saveLive { updateExitIpUrl(it) } },
+                    label = { Text(stringResource(R.string.exit_ip_url_label)) },
+                    placeholder = { Text(stringResource(R.string.exit_ip_url_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             // Protocols.

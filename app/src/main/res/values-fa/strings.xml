@@ -13,6 +13,10 @@
     <string name="notif_running_ports">HTTP :%1$d · SOCKS :%2$d</string>
     <string name="notif_running_http">HTTP :%1$d</string>
     <string name="notif_running_socks">SOCKS :%1$d</string>
+    <plurals name="notif_clients">
+        <item quantity="one">%1$d مشتری</item>
+        <item quantity="other">%1$d مشتری</item>
+    </plurals>
     <string name="notif_stop">توقف</string>
     <string name="notif_explain_title">اعلان‌ها</string>
     <string name="notif_explain_text">پروکسی‌شیر هنگام اجرای پروکسی یک اعلان دائمی با دکمه توقف نشان می‌دهد. برای دیدن آن، اعلان‌ها را مجاز کنید.</string>
@@ -48,6 +52,11 @@
     <string name="check_exit_ip">بررسی IP خروجی</string>
     <string name="check_exit_ip_checking">در حال بررسی…</string>
     <string name="check_exit_ip_failed">بررسی ناموفق بود</string>
+    <string name="exit_ip_dns_blocked">به نظر می‌رسد DNS در این شبکه مسدود یا فیلتر شده است</string>
+    <string name="exit_ip_timeout">پاسخی نرسید (مهلت تمام شد)</string>
+    <string name="exit_ip_unreachable">به هیچ سرویس بررسی دسترسی نیست</string>
+    <string name="exit_ip_url_label">آدرس بررسی IP خروجی</string>
+    <string name="exit_ip_url_hint">خالی = فهرست داخلی</string>
     <string name="connections_speed">↑ %1$s/s · ↓ %2$s/s</string>
     <string name="connections_empty">هنوز کلاینتی نیست</string>
     <string name="connections_count">%1$d اتصال</string>

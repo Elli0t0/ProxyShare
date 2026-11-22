@@ -13,6 +13,10 @@
     <string name="notif_running_ports">HTTP :%1$d · SOCKS :%2$d</string>
     <string name="notif_running_http">HTTP :%1$d</string>
     <string name="notif_running_socks">SOCKS :%1$d</string>
+    <plurals name="notif_clients">
+        <item quantity="one">%1$d client</item>
+        <item quantity="other">%1$d clients</item>
+    </plurals>
     <string name="notif_stop">Stop</string>
     <string name="notif_explain_title">Notifications</string>
     <string name="notif_explain_text">ProxyShare shows an ongoing notification while the proxy runs, with a Stop action. Allow notifications to see it.</string>
@@ -48,6 +52,11 @@
     <string name="check_exit_ip">Check exit IP</string>
     <string name="check_exit_ip_checking">Checking…</string>
     <string name="check_exit_ip_failed">Check failed</string>
+    <string name="exit_ip_dns_blocked">DNS looks blocked or filtered on this network</string>
+    <string name="exit_ip_timeout">No answer (timeout)</string>
+    <string name="exit_ip_unreachable">Could not reach any check service</string>
+    <string name="exit_ip_url_label">Exit IP check URL</string>
+    <string name="exit_ip_url_hint">Empty = built-in list</string>
     <string name="connections_speed">↑ %1$s/s · ↓ %2$s/s</string>
     <string name="connections_empty">No clients yet</string>
     <string name="connections_count">%1$d connections</string>

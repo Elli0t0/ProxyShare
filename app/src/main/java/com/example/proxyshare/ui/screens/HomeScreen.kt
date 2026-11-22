@@ -72,6 +72,8 @@ import com.example.proxyshare.data.IfKind
 import com.example.proxyshare.data.NetIf
 import com.example.proxyshare.data.rankInterfaces
 import com.example.proxyshare.engine.EngineState
+import com.example.proxyshare.service.ExitIpFailure
+import com.example.proxyshare.service.ExitIpResult
 import com.example.proxyshare.service.OutboundMode
 import com.example.proxyshare.service.ProxyController
 import com.example.proxyshare.service.ProxyService
@@ -310,11 +312,25 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 onCheckExitIp = {
                     exitIpChecking = true
                     scope.launch {
-                        val result = ProxyController.checkExitIp()
-                        exitIpOk = result.isSuccess
-                        exitIpText = result.getOrNull()
-                            ?: result.exceptionOrNull()?.message
-                            ?: context.getString(R.string.check_exit_ip_failed)
+                        when (val result = ProxyController.checkExitIp()) {
+                            is ExitIpResult.Success -> {
+                                exitIpOk = true
+                                exitIpText = "${result.ip} · " +
+                                    context.getString(
+                                        modeLabel(settings.outboundMode.toOutboundMode()),
+                                    )
+                            }
+                            is ExitIpResult.Failure -> {
+                                exitIpOk = false
+                                exitIpText = context.getString(
+                                    when (result.failure) {
+                                        ExitIpFailure.DNS_BLOCKED -> R.string.exit_ip_dns_blocked
+                                        ExitIpFailure.TIMEOUT -> R.string.exit_ip_timeout
+                                        ExitIpFailure.UNREACHABLE -> R.string.exit_ip_unreachable
+                                    },
+                                )
+                            }
+                        }
                         exitIpChecking = false
                     }
                 },
@@ -675,7 +691,7 @@ private fun OutboundCard(
     }
 }
 
-@Composable
+/** Map an outbound mode to its label string resource. Plain function (no composable APIs) so the exit-IP check can call it from a coroutine. */
 private fun modeLabel(mode: OutboundMode): Int = when (mode) {
     OutboundMode.DEFAULT -> R.string.mode_default
     OutboundMode.VPN_ONLY -> R.string.mode_vpn_only

@@ -50,7 +50,11 @@ the version number, not a silent retry.
 
 ## Outbound and exit IP
 
-- [ ] "Check exit IP" shows the phone's public IP.
+- [ ] "Check exit IP" shows the phone's public IP, with the mode next to it ("1.2.3.4 · VPN only").
+- [ ] On a network that filters DNS, the check still works (it falls through to the 1.1.1.1 endpoint) instead of showing a raw "Failed to connect … 127.0.0.1" error.
+- [ ] With every check service unreachable, the chip shows a friendly message ("DNS looks blocked…", "No answer (timeout)" or "Could not reach any check service"), never raw exception text.
+- [ ] Settings > Server has an "Exit IP check URL" field; empty means the built-in list, a custom URL is tried first.
+- [ ] With a client connected, the notification reads "1 client · …"; with two, "2 clients · …". It never buzzes when the count changes.
 - [ ] VPN only: with the VPN on, traffic goes through it; turning the
       VPN off stops the proxy (kill switch) instead of falling back.
 - [ ] Wi-Fi / Mobile mode: the proxy starts only when that network is

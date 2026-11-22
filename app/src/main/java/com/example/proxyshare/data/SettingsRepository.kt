@@ -38,8 +38,8 @@ data class AppSettings(
     val startOnBoot: Boolean = false,
     /** Outbound network mode: "default", "vpn_only", "wifi" or "mobile". Kotlin-only: never sent to the engine. */
     val outboundMode: String = "default",
-    /** URL used for the manual exit-IP check. Kotlin-only: never sent to the engine. */
-    val exitIpUrl: String = "https://api.ipify.org",
+    /** URL used for the manual exit-IP check; empty = the built-in endpoint list. Kotlin-only: never sent to the engine. */
+    val exitIpUrl: String = "",
 )
 
 /** Map settings to the engine's key=value config text (see docs/ENGINE_API.md). */

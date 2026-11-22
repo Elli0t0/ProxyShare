@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.7 — exit-IP check, engine speed, notification
+
+- Exit-IP check is robust now: it tries the custom URL first (if
+  set) then api.ipify.org, icanhazip.com and
+  https://1.1.1.1/cdn-cgi/trace (the IP literal works even when DNS
+  is filtered), 5 s per endpoint, and only accepts a real IPv4/IPv6
+  address from the body (parseExitIp: plain IP or the ip= line of a
+  trace body — an HTML error page is never shown as the IP). On
+  failure the chip shows a friendly message instead of raw exception
+  text: "DNS looks blocked or filtered on this network" (any failure
+  mentioned 127.0.0.1 / 0.0.0.0 or UnknownHostException), "No answer
+  (timeout)", or "Could not reach any check service". On success the
+  network mode shows next to the IP ("1.2.3.4 · VPN only").
+  Settings > Server has an "Exit IP check URL" field now (empty =
+  built-in list, default changed from api.ipify.org to empty).
+- Rust release profile: opt-level "z" -> 3 (throughput matters
+  more than a few hundred KB). libproxyshare_engine.so in the
+  published APK, before (v0.3.6, opt-level "z"): arm64-v8a 606,776
+  B (592.6 KB), armeabi-v7a 433,888 B (423.7 KB), x86_64 652,032 B
+  (636.8 KB). After (v0.3.7, opt-level 3): measured from the
+  published APK once this build goes green.
+- Notification shows the live client count without polling: it
+  rebuilds on activeConns changes only ("2 clients · SOCKS :1080",
+  plurals resource en+fa, 0 clients shows the old text) and
+  setOnlyAlertOnce(true) so it never buzzes.
+
 ## 0.3.6 — visual fixes only
 
 - Double top inset fixed: the Scaffold no longer adds the status
