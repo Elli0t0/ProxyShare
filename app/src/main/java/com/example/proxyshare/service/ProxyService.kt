@@ -39,6 +39,7 @@ class ProxyService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var wakeLock: PowerManager.WakeLock? = null
     private var observing = false
+    private var idleObserving = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,6 +63,7 @@ class ProxyService : Service() {
         )
         observeWakeLock()
         observeState()
+        observeIdleStop()
         ProxyController.start()
         return START_STICKY
     }
@@ -94,6 +96,46 @@ class ProxyService : Service() {
                     }
                 }
         }
+    }
+
+    /**
+     * Stop the proxy after the chosen idle time with no connections.
+     * collectLatest cancels the countdown the moment a connection
+     * opens (or the setting changes); the timer is inexact.
+     */
+    private fun observeIdleStop() {
+        if (idleObserving) return
+        idleObserving = true
+        serviceScope.launch {
+            combine(
+                ProxyController.activeConns,
+                ProxyController.settings.map { it.idleStopMinutes },
+            ) { n, m -> n to m }
+                .collectLatest { (n, minutes) ->
+                    if (n == 0 && minutes > 0) {
+                        delay(minutes * 60_000L)
+                        ProxyController.stop()
+                        showIdleStopped()
+                        stopSelf()
+                    }
+                }
+        }
+    }
+
+    /** One-line notification after an idle auto-stop. A separate, non-ongoing notification (no Stop action: the proxy is already stopped) that survives the service going away. */
+    private fun showIdleStopped() {
+        val tapIntent = Intent(this, MainActivity::class.java)
+        val tapPending = PendingIntent.getActivity(
+            this, 0, tapIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_proxy_status)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.idle_stopped_notification))
+            .setContentIntent(tapPending)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)?.notify(IDLE_NOTIF_ID, notification)
     }
 
     /**
@@ -259,6 +301,7 @@ class ProxyService : Service() {
     companion object {
         const val ACTION_STOP = "com.example.proxyshare.STOP"
         const val NOTIF_ID = 1
+        const val IDLE_NOTIF_ID = 2
         const val CHANNEL_ID = "proxy_running"
     }
 }

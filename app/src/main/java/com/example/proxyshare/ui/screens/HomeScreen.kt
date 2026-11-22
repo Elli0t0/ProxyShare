@@ -434,6 +434,14 @@ private fun AddressCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // The carrier address is the only one: keep the
+                    // hotspot button visible so the laptop can connect.
+                    FilledTonalButton(
+                        onClick = { openHotspotSettings(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.open_hotspot_settings))
+                    }
                 }
             }
             // Toggle + VPN rows sit 8dp apart: the old TextButton's

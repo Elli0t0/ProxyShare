@@ -253,6 +253,7 @@ impl Engine {
         let config = match Config::parse(config_text) {
             Ok(config) => config,
             Err(e) => {
+                crate::diag::log_error(format!("start failed: {e}"));
                 self.transition_to_error(e.clone());
                 return Err(e);
             }
@@ -269,6 +270,7 @@ impl Engine {
         let specs = match listener_specs(&config) {
             Ok(specs) => specs,
             Err(e) => {
+                crate::diag::log_error(format!("start failed: {e}"));
                 self.transition_to_error(e.clone());
                 return Err(e);
             }
@@ -276,6 +278,7 @@ impl Engine {
         let rt = match runtime() {
             Ok(rt) => rt,
             Err(e) => {
+                crate::diag::log_error(format!("start failed: {e}"));
                 self.transition_to_error(e.clone());
                 return Err(e);
             }
@@ -288,6 +291,7 @@ impl Engine {
             match Self::bind_listener(config.bind_addr, spec.port) {
                 Ok(listener) => std_listeners.push(listener),
                 Err(e) => {
+                    crate::diag::log_error(format!("bind failed: {e}"));
                     self.transition_to_error(e.clone());
                     return Err(e);
                 }
@@ -317,6 +321,7 @@ impl Engine {
                             .await;
                     }
                     Err(e) => {
+                        crate::diag::log_error(format!("failed to wrap listener: {e}"));
                         engine.transition_to_error(format!("failed to wrap listener: {e}"));
                     }
                 }
@@ -324,9 +329,11 @@ impl Engine {
         }
         inner.accept_tasks = accept_tasks;
         inner.shutdown_tx = Some(shutdown_tx);
+        let summary = config.summary();
         inner.config = Some(config);
         inner.state = EngineState::Running;
         drop(inner);
+        crate::diag::log_info(format!("started: {summary}"));
         self.emit(Event::StateChanged(EngineState::Running));
         Ok(())
     }
@@ -364,6 +371,7 @@ impl Engine {
             wait_for_task(task);
         }
         if was_running {
+            crate::diag::log_info("stopped".to_string());
             self.emit(Event::StateChanged(EngineState::Stopped));
         }
     }
@@ -441,12 +449,14 @@ impl Engine {
     /// only. A handler reports auth failure as a PermissionDenied
     /// error; other errors are not auth failures.
     fn record_auth_failure(&self, record: &ConnRecord, result: &std::io::Result<()>) {
-        if matches!(result, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied)
-            && self
+        if matches!(result, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied) {
+            crate::diag::log_warn(format!("auth failed from {}", record.client_ip));
+            if self
                 .auth_guard
                 .record_failure(record.client_ip, Instant::now())
-        {
-            self.emit(Event::AuthFailed(record.client_ip));
+            {
+                self.emit(Event::AuthFailed(record.client_ip));
+            }
         }
     }
 }
@@ -546,7 +556,8 @@ async fn accept_loop(
                     Ok((stream, peer)) => {
                         engine.try_spawn_connection(stream, peer, &config, allowed.clone(), shutdown.clone());
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        crate::diag::log_warn(format!("accept error: {e}"));
                         if *shutdown.borrow() {
                             break;
                         }
@@ -580,6 +591,10 @@ async fn handle_connection(
     let _guard = ActiveGuard(std::sync::Arc::clone(&engine));
     if engine.auth_guard.is_blocked(peer.ip(), Instant::now()) {
         // Blocked: close without reading any protocol byte.
+        crate::diag::log_warn(format!(
+            "auth blocked {} (too many failures)",
+            peer.ip()
+        ));
         engine.emit(Event::AuthFailed(peer.ip()));
         return;
     }

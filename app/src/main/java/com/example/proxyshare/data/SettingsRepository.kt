@@ -38,6 +38,8 @@ data class AppSettings(
     val batterySaver: Boolean = true,
     /** Start the proxy automatically after boot (default OFF). Kotlin-only: never sent to the engine. */
     val startOnBoot: Boolean = false,
+    /** Stop the proxy after this many idle minutes (0 = never). Kotlin-only: never sent to the engine. */
+    val idleStopMinutes: Int = 0,
     /** Outbound network mode: "default", "vpn_only", "wifi" or "mobile". Kotlin-only: never sent to the engine. */
     val outboundMode: String = "default",
     /** URL used for the manual exit-IP check; empty = the built-in endpoint list. Kotlin-only: never sent to the engine. */
@@ -134,6 +136,7 @@ class SettingsRepository(context: Context) {
             keepScreenOn = prefs[Keys.KEEP_SCREEN_ON] ?: defaults.keepScreenOn,
             batterySaver = prefs[Keys.BATTERY_SAVER] ?: defaults.batterySaver,
             startOnBoot = prefs[Keys.START_ON_BOOT] ?: defaults.startOnBoot,
+            idleStopMinutes = prefs[Keys.IDLE_STOP_MINUTES] ?: defaults.idleStopMinutes,
             outboundMode = prefs[Keys.OUTBOUND_MODE] ?: defaults.outboundMode,
             exitIpUrl = prefs[Keys.EXIT_IP_URL] ?: defaults.exitIpUrl,
         )
@@ -230,6 +233,10 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.START_ON_BOOT] = value }
     }
 
+    suspend fun updateIdleStopMinutes(value: Int) {
+        dataStore.edit { it[Keys.IDLE_STOP_MINUTES] = value }
+    }
+
     suspend fun updateOutboundMode(value: String) {
         dataStore.edit { it[Keys.OUTBOUND_MODE] = value }
     }
@@ -259,6 +266,7 @@ class SettingsRepository(context: Context) {
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val BATTERY_SAVER = booleanPreferencesKey("battery_saver")
         val START_ON_BOOT = booleanPreferencesKey("start_on_boot")
+        val IDLE_STOP_MINUTES = intPreferencesKey("idle_stop_minutes")
         val OUTBOUND_MODE = stringPreferencesKey("outbound_mode")
         val EXIT_IP_URL = stringPreferencesKey("exit_ip_url")
     }

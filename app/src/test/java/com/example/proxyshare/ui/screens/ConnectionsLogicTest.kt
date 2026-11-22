@@ -191,4 +191,25 @@ class ConnectionsLogicTest {
     fun sessionLogJsonEmptyIsEmptyArray() {
         assertEquals("[]", sessionLogJson(emptyList()))
     }
+
+    @Test
+    fun filterSessionLogMatchesHostOrClientAndBlockedOnly() {
+        val log = listOf(
+            sessionLogEntry(conn().copy(host = "ads.example.com"), closedAtMs = 1000L),
+            sessionLogEntry(
+                conn().copy(host = "news.example.com", client = "192.168.1.9"),
+                closedAtMs = 2000L,
+            ),
+            sessionLogEntry(
+                conn().copy(host = "ads.example.com", blocked = true),
+                closedAtMs = 3000L,
+            ),
+        )
+        assertEquals(3, filterSessionLog(log, "", false).size)
+        assertEquals(2, filterSessionLog(log, "ads", false).size)
+        assertEquals(1, filterSessionLog(log, "192.168.1.9", false).size)
+        assertEquals(1, filterSessionLog(log, "", true).size)
+        assertEquals(1, filterSessionLog(log, "ADS", true).size)
+        assertEquals(0, filterSessionLog(log, "nope", false).size)
+    }
 }

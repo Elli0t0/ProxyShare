@@ -273,6 +273,7 @@ async fn connect(
     record.set_target(host.clone(), port);
     if crate::config::domain_blocked(&config.blocked_domains, &host) {
         record.mark_blocked();
+        crate::diag::log_info(format!("blocked {host} from {}", record.client_ip));
         let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
         return Ok(());
     }
@@ -285,14 +286,16 @@ async fn connect(
         .await
     {
         Ok(stream) => stream,
-        Err(ConnectError::Dns(_)) => {
+        Err(ConnectError::Dns(e)) => {
+            crate::diag::log_warn(format!("could not resolve {host}: {e}"));
             let _ = send_error_reply(&mut client, REP_HOST_UNREACHABLE).await;
             return Err(io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
                 format!("could not resolve {host}"),
             ));
         }
-        Err(ConnectError::Connect(_)) => {
+        Err(ConnectError::Connect(e)) => {
+            crate::diag::log_warn(format!("could not connect to {host}:{port}: {e}"));
             let _ = send_error_reply(&mut client, REP_CONNECTION_REFUSED).await;
             return Err(io::Error::new(
                 io::ErrorKind::ConnectionRefused,

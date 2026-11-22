@@ -119,6 +119,22 @@ fun pushLogEntry(
 ): List<SessionLogEntry> =
     (log + entry).takeLast(max.coerceAtLeast(1))
 
+/**
+ * Filter the session log by a host/client query (case-insensitive)
+ * and/or blocked-only. The caller reverses for newest-first display.
+ */
+fun filterSessionLog(
+    log: List<SessionLogEntry>,
+    query: String,
+    blockedOnly: Boolean,
+): List<SessionLogEntry> {
+    val q = query.trim().lowercase()
+    return log.filter { e ->
+        (!blockedOnly || e.blocked) &&
+            (q.isEmpty() || e.host.lowercase().contains(q) || e.client.lowercase().contains(q))
+    }
+}
+
 /** The session log as a JSON array (hand-built: no serialization library). */
 fun sessionLogJson(log: List<SessionLogEntry>): String = buildString {
     append('[')

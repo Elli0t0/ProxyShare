@@ -127,4 +127,42 @@ class EngineTest {
         assertEquals(EngineState.Error("boom"), engineStateFromName("error", "boom"))
         assertEquals(EngineState.Stopped, engineStateFromName("weird"))
     }
+
+    @Test
+    fun parsesDiagLogLines() {
+        val text = "1794500000000\tINFO\tstarted: bind 0.0.0.0:8080\n" +
+            "1794500001000\tWARN\tblocked ads.example.com from 192.168.1.5\n" +
+            "bad line\n" +
+            "1794500002000\tERROR\tbind failed: address in use\n"
+        val lines = parseDiagLog(text)
+        assertEquals(3, lines.size)
+        assertEquals(DiagLine(1794500000000L, "INFO", "started: bind 0.0.0.0:8080"), lines[0])
+        assertEquals(
+            DiagLine(1794500001000L, "WARN", "blocked ads.example.com from 192.168.1.5"),
+            lines[1],
+        )
+        assertEquals(
+            DiagLine(1794500002000L, "ERROR", "bind failed: address in use"),
+            lines[2],
+        )
+        assertEquals(emptyList<DiagLine>(), parseDiagLog(""))
+    }
+
+    @Test
+    fun redactLogHidesCredentials() {
+        assertEquals("auth_pass=***", redactLog("auth_pass=s3cret"))
+        assertEquals("token=*** rest", redactLog("token=abc123 rest"))
+        assertEquals(
+            "see http://***@host:8080/x",
+            redactLog("see http://user:pass@host:8080/x"),
+        )
+        assertEquals(
+            "Proxy-Authorization: ***",
+            redactLog("Proxy-Authorization: Basic dXNlcjpwYXNz"),
+        )
+        assertEquals(
+            "blocked ads.example.com from 192.168.1.5",
+            redactLog("blocked ads.example.com from 192.168.1.5"),
+        )
+    }
 }

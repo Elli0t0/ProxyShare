@@ -1,5 +1,6 @@
 package com.example.proxyshare.ui.screens
 
+import com.example.proxyshare.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -66,5 +67,15 @@ class SettingsLogicTest {
         )
         assertEquals(listOf("ads.example.com"), added2)
         assertEquals(0, invalid2)
+    }
+
+    @Test
+    fun idleStopLabelResMapsMinutes() {
+        assertEquals(R.string.idle_stop_off, idleStopLabelRes(0))
+        assertEquals(R.string.idle_stop_15, idleStopLabelRes(15))
+        assertEquals(R.string.idle_stop_30, idleStopLabelRes(30))
+        assertEquals(R.string.idle_stop_60, idleStopLabelRes(60))
+        assertEquals(R.string.idle_stop_120, idleStopLabelRes(120))
+        assertEquals(R.string.idle_stop_off, idleStopLabelRes(999))
     }
 }

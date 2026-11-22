@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.4.2 — in-app session log, diagnostics, idle auto-stop
+
+- Session log screen (Connections menu > "Session log"): the last 500
+  closed connections, newest first — host:port, protocol, client,
+  bytes up/down, duration, and a "Blocked" badge. Search filters
+  host/client; a "Blocked only" chip; Export JSON and Clear in the
+  menu. Tapping a row's host copies it; long-pressing a hostname
+  offers "Block this domain" (same validator as the list; IP literals
+  are not offered, the engine never matches them). The restart
+  banner flag moved to ProxyController so the block action sets the
+  same banner Settings shows.
+- Engine diagnostics log: the Rust engine had no log lines at all, so
+  a ring buffer of the last 300 lines was added (rust/engine/src/diag.rs,
+  `ts_ms<TAB>LEVEL<TAB>message`) with a `nativeDiagLog` JNI getter
+  (documented in docs/ENGINE_API.md). Logged: engine start/stop with
+  a config summary (never the password or the username), bind errors,
+  accept errors, upstream connect failures (host, reason), blocked
+  requests, auth failures (client IP only). Settings > Diagnostics
+  shows it monospace, selectable, auto-scrolled to the bottom, with
+  Refresh and Share (ShareCompat text/plain; `redactLog` strips
+  key=value secrets, userinfo in URLs and Proxy-Authorization
+  headers before sharing).
+- Idle auto-stop: Settings > "Battery & startup" > "Stop automatically
+  when idle" — Off (default) / 15 min / 30 min / 1 h / 2 h (radio list
+  in a dialog; OptionRow does not fit 5 options). ProxyService stops
+  the engine and the service when activeConns stays 0 for the chosen
+  time and posts "ProxyShare stopped (idle)"; the countdown cancels
+  the moment a connection opens.
+- Small things: the Connections empty state (running, 0 clients) now
+  shows the exact address to type on the laptop with a Copy button
+  instead of only the generic hint; when the only address is the
+  carrier one, the "Open hotspot settings" button stays visible on
+  Home too.
+- Tests: Kotlin 103 -> 109 (diag log parsing + redaction, idle-stop
+  setting + label, session-log filter; the 0.4.1 figure of 105 was 2
+  high — recounting the test files gives 103 before this step). Rust
+  97 -> 102 (ring buffer order, 300-line cap, message sanitization,
+  config summary never includes credentials).
+
 ## 0.4.1 — bugs and visual fixes
 
 - The app is English-only now: res/values-fa/ is deleted, and no

@@ -215,6 +215,7 @@ pub async fn handle(
         record.set_target(host.clone(), port);
         if crate::config::domain_blocked(&config.blocked_domains, &host) {
             record.mark_blocked();
+            crate::diag::log_info(format!("blocked {host} from {}", record.client_ip));
             let _ = send_status(&mut client, 403, "Forbidden").await;
             return Ok(());
         }
@@ -224,6 +225,7 @@ pub async fn handle(
         {
             Ok(stream) => stream,
             Err(e) => {
+                crate::diag::log_warn(format!("connect to {host}:{port} failed: {e}"));
                 let _ = send_status(&mut client, 502, "Bad Gateway").await;
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionRefused,
@@ -262,6 +264,7 @@ pub async fn handle(
     record.set_target(host.clone(), port);
     if crate::config::domain_blocked(&config.blocked_domains, &host) {
         record.mark_blocked();
+        crate::diag::log_info(format!("blocked {host} from {}", record.client_ip));
         let _ = send_status(&mut client, 403, "Forbidden").await;
         return Ok(());
     }
@@ -271,6 +274,7 @@ pub async fn handle(
     {
         Ok(stream) => stream,
         Err(e) => {
+            crate::diag::log_warn(format!("connect to {host}:{port} failed: {e}"));
             let _ = send_status(&mut client, 502, "Bad Gateway").await;
             return Err(io::Error::new(
                 io::ErrorKind::ConnectionRefused,

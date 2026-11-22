@@ -20,6 +20,12 @@ phone's active VPN. No root.
 - Quick Settings tile to start/stop the proxy from the shade; session
   log (last 500 closed connections, metadata only) with JSON export;
   optional "Start on boot".
+- In-app session log screen (Connections menu): search, "Blocked only"
+  filter, tap a host to copy it, long-press a hostname to block it.
+- Engine diagnostics log (Settings > Diagnostics): last 300 lines,
+  monospace, selectable, auto-scrolled, shareable with credentials
+  redacted; optional idle auto-stop (15 min / 30 min / 1 h / 2 h) in
+  "Battery & startup".
 - Outbound DNS runs on the selected network (API 29+), addresses are
   tried IPv4 first with each attempt capped at 5 s.
 

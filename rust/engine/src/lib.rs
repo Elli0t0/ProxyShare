@@ -12,7 +12,8 @@
 //! [`cidr`] (client network ranges), [`engine`] (runtime, listener,
 //! accept loop, handle table), [`sniffer`] (first-byte protocol sniff),
 //! [`auth`] (proxy authentication), [`connector`] (outbound
-//! connections), [`relay`] (byte pumps between client and target),
+//! connections), [`diag`] (in-process diagnostics ring buffer, last
+//! 300 log lines), [`relay`] (byte pumps between client and target),
 //! [`socks4`] (SOCKS4/4a CONNECT), [`socks5`] (SOCKS5 negotiation and
 //! CONNECT), [`udp`] (SOCKS5 UDP datagram header parse/build, pure
 //! functions), [`http`] (plain HTTP forwarding and CONNECT tunnels),
@@ -23,6 +24,7 @@ pub mod auth;
 pub mod cidr;
 pub mod config;
 pub mod connector;
+pub mod diag;
 pub mod engine;
 pub mod http;
 pub mod listener;
@@ -44,7 +46,7 @@ use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
 /// The engine version string, e.g. "engine 0.2.4".
-pub const ENGINE_VERSION: &str = "engine 0.4.1";
+pub const ENGINE_VERSION: &str = "engine 0.4.2";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -172,6 +174,24 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSna
             None => to_jstring(&env, ""),
         }
     }));
+    match result {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// The diagnostics log text (see docs/ENGINE_API.md): one
+/// `ts_ms<TAB>LEVEL<TAB>message` line per entry, oldest first, or ""
+/// when empty. Never lets a panic or exception cross the FFI boundary.
+#[no_mangle]
+pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDiagLog<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| to_jstring(&env, &crate::diag::snapshot_text())));
     match result {
         Ok(s) => s,
         Err(_) => {

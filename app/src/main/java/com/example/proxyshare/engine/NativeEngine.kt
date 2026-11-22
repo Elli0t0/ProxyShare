@@ -36,6 +36,10 @@ object NativeEngine {
     @JvmStatic
     external fun nativeSnapshot(handle: Long): String
 
+    /** The diagnostics log text (see docs/ENGINE_API.md), or "" when empty. */
+    @JvmStatic
+    external fun nativeDiagLog(): String
+
     /** Register the callback that receives engine events. */
     @JvmStatic
     external fun nativeSetListener(handle: Long, listener: EngineListener)

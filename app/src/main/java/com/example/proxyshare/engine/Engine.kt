@@ -114,6 +114,36 @@ fun parseSnapshot(text: String): Snapshot? {
 /** One event from the engine (see docs/ENGINE_API.md for the type numbers). */
 data class EngineEvent(val type: Int, val a: String, val b: String)
 
+/** One diagnostics line from the engine ring buffer. */
+data class DiagLine(val tsMs: Long, val level: String, val msg: String)
+
+/**
+ * Parse the diagnostics wire text from nativeDiagLog (see
+ * docs/ENGINE_API.md): one `ts_ms<TAB>LEVEL<TAB>message` line each,
+ * oldest first. Malformed lines are skipped, never a crash.
+ */
+fun parseDiagLog(text: String): List<DiagLine> =
+    text.lineSequence().filter { it.isNotEmpty() }.mapNotNull { line ->
+        val f = line.split('\t')
+        if (f.size != 3) return@mapNotNull null
+        val ts = f[0].toLongOrNull() ?: return@mapNotNull null
+        DiagLine(ts, f[1], f[2])
+    }.toList()
+
+/**
+ * Redact anything resembling credentials from log text before sharing.
+ * The engine never logs the password, but this is the safety net for
+ * the share path: key=value secrets, userinfo in URLs, and
+ * Proxy-Authorization headers are replaced with ***.
+ */
+fun redactLog(text: String): String {
+    var out = text
+    out = out.replace(Regex("(?i)(password|passwd|pass|pwd|token|secret)[=:][^\\s]*"), "$1=***")
+    out = out.replace(Regex("://[^\\s/@:]+:[^\\s/@]+@"), "://***@")
+    out = out.replace(Regex("(?i)Proxy-Authorization:[^\\n]*"), "Proxy-Authorization: ***")
+    return out
+}
+
 /**
  * Kotlin wrapper that owns the native engine handle.
  *

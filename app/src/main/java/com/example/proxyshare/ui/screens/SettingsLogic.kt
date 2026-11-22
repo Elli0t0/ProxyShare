@@ -1,5 +1,7 @@
 package com.example.proxyshare.ui.screens
 
+import com.example.proxyshare.R
+
 /** Port 1024-65535, or null when the text is not a valid port. */
 fun validatePort(text: String): Int? = text.toIntOrNull()?.takeIf { it in 1024..65535 }
 
@@ -44,4 +46,13 @@ fun parseBlockedList(text: String, existing: List<String> = emptyList()): Pair<L
         }
     }
     return added to invalid
+}
+
+/** Map idle-stop minutes to its label string. 0 = off. */
+fun idleStopLabelRes(minutes: Int): Int = when (minutes) {
+    15 -> R.string.idle_stop_15
+    30 -> R.string.idle_stop_30
+    60 -> R.string.idle_stop_60
+    120 -> R.string.idle_stop_120
+    else -> R.string.idle_stop_off
 }

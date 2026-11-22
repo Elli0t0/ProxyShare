@@ -1,5 +1,7 @@
 package com.example.proxyshare.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
@@ -30,6 +32,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -95,6 +98,7 @@ fun ConnectionsScreen(
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }
+    var showSessionLog by rememberSaveable { mutableStateOf(false) }
     var prevConns by remember { mutableStateOf<Map<Long, ConnInfo>>(emptyMap()) }
     var prevTimeMs by remember { mutableLongStateOf(0L) }
     var speeds by remember { mutableStateOf<Map<Long, Speed>>(emptyMap()) }
@@ -111,6 +115,11 @@ fun ConnectionsScreen(
     val running = state is EngineState.Running
     val peakUp = remember(history) { history.maxOfOrNull { it.upBps } ?: 0L }
     val peakDown = remember(history) { history.maxOfOrNull { it.downBps } ?: 0L }
+
+    if (showSessionLog) {
+        SessionLogScreen(onBack = { showSessionLog = false }, modifier = modifier)
+        return
+    }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -136,6 +145,13 @@ fun ConnectionsScreen(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.session_log_title)) },
+                        onClick = {
+                            showMenu = false
+                            showSessionLog = true
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.export_log)) },
                         onClick = {
@@ -266,15 +282,15 @@ fun ConnectionsScreen(
                             )
                         } else if (advertise != null) {
                             Text(
-                                text = stringResource(
-                                    R.string.connections_empty_hint,
-                                    advertise,
-                                ),
+                                text = advertise,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontFamily = FontFamily.Monospace,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            OutlinedButton(onClick = { copyText(context, advertise) }) {
+                                Text(stringResource(R.string.copy))
+                            }
                         }
                     }
                 }
@@ -300,7 +316,7 @@ fun ConnectionsScreen(
 }
 
 /** Write the session log as JSON into the cache dir and share it via FileProvider. */
-private fun exportSessionLog(context: Context, log: List<SessionLogEntry>) {
+fun exportSessionLog(context: Context, log: List<SessionLogEntry>) {
     val file = File(context.cacheDir, "proxyshare-session-log.json")
     file.writeText(sessionLogJson(log))
     val uri = FileProvider.getUriForFile(
@@ -313,6 +329,11 @@ private fun exportSessionLog(context: Context, log: List<SessionLogEntry>) {
         .setStream(uri)
         .setChooserTitle(R.string.export_log)
         .startChooser()
+}
+
+private fun copyText(context: Context, text: String) {
+    val cm = context.getSystemService(ClipboardManager::class.java)
+    cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
 }
 
 @Composable

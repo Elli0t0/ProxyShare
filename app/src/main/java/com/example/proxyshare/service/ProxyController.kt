@@ -9,6 +9,7 @@ import com.example.proxyshare.data.SettingsRepository
 import com.example.proxyshare.engine.Engine
 import com.example.proxyshare.engine.EngineEvent
 import com.example.proxyshare.engine.EngineState
+import com.example.proxyshare.engine.NativeEngine
 import com.example.proxyshare.engine.Snapshot
 import com.example.proxyshare.engine.parseConnLine
 import com.example.proxyshare.ui.screens.SessionLogEntry
@@ -30,6 +31,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Live speed sample, in bytes per second. */
@@ -178,6 +180,25 @@ object ProxyController {
     /** Clear the session log (Connections overflow menu). */
     fun clearSessionLog() {
         _sessionLog.value = emptyList()
+    }
+
+    private val _restartNeeded = MutableStateFlow(false)
+    /** An engine setting changed while running: the proxy needs a restart to apply it. Cleared on start. */
+    val restartNeeded: StateFlow<Boolean> = _restartNeeded.asStateFlow()
+
+    /** Mark that an engine setting changed while running (shows the restart banner in Settings). */
+    fun markRestartNeeded() {
+        _restartNeeded.value = true
+    }
+
+    /** Clear the restart flag (the banner's Restart button). */
+    fun clearRestartNeeded() {
+        _restartNeeded.value = false
+    }
+
+    /** The engine diagnostics log text (see docs/ENGINE_API.md), read on IO. */
+    suspend fun diagLog(): String = withContext(Dispatchers.IO) {
+        NativeEngine.nativeDiagLog()
     }
 
     private val _history = MutableStateFlow<List<SpeedSample>>(emptyList())
@@ -366,6 +387,8 @@ object ProxyController {
                 networkJob = null
                 stopSpeedSampler()
             } else {
+                // A fresh start applies the current settings.
+                _restartNeeded.value = false
                 startSpeedSampler()
             }
         } catch (_: Exception) {

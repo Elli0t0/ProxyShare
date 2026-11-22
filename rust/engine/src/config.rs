@@ -112,6 +112,31 @@ impl Config {
         }
         Ok(config)
     }
+
+    /// One-line config summary for the diagnostics log. Never includes
+    /// the password (or the username): only whether auth is on.
+    pub fn summary(&self) -> String {
+        let port_str = |p: Option<u16>| match p {
+            Some(p) => p.to_string(),
+            None => "-".to_string(),
+        };
+        let ports = match (self.http_port, self.socks_port) {
+            (None, None) => format!("port {}", self.port),
+            (h, s) => format!("http_port {} socks_port {}", port_str(h), port_str(s)),
+        };
+        let mut protocols: Vec<&str> =
+            self.protocols.iter().map(|p| p.as_str()).collect();
+        protocols.sort_unstable();
+        format!(
+            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains",
+            self.bind_addr,
+            protocols.join("+"),
+            self.private_only,
+            self.max_connections,
+            if self.auth_user.is_some() { "on" } else { "off" },
+            self.blocked_domains.len(),
+        )
+    }
 }
 
 fn opt_string(value: &str) -> Option<String> {
@@ -384,6 +409,33 @@ connect_timeout_s = 5
         assert!(!domain_blocked(&list, ""));
         assert!(!domain_blocked(&[], "example.com"));
         assert!(!domain_blocked(&[], "1.2.3.4"));
+    }
+
+    #[test]
+    fn summary_never_includes_credentials() {
+        let config = Config::parse(
+            "auth_user = alice\nauth_pass = s3cret\nblocked_domains = ads.example.com",
+        )
+        .expect("config parses");
+        let summary = config.summary();
+        assert!(summary.contains("auth on"));
+        assert!(summary.contains("1 blocked domains"));
+        assert!(!summary.contains("alice"));
+        assert!(!summary.contains("s3cret"));
+    }
+
+    #[test]
+    fn summary_shows_ports_and_protocols() {
+        let config = Config::parse("http_port = 8080\nsocks_port = 1080").expect("config parses");
+        let summary = config.summary();
+        assert!(summary.contains("bind 0.0.0.0"));
+        assert!(summary.contains("http_port 8080"));
+        assert!(summary.contains("socks_port 1080"));
+        assert!(summary.contains("protocols http+socks4+socks5"));
+        assert!(summary.contains("auth off"));
+        let single = Config::default().summary();
+        assert!(single.contains("port 1080"));
+        assert!(!single.contains("http_port"));
     }
 
     #[test]

@@ -130,6 +130,18 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun idleStopMinutesDefaultIsOff() {
+        assertEquals(0, AppSettings().idleStopMinutes)
+    }
+
+    @Test
+    fun idleStopMinutesDoesNotChangeEngineConfig() {
+        val base = AppSettings(authPass = "secret").toEngineConfig()
+        val changed = AppSettings(authPass = "secret", idleStopMinutes = 30).toEngineConfig()
+        assertEquals(base, changed)
+    }
+
+    @Test
     fun randomPasswordHasLengthAndChars() {
         val password = randomPassword()
         assertEquals(12, password.length)

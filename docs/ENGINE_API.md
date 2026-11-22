@@ -25,7 +25,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
 - Rust: `pub extern "system" fn ... (env: JNIEnv, _class: JClass) -> jstring`
-- Returns the engine version string, e.g. `"engine 0.4.0"`.
+- Returns the engine version string, e.g. `"engine 0.4.2"`.
 - On failure (including a Rust panic) it returns null instead of letting an
   exception cross the FFI boundary; every JNI entry point wraps its body in
   `catch_unwind`.
@@ -45,6 +45,7 @@ second parameter.
 | `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
+| `nativeDiagLog(): String` | reads the diagnostics ring buffer | The log text (below), or `""` when empty. Takes no handle: the buffer is global, not per-engine. |
 | `nativeSetListener(h: Long, listener: EngineListener)` | builds a `JniListener` and registers it as the engine's event sink | `EngineListener` is a Kotlin interface `{ fun onEvent(type: Int, a: String, b: String) }`. The Rust side caches the `JavaVM`, holds a `GlobalRef` to the listener and caches the `onEvent` method ID. Events are sent from the tokio worker threads ("ps-worker") with `attach_current_thread`; `onEvent` runs on that worker thread, so the Kotlin side must post to the main thread before touching UI or Compose state. |
 
 ## Server (0.0.4, extended in 0.0.5)
@@ -326,6 +327,30 @@ Example:
 running	1024	2048	1
 1	192.168.1.5	example.com	443	http	1794500000000	1024	2048	0
 ```
+
+## Diagnostics log (0.4.2)
+
+The engine keeps an in-process ring buffer of the last 300 log lines
+(`rust/engine/src/diag.rs`); Kotlin reads it with `nativeDiagLog()`.
+One line per entry, oldest first:
+
+```
+ts_ms<TAB>LEVEL<TAB>message
+```
+
+- `ts_ms` is the unix time in milliseconds, `LEVEL` one of `INFO`,
+  `WARN`, `ERROR`.
+- The message never contains a tab or newline (sanitized on write).
+- Logged: engine start/stop (start carries a config summary: bind
+  address, ports, protocols, private-only, max connections, auth
+  on/off, blocked-domain count — never the password or the username),
+  bind errors, accept errors, upstream connect failures (target
+  host:port and the reason), blocked requests (host and client IP),
+  auth failures (client IP only).
+- The log never contains traffic payloads (no MITM) or credentials.
+  Kotlin redacts anything resembling credentials (`redactLog` in
+  `engine/Engine.kt`) before the log is shared from Settings >
+  Diagnostics.
 
 ## Events
 
