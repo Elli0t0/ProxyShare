@@ -163,9 +163,11 @@ mod tests {
         }
         assert_eq!(MAX_LINES, log.len());
         let text = log.snapshot_text();
-        assert!(!text.contains("line 0\n"));
-        assert!(text.contains("line 1\n"));
-        assert!(text.contains(&format!("line {MAX_LINES}\n")));
+        // The wire format now ends each line with "\t<count>\n", so the
+        // message is followed by a tab, not a newline.
+        assert!(!text.contains("line 0\t"));
+        assert!(text.contains("line 1\t"));
+        assert!(text.contains(&format!("line {MAX_LINES}\t")));
     }
 
     #[test]
