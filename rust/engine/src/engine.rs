@@ -1196,7 +1196,8 @@ mod tests {
             .await
             .expect("connect");
         assert_closed(&mut second).await;
-        let head = engine.snapshot().lines().next().expect("snapshot head");
+        let snap = engine.snapshot();
+        let head = snap.lines().next().expect("snapshot head");
         let fields: Vec<&str> = head.split('\t').collect();
         assert_eq!(fields[3], "1", "one connection active: {head}");
         assert_eq!(fields[4], "1", "one limit rejection: {head}");
@@ -1215,7 +1216,8 @@ mod tests {
             .await
             .expect("connect");
         assert_closed(&mut client).await;
-        let head = engine.snapshot().lines().next().expect("snapshot head");
+        let snap = engine.snapshot();
+        let head = snap.lines().next().expect("snapshot head");
         let fields: Vec<&str> = head.split('\t').collect();
         assert_eq!(fields[6], "1", "one disallowed rejection: {head}");
         engine.stop();
@@ -1227,7 +1229,8 @@ mod tests {
             .await
             .expect("connect");
         assert_closed(&mut client).await;
-        let head = engine.snapshot().lines().next().expect("snapshot head");
+        let snap = engine.snapshot();
+        let head = snap.lines().next().expect("snapshot head");
         let fields: Vec<&str> = head.split('\t').collect();
         assert_eq!(fields[5], "1", "one denied rejection: {head}");
         engine.stop();
