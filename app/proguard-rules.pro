@@ -12,6 +12,6 @@
 
 # JNI: the engine calls EngineListener.onEvent from Rust, so the interface
 # and its method must survive R8 with their names intact.
--keep class com.example.proxyshare.engine.EngineListener {
+-keep class io.github.elli0t0.proxyshare.engine.EngineListener {
     *;
 }

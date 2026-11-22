@@ -20,7 +20,7 @@ arm64-v8a, armeabi-v7a and x86_64 (release) or arm64-v8a and x86_64 (debug).
 
 ### `nativeVersion(): String`
 
-- JNI name: `Java_com_example_proxyshare_engine_NativeEngine_nativeVersion`
+- JNI name: `Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeVersion`
 - Kotlin: `@JvmStatic external fun nativeVersion(): String` on
   `object NativeEngine` (`@JvmStatic` matters: the Rust side takes a
   `JClass` second parameter, so the method must be static.)
@@ -599,5 +599,5 @@ and the snapshot instead). Types 10–13 are the edge events from
   metadata (client IP, target host:port, protocol, byte counts) may be
   recorded or passed to Kotlin.
 - `unsafe` only at the FFI boundary, each block commented.
-- The Kotlin package name is fixed (`com.example.proxyshare`): JNI symbol
+- The Kotlin package name is fixed (`io.github.elli0t0.proxyshare`): JNI symbol
   names depend on it.

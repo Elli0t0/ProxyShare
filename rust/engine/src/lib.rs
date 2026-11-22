@@ -51,7 +51,7 @@ use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
 /// The engine version string, e.g. "engine 0.5.2".
-pub const ENGINE_VERSION: &str = "engine 0.5.3";
+pub const ENGINE_VERSION: &str = "engine 0.5.5";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -73,7 +73,7 @@ fn from_jstring(env: &mut JNIEnv, s: &JString) -> Result<String, String> {
 /// Never lets a panic or exception cross the FFI boundary: a panic is caught
 /// and a null jstring is returned instead.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeVersion<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeVersion<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jstring {
@@ -91,7 +91,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeVer
 /// Create an engine and return its handle (> 0). Destroy it with
 /// nativeDestroy. Returns 0 if the engine could not be created.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeCreate<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeCreate<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jlong {
@@ -101,7 +101,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeCre
 /// Start the engine with a "key=value" config text. Returns "" on success,
 /// or an error text on failure. An unknown handle is an error.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeStart<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeStart<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -129,7 +129,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSta
 
 /// Stop the engine. Safe on a stopped or unknown handle (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeStop<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeStop<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -143,7 +143,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSto
 /// docs/ENGINE_API.md). Safe on an unknown handle or a malformed IP
 /// (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeCloseClient<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeCloseClient<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -162,7 +162,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeClo
 /// Existing connections are NOT closed: call nativeCloseClient for
 /// that. Safe on an unknown handle or a malformed IP (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDenyClient<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeDenyClient<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -180,7 +180,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDen
 /// Lift a block set by nativeDenyClient. Safe on an unknown handle or
 /// a malformed IP (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeAllowClient<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeAllowClient<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -199,7 +199,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeAll
 /// connections. 0 means the default network. Safe on a stopped or
 /// unknown handle (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSetOutboundNetwork<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSetOutboundNetwork<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -214,7 +214,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSet
 /// docs/ENGINE_API.md). Only consulted when the config sets
 /// require_vpn. Safe on a stopped or unknown handle (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSetVpnActive<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSetVpnActive<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -228,7 +228,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSet
 /// Stop the engine if running and release its handle. An unknown handle
 /// is a no-op.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDestroy<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeDestroy<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -239,7 +239,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDes
 /// The engine snapshot text (see docs/ENGINE_API.md), or "" for an
 /// unknown handle.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSnapshot<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSnapshot<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -262,7 +262,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSna
 /// The last 120 seconds of speed as "up,down;up,down;…" oldest first
 /// (see docs/ENGINE_API.md), or "" for an unknown handle.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeHistory<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeHistory<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -287,7 +287,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeHis
 /// docs/ENGINE_API.md), or "" when nothing is newer or the handle is
 /// unknown.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSessionLog<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSessionLog<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -310,7 +310,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSes
 
 /// Drop every session-log record. Safe on an unknown handle (no-op).
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSessionLogClear<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSessionLogClear<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -324,7 +324,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSes
 /// `ts_ms<TAB>LEVEL<TAB>message<TAB>count` line per entry, oldest first,
 /// or "" when empty. Never lets a panic or exception cross the FFI boundary.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDiagLog<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeDiagLog<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jstring {
@@ -341,7 +341,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDia
 /// Clear the diagnostics ring buffer (Logs screen "Clear"). No handle:
 /// the buffer is global, not per-engine.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDiagClear<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeDiagClear<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) {
@@ -359,7 +359,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeDia
 /// no validation logic of its own. Takes no handle: validation is
 /// pure, not per-engine.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeValidate<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeValidate<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     kind: jint,
@@ -385,7 +385,7 @@ pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeVal
 /// EngineListener; the Rust side keeps it as a GlobalRef. An unknown
 /// handle, or a listener that cannot be kept, is a silent no-op.
 #[no_mangle]
-pub extern "system" fn Java_com_example_proxyshare_engine_NativeEngine_nativeSetListener<'local>(
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSetListener<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,

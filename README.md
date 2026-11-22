@@ -68,7 +68,7 @@ The Kotlin ↔ Rust contract is in `docs/ENGINE_API.md`.
 
 Kotlin, Jetpack Compose, Material 3, Coroutines, DataStore. No Hilt.
 No Room unless a step says so. minSdk 26, targetSdk 36, single module,
-package `com.example.proxyshare`.
+package `io.github.elli0t0.proxyshare`.
 
 ## Versions
 

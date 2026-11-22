@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.5 — package renamed to io.github.elli0t0.proxyshare
+
+- Pure rename, no behavior change: the Kotlin package (and the app
+  id) is now `io.github.elli0t0.proxyshare` instead of
+  `com.example.proxyshare` — namespace and `applicationId` in
+  `app/build.gradle.kts`, every Kotlin file moved to
+  `java/io/github/elli0t0/proxyshare/...` with its `package` and
+  `import` lines updated, all 18 JNI exports in `rust/engine/src/lib.rs`
+  renamed to `Java_io_github_elli0t0_proxyshare_engine_NativeEngine_*`,
+  the `EngineListener` class path in `rust/engine/src/listener.rs`
+  updated, the ProGuard keep rule, README and `docs/ENGINE_API.md`
+  updated. `AndroidManifest.xml` needed no change (all relative
+  names, FileProvider authority is `${applicationId}`).
+- **This build installs as a NEW app**: the old
+  `com.example.proxyshare` install must be uninstalled manually, and
+  settings do not carry over. A unit test asserts
+  `BuildConfig.APPLICATION_ID == "io.github.elli0t0.proxyshare"`.
+
 ## 0.5.3 — Wi-Fi lock while clients are connected
 
 - ProxyService now holds a `WifiManager.WifiLock` (`WIFI_MODE_FULL_LOW_LATENCY`

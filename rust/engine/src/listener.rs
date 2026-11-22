@@ -35,7 +35,7 @@ impl JniListener {
             .map_err(|e| format!("failed to keep the listener: {e}"))?;
         let method = env
             .get_method_id(
-                "com/example/proxyshare/engine/EngineListener",
+                "io/github/elli0t0/proxyshare/engine/EngineListener",
                 "onEvent",
                 ON_EVENT_SIG,
             )

@@ -11,11 +11,11 @@ val appVersionName = "$versionMajor.$versionMinor.$versionPatch"
 val appVersionCode = (project.findProperty("VERSION_CODE") as? String)?.toIntOrNull() ?: 1
 
 android {
-    namespace = "com.example.proxyshare"
+    namespace = "io.github.elli0t0.proxyshare"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.proxyshare"
+        applicationId = "io.github.elli0t0.proxyshare"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
