@@ -174,7 +174,7 @@ fun LogsScreen(modifier: Modifier = Modifier) {
             }
             OptionRow(
                 options = listOf(
-                    0 to stringResource(R.string.nav_connections),
+                    0 to stringResource(R.string.logs_history),
                     1 to stringResource(R.string.logs_engine),
                     2 to stringResource(R.string.logs_usage),
                 ),

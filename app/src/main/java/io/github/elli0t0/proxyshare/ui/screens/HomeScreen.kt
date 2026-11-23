@@ -30,14 +30,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -314,20 +311,24 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 socks5On = "socks5" in settings.protocols,
             )
 
-            // Credentials card, only when auth is on; otherwise a compact chip.
+            // Credentials card, only when auth is on.
             if (settings.authEnabled) {
                 CredentialsCard(user = settings.authUser, password = settings.authPass)
-            } else if (settings.privateOnly) {
-                InfoChip(text = stringResource(R.string.no_password_private))
             }
 
-            // Protocol chips: read-only, so only the enabled ones show,
-            // each with a leading check.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if ("http" in settings.protocols) ProtocolChip("HTTP")
-                if ("socks4" in settings.protocols) ProtocolChip("SOCKS4")
-                if ("socks5" in settings.protocols) ProtocolChip("SOCKS5")
+            // One chip joining protocol, password state and private-only.
+            // It fills the width so long text wraps instead of shrinking.
+            val statusParts = buildList {
+                if ("http" in settings.protocols) add("HTTP")
+                if ("socks4" in settings.protocols) add("SOCKS4")
+                if ("socks5" in settings.protocols) add("SOCKS5")
+                add(if (settings.authEnabled) "Password" else "No password")
+                if (settings.privateOnly) add("private networks only")
             }
+            InfoChip(
+                text = statusParts.joinToString(" · "),
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             // Outbound mode + exit-IP check.
             OutboundCard(
@@ -746,27 +747,3 @@ private fun modeLabel(mode: OutboundMode): Int = when (mode) {
     OutboundMode.MOBILE -> R.string.mode_mobile
 }
 
-@Composable
-private fun ProtocolChip(label: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Check,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-    }
-}

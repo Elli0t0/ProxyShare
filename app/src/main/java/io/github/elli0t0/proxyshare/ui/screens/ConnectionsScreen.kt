@@ -49,7 +49,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
@@ -240,22 +239,6 @@ fun ConnectionsScreen(
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.clickable { showRejectedInfo = true },
-                    )
-                }
-            } else {
-                // Stopped: dimmed chart with an overlay, no radar state.
-                Box(contentAlignment = Alignment.Center) {
-                    TrafficChart(
-                        history = history,
-                        current = speed,
-                        modifier = Modifier.alpha(0.4f),
-                        downloadLimitBps = settings.limitDownKbps * 1024L,
-                        uploadLimitBps = settings.limitUpKbps * 1024L,
-                    )
-                    Text(
-                        text = stringResource(R.string.proxy_stopped),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

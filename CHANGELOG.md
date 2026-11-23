@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.6 — small UI cleanup
+
+- Connections: when the proxy is stopped the dimmed "Live traffic"
+  chart card with the "Proxy stopped" overlay is gone entirely — only
+  the centered "Proxy stopped — start it from Home" message and the
+  "Go to Home" button remain. The Active / Session up / Session down
+  stat cards stay, and nothing changes while running.
+- Logs: the first tab is now "History" (new `logs_history` string);
+  the bottom bar still says "Connections". Empty text unchanged.
+- Home: the separate "No password · private networks only" chip and
+  the protocol chips are now one chip, e.g. "SOCKS5 · No password ·
+  private networks only" — protocol parts (HTTP / SOCKS4 / SOCKS5),
+  password state and private-only are joined with " · ", and the chip
+  fills the width so long text wraps instead of shrinking. The
+  Credentials card when auth is on is unchanged; the now-unused
+  `ProtocolChip` and the `no_password_private` string are deleted.
+  (`proxy_stopped` stays: Home's hero status text still uses it.)
+- No behavior or setting changes. No test referenced the old texts.
+
 ## 0.5.5 — package renamed to io.github.elli0t0.proxyshare
 
 - Pure rename, no behavior change: the Kotlin package (and the app

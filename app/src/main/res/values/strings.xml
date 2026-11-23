@@ -31,6 +31,7 @@
     <string name="nav_settings">Settings</string>
     <string name="nav_logs">Logs</string>
     <string name="logs_engine">Engine</string>
+    <string name="logs_history">History</string>
     <string name="log_search">Search log</string>
     <string name="log_filter_all">All</string>
     <string name="log_filter_warn">Warn+</string>
@@ -215,7 +216,6 @@
     <string name="laptop_firefox_steps">Settings → Network Settings → Manual proxy. Choose SOCKS v5, enter the host and port, and tick "Proxy DNS when using SOCKS v5".</string>
     <string name="auth_no_password">No password</string>
     <string name="auth_no_password_note">Anyone who can reach this port can use your connection. Keep \'Private networks only\' on.</string>
-    <string name="no_password_private">No password · private networks only</string>
     <string name="vpn_down_bypass">VPN is not connected — laptop traffic may bypass it</string>
     <string name="vpn_down_paused">VPN is not connected — sharing is paused</string>
     <string name="notif_vpn_channel_name">VPN watchdog</string>
