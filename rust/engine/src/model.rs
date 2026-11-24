@@ -319,7 +319,7 @@ mod tests {
                 (500, 600),
                 false
             ),
-            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\t0\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
+            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\t0\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0\tproxy"
         );
     }
 

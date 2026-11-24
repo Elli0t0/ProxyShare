@@ -3698,13 +3698,14 @@ mod tests {
         let lines: Vec<&str> = log.lines().collect();
         assert_eq!(lines.len(), 1, "one closed connection: {log}");
         let fields: Vec<&str> = lines[0].split('\t').collect();
-        assert_eq!(fields.len(), 10, "log id + 9 connection fields");
+        assert_eq!(fields.len(), 11, "log id + 10 connection fields");
         assert_eq!(fields[0], "1", "first log id is 1");
         assert_eq!(fields[2], "127.0.0.1");
         assert_eq!(fields[3], "127.0.0.1");
         assert_eq!(fields[4], echo_port.to_string());
         assert_eq!(fields[7], "5");
         assert_eq!(fields[8], "5");
+        assert_eq!(fields[10], "proxy", "route is the last field");
         assert_eq!(engine.session_log_since(1), "", "nothing newer than 1");
         engine.clear_session_log();
         assert_eq!(engine.session_log_since(0), "", "cleared");
