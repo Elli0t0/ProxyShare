@@ -127,7 +127,7 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
                 ) {
                     items(
                         entries,
-                        key = { e -> "${e.closedAtMs}|${e.client}|${e.host}|${e.port}|${e.up}|${e.down}" },
+                        key = { it.id },
                     ) { entry ->
                         SessionLogRow(
                             entry = entry,

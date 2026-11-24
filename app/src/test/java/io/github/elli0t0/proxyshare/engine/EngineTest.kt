@@ -182,17 +182,37 @@ class EngineTest {
             "1794500002000\tERROR\tbind failed: address in use\n"
         val lines = parseDiagLog(text)
         assertEquals(3, lines.size)
-        assertEquals(DiagLine(1794500000000L, "INFO", "started: bind 0.0.0.0:8080", 1), lines[0])
+        // id is creation-assigned, so the expected line takes the parsed line's id.
+        assertEquals(DiagLine(1794500000000L, "INFO", "started: bind 0.0.0.0:8080", 1, lines[0].id), lines[0])
         assertEquals(
-            DiagLine(1794500001000L, "WARN", "blocked ads.example.com from 192.168.1.5", 3),
+            DiagLine(1794500001000L, "WARN", "blocked ads.example.com from 192.168.1.5", 3, lines[1].id),
             lines[1],
         )
         // A pre-0.4.4 line without the count field still parses, as count 1.
         assertEquals(
-            DiagLine(1794500002000L, "ERROR", "bind failed: address in use", 1),
+            DiagLine(1794500002000L, "ERROR", "bind failed: address in use", 1, lines[2].id),
             lines[2],
         )
         assertEquals(emptyList<DiagLine>(), parseDiagLog(""))
+    }
+
+    @Test
+    fun identicalDiagLinesHaveDistinctIds() {
+        // Same content three times: the LazyColumn keys must still be 3 distinct ids.
+        val lines = listOf(
+            DiagLine(1000L, "INFO", "same line", 1),
+            DiagLine(1000L, "INFO", "same line", 1),
+            DiagLine(1000L, "INFO", "same line", 1),
+        )
+        assertEquals(3, lines.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun mergedDiagLineKeepsFirstId() {
+        val first = DiagLine(1000L, "INFO", "same line", 1)
+        val merged = first.copy(count = 2)
+        assertEquals(first.id, merged.id)
+        assertEquals(2, merged.count)
     }
 
     @Test

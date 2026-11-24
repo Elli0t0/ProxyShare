@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
 /** One connection from the engine snapshot. */
 data class ConnInfo(
@@ -152,7 +153,26 @@ fun parseHistory(text: String): List<SpeedSample> {
 data class EngineEvent(val type: Int, val a: String, val b: String)
 
 /** One diagnostics line from the engine ring buffer. `count` is how many times this exact line repeated in a row (1 = no repeat). */
-data class DiagLine(val tsMs: Long, val level: String, val msg: String, val count: Int = 1)
+data class DiagLine(
+    val tsMs: Long,
+    val level: String,
+    val msg: String,
+    val count: Int = 1,
+    /**
+     * Process-wide unique id, assigned at creation. Identical lines
+     * (same ms, same text) must still get distinct LazyColumn keys,
+     * or the list crashes with "Key ... was already used". It is a
+     * constructor property so copy() — the merge path — keeps the old
+     * id; tests compare content fields, or pass the parsed id in.
+     */
+    val id: Long = LogIds.next(),
+)
+
+/** Process-wide ids for log lines, so LazyColumn keys stay unique even for identical lines. */
+object LogIds {
+    private val n = AtomicLong()
+    fun next(): Long = n.incrementAndGet()
+}
 
 /**
  * Parse the diagnostics wire text from nativeDiagLog (see

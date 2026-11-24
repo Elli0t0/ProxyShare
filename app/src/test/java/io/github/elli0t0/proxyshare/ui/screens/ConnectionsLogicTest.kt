@@ -139,6 +139,14 @@ class ConnectionsLogicTest {
     }
 
     @Test
+    fun identicalSessionLogEntriesHaveDistinctIds() {
+        // Same connection closed three times in the same ms with 0 bytes
+        // moved: the LazyColumn keys must still be 3 distinct ids.
+        val entries = List(3) { sessionLogEntry(conn(), closedAtMs = 4000) }
+        assertEquals(3, entries.map { it.id }.toSet().size)
+    }
+
+    @Test
     fun sessionLogEntryCopiesBlockedFlag() {
         assertEquals(true, sessionLogEntry(conn().copy(blocked = true), closedAtMs = 4000).blocked)
         assertEquals(false, sessionLogEntry(conn(), closedAtMs = 4000).blocked)

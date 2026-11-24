@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.7 — fix Logs crash on duplicate LazyColumn keys
+
+- Bug: scrolling Logs → History (and the Engine tab) crashed with
+  `IllegalArgumentException: Key ... was already used` when two
+  entries were identical (same ms, same host, 0 bytes; or repeated
+  engine lines), because both LazyColumns keyed rows by concatenated
+  content.
+- Fix: `SessionLogEntry` (ConnectionsLogic.kt) and `DiagLine`
+  (engine/Engine.kt) each gained `val id: Long`, assigned at creation
+  from a process-wide `LogIds` AtomicLong counter, and both
+  LazyColumns now use `key = { it.id }`. The id is a constructor
+  property with a default, so `copy()` — the merge path — keeps the
+  old id and existing call sites still compile. (Your sample put it
+  in the class body, but then a merged line's `copy()` would get a
+  fresh id; the constructor placement is what makes the merge test
+  pass. Existing `==` tests were updated instead — see below.)
+- Tests: 3 identical `SessionLogEntry` objects and 3 identical
+  `DiagLine` objects each produce 3 distinct ids; a merged
+  `DiagLine.copy(count = 2)` keeps the first id. The three
+  `parsesDiagLogLines` `assertEquals` now pass the parsed line's id
+  into the expected object. Tests: Kotlin 134 → 137, Rust 170.
+- Sweep (item 6): the only other `key = {` in ui/ is the clients
+  list (`key = { it.client }`), already unique — groups are built
+  by `groupByClient`, one group per client. Blocked domains and
+  allowed clients render with plain `for` loops in a Column, no
+  LazyColumn keys at all. Nothing else to change.
+
 ## 0.5.6 — small UI cleanup
 
 - Connections: when the proxy is stopped the dimmed "Live traffic"

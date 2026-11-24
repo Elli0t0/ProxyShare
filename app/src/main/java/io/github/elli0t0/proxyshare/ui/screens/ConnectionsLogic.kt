@@ -3,6 +3,7 @@ package io.github.elli0t0.proxyshare.ui.screens
 import io.github.elli0t0.proxyshare.data.IfKind
 import io.github.elli0t0.proxyshare.data.NetIf
 import io.github.elli0t0.proxyshare.engine.ConnInfo
+import io.github.elli0t0.proxyshare.engine.LogIds
 import java.util.Locale
 
 /** Live speed of one connection, in bytes per second. */
@@ -95,6 +96,12 @@ data class SessionLogEntry(
     val closedAtMs: Long,
     /** True when the connection was refused for a blocked domain. */
     val blocked: Boolean = false,
+    /**
+     * Process-wide unique id, assigned at creation. Identical entries
+     * (same ms, same host, 0 bytes) must still get distinct LazyColumn
+     * keys, or the list crashes with "Key ... was already used".
+     */
+    val id: Long = LogIds.next(),
 )
 
 /** Build a log entry from a closed connection (type 3 event payload, parsed as a connection line). */

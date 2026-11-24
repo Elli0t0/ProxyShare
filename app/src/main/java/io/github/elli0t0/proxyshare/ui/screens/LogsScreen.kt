@@ -282,7 +282,7 @@ private fun EngineLogContent(modifier: Modifier = Modifier) {
             ) {
                 items(
                     visible,
-                    key = { line -> "${line.tsMs}|${line.level}|${line.msg}" },
+                    key = { it.id },
                 ) { line ->
                     DiagRow(line)
                 }
