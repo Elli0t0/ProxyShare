@@ -200,6 +200,9 @@ impl Event {
 /// speed_up/speed_down are the latest 1 s samples (EMA, bytes/s).
 /// pac_ok is false when the PAC server failed to bind (0.6.5); true
 /// when it is off or up. See docs/ENGINE_API.md.
+// The 8 parameters are the snapshot's 8 parts; grouping them into a
+// struct would churn the engine and test call sites for no benefit.
+#[allow(clippy::too_many_arguments)]
 pub fn snapshot_text(
     state: &EngineState,
     totals: (u64, u64),
