@@ -2144,6 +2144,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_connect_to_private_target_is_403_when_blocked() {
+        let (engine, sink, port) = start_test_engine("block_private = true");
+        let mut client = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = connect_request("127.0.0.1", 80, None);
+        client.write_all(request.as_bytes()).await.expect("write");
+        let response = read_head_response(&mut client).await;
+        assert!(
+            response.starts_with(b"HTTP/1.1 403"),
+            "expected a 403 response, got: {}",
+            String::from_utf8_lossy(&response)
+        );
+        let closed = wait_closed(&sink).await;
+        assert!(closed.blocked, "closed connection is marked blocked");
+        assert_eq!(closed.host, "127.0.0.1");
+        assert_eq!(closed.port, 80);
+        engine.stop();
+    }
+
+    #[tokio::test]
     async fn require_vpn_refuses_http_connect_with_403() {
         let (engine, _sink, port) = start_test_engine("require_vpn = true");
         let echo_port = start_echo_server().await;

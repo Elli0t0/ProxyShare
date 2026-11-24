@@ -14,7 +14,7 @@ phone's active VPN. No root.
   address, port listening, password) with a Fix button for each
   failing item.
 - Settings: port, bind address, protocols, auth, allowed clients, blocked
-  domains, limits, theme (System/Light/Dark).
+  domains, block private networks, limits, theme (System/Light/Dark).
 - Backup: export and import all settings as a JSON file
   (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill

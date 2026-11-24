@@ -103,6 +103,8 @@
     <string name="backup_import">Import settings</string>
     <string name="backup_imported">Settings imported</string>
     <string name="backup_bad_file">Not a ProxyShare settings file</string>
+    <string name="block_private_label">Block private networks</string>
+    <string name="block_private_subtitle">Stop clients from reaching devices on your phone's local network</string>
     <string name="port_label">Port</string>
     <string name="port_error">Port must be 1024–65535</string>
     <string name="validation_empty">Enter a value</string>

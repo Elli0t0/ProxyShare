@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.4 — Block private networks
+
+- New Settings > Security switch "Block private networks" (default
+  off): proxy clients can no longer reach devices on the phone's own
+  network (router admin page, other LAN devices, localhost services).
+  Default off because VPN-internal 10.x targets would break otherwise.
+- Rust: new config key `block_private` (config.rs, parse + summary)
+  and pure `is_private_ip` (10/8, 172.16/12, 192.168/16, loopback,
+  link-local, unspecified, broadcast; IPv6 loopback, unspecified,
+  unique-local fc00::/7, link-local fe80::/10, IPv4-mapped judged by
+  its IPv4 half). The Connector drops private addresses from the
+  resolved list after DNS (never on the hostname, so a domain pointing
+  at a private address is caught too) and refuses with a new
+  `ConnectError::Blocked` when nothing is left.
+- Refusal maps like blocked domains: HTTP 403, SOCKS5 0x02, SOCKS4
+  0x5B, record marked blocked, logged as a private-target refusal.
+- Kotlin: AppSettings.blockPrivate -> toEngineConfig, and in the
+  backup JSON. Tests: Rust +6 (is_private_ip table, config
+  parse/summary, connector refuses loopback + refuses after DNS +
+  allows when off, engine HTTP CONNECT to a private target is 403 and
+  marked blocked); Kotlin +2 (blockPrivate omitted by default, sent
+  when on), and the backup round trip now covers the new field.
+
 ## 0.6.3 — Backup / restore settings as JSON
 
 - New Settings > Backup page: Export writes every setting to a

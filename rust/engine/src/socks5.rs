@@ -303,10 +303,20 @@ async fn connect(
             &host,
             port,
             Duration::from_secs(config.connect_timeout_s),
+            config.block_private,
         )
         .await
     {
         Ok(stream) => stream,
+        Err(ConnectError::Blocked(_)) => {
+            record.mark_blocked();
+            crate::diag::log_info(format!(
+                "blocked {host}:{port} from {} (private target)",
+                record.client_ip
+            ));
+            let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
+            return Ok(());
+        }
         Err(ConnectError::Dns(e)) => {
             crate::diag::log_warn(format!("could not resolve {host}: {e}"));
             let _ = send_error_reply(&mut client, REP_HOST_UNREACHABLE).await;

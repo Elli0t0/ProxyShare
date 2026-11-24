@@ -119,6 +119,27 @@ second parameter.
 - UDP ASSOCIATE datagrams are NOT filtered: there is no refusal
   reply for a datagram, so the block applies to TCP connects only.
 
+## Block private networks (0.6.4)
+
+- Config key `block_private` (default `false`): stop proxy clients
+  from reaching devices on the phone's own network (router admin
+  page, other LAN devices, localhost services) through the proxy.
+  Default off: VPN-internal 10.x targets would break otherwise.
+- Enforced in the Connector, after DNS resolution: private addresses
+  are dropped from the resolved list (never judged on the hostname,
+  so a domain pointing at a private address is caught too); when
+  nothing is left, the attempt is refused with `ConnectError::Blocked`.
+  IP-literal targets are checked directly. The pure function is
+  `config::is_private_ip(ip)`: IPv4 private, loopback, link-local,
+  unspecified, broadcast; IPv6 loopback, unspecified, unique-local
+  (fc00::/7), link-local (fe80::/10), and IPv4-mapped addresses judged
+  by their IPv4 half.
+- Refusal maps like blocked domains: HTTP (CONNECT and plain) gets
+  403, SOCKS5 CONNECT gets 0x02, SOCKS4 CONNECT gets 0x5B. The refused
+  connection is marked blocked on its record and logged
+  ("blocked {host}:{port} from {ip} (private target)"). UDP ASSOCIATE
+  datagrams are NOT filtered, like blocked domains.
+
 ## Authentication (0.0.9)
 
 - When the config has both `auth_user` and `auth_pass`, every protocol
@@ -309,6 +330,7 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `limit_down_kbps` | whole number ≥ 0 | `0` | Download speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
 | `limit_up_kbps` | whole number ≥ 0 | `0` | Upload speed limit in KB/s, total across all connections. 0 = unlimited. See "Speed limit". |
 | `require_vpn` | `true` / `false` | `false` | Refuse new connections while no VPN is active (the live state arrives through `nativeSetVpnActive`). Existing connections are never closed. See "VPN watchdog". |
+| `block_private` | `true` / `false` | `false` | Refuse targets that resolve only to private addresses. Enforced after DNS in the Connector. See "Block private networks". |
 | `idle_stop_secs` | seconds ≥ 0 | `0` | Stop the proxy after this many seconds with no active connection. 0 = off. See "Engine-owned stats". |
 
 Example:

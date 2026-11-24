@@ -26,6 +26,7 @@ class BackupLogicTest {
         allowedClients = listOf("192.168.1.0/24"),
         blockedDomains = listOf("ads.example.com", "*.tracker.example"),
         privateOnly = false,
+        blockPrivate = true,
         maxConnections = 100,
         idleTimeoutS = 60,
         connectTimeoutS = 5,

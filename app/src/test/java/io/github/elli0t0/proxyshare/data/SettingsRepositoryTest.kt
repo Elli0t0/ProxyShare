@@ -177,4 +177,17 @@ class SettingsRepositoryTest {
         val config = AppSettings(requireVpn = true).toEngineConfig()
         assertTrue(config.contains("require_vpn=true\n"))
     }
+
+    @Test
+    fun blockPrivateDefaultsToOffAndIsOmitted() {
+        val config = AppSettings().toEngineConfig()
+        assertFalse(AppSettings().blockPrivate)
+        assertTrue(!config.contains("block_private"))
+    }
+
+    @Test
+    fun blockPrivateIsSentWhenOn() {
+        val config = AppSettings(blockPrivate = true).toEngineConfig()
+        assertTrue(config.contains("block_private=true\n"))
+    }
 }

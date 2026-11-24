@@ -51,6 +51,11 @@ pub enum ConnectError {
     /// waiting out the 5 s cap. Handlers map it to SOCKS5 0x03 and
     /// HTTP 502.
     Unreachable(io::Error),
+    /// The target resolved only to private addresses and
+    /// block_private is on, so the attempt is refused. Handlers map
+    /// it like a blocked domain: HTTP 403, SOCKS5 0x02, SOCKS4 0x5B,
+    /// record marked blocked.
+    Blocked(io::Error),
 }
 
 impl fmt::Display for ConnectError {
@@ -61,6 +66,9 @@ impl fmt::Display for ConnectError {
             ConnectError::Unreachable(e) => {
                 write!(f, "IPv6 is down, target unreachable at once: {e}")
             }
+            ConnectError::Blocked(e) => {
+                write!(f, "target is private and block_private is on: {e}")
+            }
         }
     }
 }
@@ -68,9 +76,10 @@ impl fmt::Display for ConnectError {
 impl std::error::Error for ConnectError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ConnectError::Dns(e) | ConnectError::Connect(e) | ConnectError::Unreachable(e) => {
-                Some(e)
-            }
+            ConnectError::Dns(e)
+            | ConnectError::Connect(e)
+            | ConnectError::Unreachable(e)
+            | ConnectError::Blocked(e) => Some(e),
         }
     }
 }
@@ -78,7 +87,10 @@ impl std::error::Error for ConnectError {
 impl From<ConnectError> for io::Error {
     fn from(err: ConnectError) -> io::Error {
         match err {
-            ConnectError::Dns(e) | ConnectError::Connect(e) | ConnectError::Unreachable(e) => e,
+            ConnectError::Dns(e)
+            | ConnectError::Connect(e)
+            | ConnectError::Unreachable(e)
+            | ConnectError::Blocked(e) => e,
         }
     }
 }
@@ -116,12 +128,17 @@ impl Connector {
     /// Connect to `host:port` within `timeout` (the timeout bounds the
     /// DNS lookup; each connect attempt is capped at 5 s). Addresses
     /// are tried IPv4 first, staggered 300 ms apart; the first success
-    /// wins and the losers are dropped.
+    /// wins and the losers are dropped. When `block_private` is on,
+    /// private addresses are dropped from the resolved list after DNS
+    /// (never judged on the hostname, so a domain pointing at a
+    /// private address is caught too); when nothing is left, the
+    /// attempt is refused with [ConnectError::Blocked].
     pub async fn connect(
         &self,
         host: &str,
         port: u16,
         timeout: Duration,
+        block_private: bool,
     ) -> Result<TcpStream, ConnectError> {
         let mut addrs = self.resolve(host, port, timeout).await?;
         if addrs.is_empty() {
@@ -129,6 +146,15 @@ impl Connector {
                 io::ErrorKind::NotFound,
                 format!("{host} resolved to no addresses"),
             )));
+        }
+        if block_private {
+            addrs.retain(|a| !crate::config::is_private_ip(a.ip()));
+            if addrs.is_empty() {
+                return Err(ConnectError::Blocked(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("{host} resolves only to private addresses"),
+                )));
+            }
         }
         order_addrs(&mut addrs);
         // While the IPv6 breaker is down, IPv6 addresses are skipped
@@ -635,7 +661,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
         let stream = Connector::default()
-            .connect("127.0.0.1", port, Duration::from_secs(2))
+            .connect("127.0.0.1", port, Duration::from_secs(2), false)
             .await
             .expect("connect to a listening socket");
         assert!(stream.nodelay().expect("read nodelay"), "TCP_NODELAY is set");
@@ -651,7 +677,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
         let stream = connector
-            .connect("127.0.0.1", port, Duration::from_secs(2))
+            .connect("127.0.0.1", port, Duration::from_secs(2), false)
             .await
             .expect("connect with a network handle set");
         assert!(stream.nodelay().expect("read nodelay"), "TCP_NODELAY is set");
@@ -665,7 +691,7 @@ mod tests {
         let port = probe.local_addr().expect("probe addr").port();
         drop(probe);
         let err = Connector::default()
-            .connect("127.0.0.1", port, Duration::from_secs(2))
+            .connect("127.0.0.1", port, Duration::from_secs(2), false)
             .await
             .expect_err("nothing listens on the port");
         assert!(
@@ -678,12 +704,53 @@ mod tests {
     async fn bad_domain_is_a_dns_error() {
         // ".invalid" never resolves (RFC 2606), with or without network.
         let err = Connector::default()
-            .connect("nonexistent.invalid", 80, Duration::from_secs(2))
+            .connect("nonexistent.invalid", 80, Duration::from_secs(2), false)
             .await
             .expect_err("the domain does not resolve");
         assert!(
             matches!(err, ConnectError::Dns(_)),
             "a failed lookup is a Dns error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn block_private_refuses_a_loopback_target() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let err = Connector::default()
+            .connect("127.0.0.1", port, Duration::from_secs(2), true)
+            .await
+            .expect_err("a loopback target is refused with block_private on");
+        assert!(
+            matches!(err, ConnectError::Blocked(_)),
+            "a private target is a Blocked error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn block_private_off_still_connects_to_loopback() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let stream = Connector::default()
+            .connect("127.0.0.1", port, Duration::from_secs(2), false)
+            .await
+            .expect("block_private off connects to loopback");
+        assert_eq!(stream.peer_addr().expect("peer").port(), port);
+    }
+
+    #[tokio::test]
+    async fn block_private_refuses_after_dns() {
+        // "localhost" is a hostname, not an IP literal: it resolves to
+        // loopback addresses, which the filter drops after DNS.
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let err = Connector::default()
+            .connect("localhost", port, Duration::from_secs(2), true)
+            .await
+            .expect_err("localhost resolves only to private addresses");
+        assert!(
+            matches!(err, ConnectError::Blocked(_)),
+            "a hostname resolving to private addresses is a Blocked error, got: {err}"
         );
     }
 
@@ -871,7 +938,7 @@ mod tests {
         for _ in 0..3 {
             mark_v6_down_at(now_ms());
             match Connector::default()
-                .connect("::1", free_port, Duration::from_secs(2))
+                .connect("::1", free_port, Duration::from_secs(2), false)
                 .await
             {
                 Err(ConnectError::Unreachable(_)) => {
@@ -896,7 +963,7 @@ mod tests {
         mark_v6_up();
         let start = std::time::Instant::now();
         let stream = Connector::default()
-            .connect("localhost", port, Duration::from_secs(5))
+            .connect("localhost", port, Duration::from_secs(5), false)
             .await
             .expect("staggered connect reaches the live address");
         assert_eq!(stream.peer_addr().expect("peer").ip().to_string(), "::1");

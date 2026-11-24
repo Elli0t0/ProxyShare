@@ -745,6 +745,16 @@ private fun SecuritySettings(
                 )
             },
         )
+        SettingRow(
+            title = stringResource(R.string.block_private_label),
+            subtitle = stringResource(R.string.block_private_subtitle),
+            trailing = {
+                Switch(
+                    checked = settings.blockPrivate,
+                    onCheckedChange = { saveRestart { updateBlockPrivate(it) } },
+                )
+            },
+        )
         Text(
             text = stringResource(R.string.allowed_clients_label),
             style = MaterialTheme.typography.bodyLarge,

@@ -57,6 +57,12 @@ pub struct Config {
     /// state arrives through set_vpn_active; false here means the
     /// flag is ignored). Existing connections are never closed.
     pub require_vpn: bool,
+    /// Refuse targets that resolve only to private addresses (the
+    /// phone's own network: router admin page, other LAN devices,
+    /// localhost services). Default off: VPN-internal 10.x targets
+    /// would break otherwise. Enforced in the Connector after DNS,
+    /// never on the hostname.
+    pub block_private: bool,
     /// Seconds of idleness (no connections at all) before the engine
     /// emits IdleStop. 0 = off. The Kotlin side stops the proxy on
     /// that event; the engine never stops itself.
@@ -82,6 +88,7 @@ impl Default for Config {
             limit_down_kbps: 0,
             limit_up_kbps: 0,
             require_vpn: false,
+            block_private: false,
             idle_stop_secs: 0,
         }
     }
@@ -128,6 +135,7 @@ impl Config {
                     config.limit_up_kbps = parse_u64(value, line_no, key)?
                 }
                 "require_vpn" => config.require_vpn = parse_bool(value, line_no, key)?,
+                "block_private" => config.block_private = parse_bool(value, line_no, key)?,
                 "idle_stop_secs" => {
                     config.idle_stop_secs = parse_u64(value, line_no, key)?
                 }
@@ -164,13 +172,18 @@ impl Config {
         } else {
             ""
         };
+        let block_private = if self.block_private {
+            ", block_private on"
+        } else {
+            ""
+        };
         let idle_stop = if self.idle_stop_secs > 0 {
             format!(", idle stop {}s", self.idle_stop_secs)
         } else {
             String::new()
         };
         format!(
-            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}{idle_stop}",
+            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}{block_private}{idle_stop}",
             self.bind_addr,
             protocols.join("+"),
             self.private_only,
@@ -285,6 +298,28 @@ pub fn domain_blocked(list: &[String], host: &str) -> bool {
 
 fn normalize_host(host: &str) -> String {
     host.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// True when `ip` is a private address: the phone's own network.
+/// IPv4: private, loopback, link-local, unspecified, broadcast.
+/// IPv6: loopback, unspecified, unique-local (fc00::/7), link-local
+/// (fe80::/10), and IPv4-mapped addresses judged by their IPv4 half.
+pub fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private() || v4.is_loopback() || v4.is_link_local()
+                || v4.is_unspecified() || v4.is_broadcast()
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_private_ip(IpAddr::V4(v4));
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+        }
+    }
 }
 
 fn parse_bool(value: &str, line_no: usize, key: &str) -> Result<bool, String> {
@@ -511,6 +546,38 @@ connect_timeout_s = 5
         assert!(config.require_vpn);
         assert!(config.summary().contains("require_vpn on"));
         assert!(Config::parse("require_vpn = maybe").is_err());
+    }
+
+    #[test]
+    fn block_private_parses_and_shows_in_summary() {
+        assert!(!Config::default().block_private);
+        assert!(!Config::default().summary().contains("block_private"));
+        let config = Config::parse("block_private = true").expect("block_private parse");
+        assert!(config.block_private);
+        assert!(config.summary().contains("block_private on"));
+        assert!(Config::parse("block_private = maybe").is_err());
+    }
+
+    #[test]
+    fn is_private_ip_table() {
+        for ip in [
+            "10.0.0.1",
+            "172.16.5.5",
+            "192.168.1.1",
+            "127.0.0.1",
+            "169.254.1.1",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:192.168.1.1",
+        ] {
+            let addr = IpAddr::from_str(ip).expect("test IP");
+            assert!(is_private_ip(addr), "{ip} is private");
+        }
+        for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "172.32.0.1"] {
+            let addr = IpAddr::from_str(ip).expect("test IP");
+            assert!(!is_private_ip(addr), "{ip} is not private");
+        }
     }
 
     #[test]

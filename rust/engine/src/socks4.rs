@@ -19,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::config::Config;
-use crate::connector::Connector;
+use crate::connector::{ConnectError, Connector};
 use crate::engine::ConnRecord;
 use crate::relay;
 use crate::relay::RateLimiter;
@@ -126,10 +126,24 @@ pub async fn handle(
         return Ok(());
     }
     let upstream = match outbound
-        .connect(&host, port, Duration::from_secs(config.connect_timeout_s))
+        .connect(
+            &host,
+            port,
+            Duration::from_secs(config.connect_timeout_s),
+            config.block_private,
+        )
         .await
     {
         Ok(stream) => stream,
+        Err(ConnectError::Blocked(_)) => {
+            record.mark_blocked();
+            crate::diag::log_info(format!(
+                "blocked {host}:{port} from {} (private target)",
+                record.client_ip
+            ));
+            let _ = send_reply(&mut client, REP_FAILURE).await;
+            return Ok(());
+        }
         Err(e) => {
             crate::diag::log_warn(format!("connect to {host}:{port} failed: {e}"));
             let _ = send_reply(&mut client, REP_FAILURE).await;

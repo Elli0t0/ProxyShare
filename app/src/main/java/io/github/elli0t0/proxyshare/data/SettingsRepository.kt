@@ -28,6 +28,8 @@ data class AppSettings(
     /** Domains refused before any outbound connect ("ads.example.com" or "*.example.com"). Sent to the engine. */
     val blockedDomains: List<String> = emptyList(),
     val privateOnly: Boolean = true,
+    /** Refuse targets that resolve only to private addresses (the phone's own network). Sent to the engine. */
+    val blockPrivate: Boolean = false,
     val maxConnections: Int = 256,
     val idleTimeoutS: Int = 300,
     val connectTimeoutS: Int = 10,
@@ -77,6 +79,7 @@ fun AppSettings.toEngineConfig(): String = buildString {
     if (limitDownKbps > 0) appendLine("limit_down_kbps=$limitDownKbps")
     if (limitUpKbps > 0) appendLine("limit_up_kbps=$limitUpKbps")
     if (requireVpn) appendLine("require_vpn=true")
+    if (blockPrivate) appendLine("block_private=true")
     if (idleStopMinutes > 0) appendLine("idle_stop_secs=${idleStopMinutes * 60}")
 }
 
@@ -140,6 +143,7 @@ class SettingsRepository(context: Context) {
                 ?.filter { it.isNotEmpty() }
                 ?: emptyList(),
             privateOnly = prefs[Keys.PRIVATE_ONLY] ?: defaults.privateOnly,
+            blockPrivate = prefs[Keys.BLOCK_PRIVATE] ?: defaults.blockPrivate,
             maxConnections = prefs[Keys.MAX_CONNECTIONS] ?: defaults.maxConnections,
             idleTimeoutS = prefs[Keys.IDLE_TIMEOUT_S] ?: defaults.idleTimeoutS,
             connectTimeoutS = prefs[Keys.CONNECT_TIMEOUT_S] ?: defaults.connectTimeoutS,
@@ -215,6 +219,10 @@ class SettingsRepository(context: Context) {
 
     suspend fun updatePrivateOnly(value: Boolean) {
         dataStore.edit { it[Keys.PRIVATE_ONLY] = value }
+    }
+
+    suspend fun updateBlockPrivate(value: Boolean) {
+        dataStore.edit { it[Keys.BLOCK_PRIVATE] = value }
     }
 
     suspend fun updateMaxConnections(value: Int) {
@@ -299,6 +307,7 @@ class SettingsRepository(context: Context) {
             prefs[Keys.ALLOWED_CLIENTS] = s.allowedClients.joinToString(",")
             prefs[Keys.BLOCKED_DOMAINS] = s.blockedDomains.joinToString(",")
             prefs[Keys.PRIVATE_ONLY] = s.privateOnly
+            prefs[Keys.BLOCK_PRIVATE] = s.blockPrivate
             prefs[Keys.MAX_CONNECTIONS] = s.maxConnections
             prefs[Keys.IDLE_TIMEOUT_S] = s.idleTimeoutS
             prefs[Keys.CONNECT_TIMEOUT_S] = s.connectTimeoutS
@@ -330,6 +339,7 @@ class SettingsRepository(context: Context) {
         val ALLOWED_CLIENTS = stringPreferencesKey("allowed_clients")
         val BLOCKED_DOMAINS = stringPreferencesKey("blocked_domains")
         val PRIVATE_ONLY = booleanPreferencesKey("private_only")
+        val BLOCK_PRIVATE = booleanPreferencesKey("block_private")
         val MAX_CONNECTIONS = intPreferencesKey("max_connections")
         val IDLE_TIMEOUT_S = intPreferencesKey("idle_timeout_s")
         val CONNECT_TIMEOUT_S = intPreferencesKey("connect_timeout_s")

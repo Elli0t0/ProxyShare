@@ -162,6 +162,7 @@ fun AppSettings.toBackupJson(): String = JSONObject().apply {
     put("allowedClients", JSONArray(allowedClients))
     put("blockedDomains", JSONArray(blockedDomains))
     put("privateOnly", privateOnly)
+    put("blockPrivate", blockPrivate)
     put("maxConnections", maxConnections)
     put("idleTimeoutS", idleTimeoutS)
     put("connectTimeoutS", connectTimeoutS)
@@ -223,6 +224,7 @@ fun settingsFromBackupJson(
         allowedClients = jsonStringList(o, "allowedClients").filter(isValidCidr),
         blockedDomains = jsonStringList(o, "blockedDomains").filter(isValidDomain),
         privateOnly = o.optBoolean("privateOnly", base.privateOnly),
+        blockPrivate = o.optBoolean("blockPrivate", base.blockPrivate),
         maxConnections = o.optInt("maxConnections", base.maxConnections).coerceIn(1, 2000),
         idleTimeoutS = o.optInt("idleTimeoutS", base.idleTimeoutS).coerceIn(30, 3600),
         connectTimeoutS = o.optInt("connectTimeoutS", base.connectTimeoutS).coerceIn(2, 120),
