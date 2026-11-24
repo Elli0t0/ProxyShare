@@ -388,10 +388,18 @@ mod tests {
             .expect("connect");
         client.write_all(request).await.expect("write");
         let mut reply = Vec::new();
-        client
-            .read_to_end(&mut reply)
-            .await
-            .expect("read reply to EOF");
+        // A rejected client gets its stream dropped without a read,
+        // so the kernel sends RST instead of FIN: the close still
+        // carries no reply, but read_to_end reports ConnectionReset
+        // instead of EOF. Treat the reset as "no reply" (the proxy's
+        // own rejection path closes the same way). A served request
+        // still fails below on its content assertions if the reply
+        // is empty.
+        match client.read_to_end(&mut reply).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+            Err(e) => panic!("read reply to EOF: {e}"),
+        }
         let _ = shutdown_tx.send(true);
         task.abort();
         reply
