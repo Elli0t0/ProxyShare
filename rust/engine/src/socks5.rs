@@ -271,7 +271,8 @@ pub async fn handle(
     match cmd {
         0x01 => {
             connect(
-                client, outbound, config, rules, record, target, port, up_limiter, down_limiter,
+                client, outbound, config, rules, sets, record, target, port, up_limiter,
+                down_limiter,
             )
             .await
         }
@@ -287,7 +288,7 @@ pub async fn handle(
 }
 
 /// CONNECT: dial the target and relay both directions.
-// 8 args: the two rate limiters are separate params so the call sites
+// 10 args: the two rate limiters are separate params so the call sites
 // stay symmetric with socks4/http handle(); grouping them would touch
 // every handler signature for no behaviour gain.
 #[allow(clippy::too_many_arguments)]
@@ -296,6 +297,7 @@ async fn connect(
     outbound: &Connector,
     config: &Config,
     rules: &crate::rules::RuleSet,
+    sets: &[crate::rules::RuleSetEntry],
     record: &std::sync::Arc<ConnRecord>,
     target: Target,
     port: u16,

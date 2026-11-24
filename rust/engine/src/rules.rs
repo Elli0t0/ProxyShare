@@ -25,7 +25,7 @@
 //! `block`. Loading is atomic: the first invalid line rejects the
 //! whole text and the previous set stays in force.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 
 use crate::cidr::Cidr;
