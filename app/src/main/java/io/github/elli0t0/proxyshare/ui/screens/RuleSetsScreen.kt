@@ -65,7 +65,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Rule sets page (0.6.8), the second half of the Rules tab: the
+ * Rule sets page (0.6.8), the second half of the Rules page: the
  * built-in Ads & trackers list (OISD small, bundled as an asset,
  * Block only) and user-made named lists. Subscriptions (0.6.9) are
  * named lists whose content comes from an https URL instead of a

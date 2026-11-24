@@ -100,6 +100,21 @@ fun appearanceSummary(s: AppSettings): String = when (s.themeMode) {
     else -> "System theme"
 }
 
+/** Live one-line summary for the Routing rules row: "3 rules · 2 rule sets". */
+fun rulesSummary(s: AppSettings): String {
+    val parts = buildList {
+        if (s.rules.isNotEmpty()) {
+            add("${s.rules.size} rule" + if (s.rules.size == 1) "" else "s")
+        }
+        // The built-in list is always there; only user lists count.
+        val custom = s.ruleSets.count { !it.builtin }
+        if (custom > 0) {
+            add("$custom rule set" + if (custom == 1) "" else "s")
+        }
+    }
+    return if (parts.isEmpty()) "No rules yet" else parts.joinToString(" · ")
+}
+
 /** Backup file format version, written by [AppSettings.toBackupJson]. */
 private const val BACKUP_VERSION = 1
 
@@ -194,7 +209,7 @@ fun settingsFromBackupJson(
         ?.let { parseClientNames(it.toString()) } ?: base.clientNames
     // Rules (0.6.7): unknown actions and blank/overlong/whitespace
     // patterns are dropped; a bad pattern the engine would reject is
-    // caught when the rules are pushed (the Rules tab shows the error).
+    // caught when the rules are pushed (the Rules page shows the error).
     val rules = o.optJSONArray("rules")?.let { arr ->
         buildList {
             for (i in 0 until arr.length()) {

@@ -187,7 +187,7 @@ object ProxyController {
      * engine.start, and the rules job pushes on every change while
      * running. The engine validates the text atomically, so a bad
      * rule rejects the whole set and the previous rules stay live;
-     * the error line is kept in [rulesStatus] for the Rules tab.
+     * the error line is kept in [rulesStatus] for the Rules page.
      */
     fun pushRules(rules: List<RuleEntry> = _settings.value.rules) {
         if (!started) return

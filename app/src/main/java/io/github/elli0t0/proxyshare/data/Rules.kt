@@ -11,7 +11,7 @@ package io.github.elli0t0.proxyshare.data
  *
  * Pure Kotlin: no pattern parsing here except trimming — the engine
  * is the authority on whether a pattern is valid (nativeSetRules
- * reports "error line N: msg", shown by the Rules tab). Stored in
+ * reports "error line N: msg", shown by the Rules page). Stored in
  * DataStore as one string in engine-text format (see [toEngineText]).
  */
 enum class RuleAction(val wire: String) { PROXY("proxy"), DIRECT("direct"), BLOCK("block") }
@@ -52,7 +52,7 @@ fun rulesFromEngineText(text: String): List<RuleEntry> {
  * (too long, or containing whitespace — the engine rejects those).
  * Duplicates (within the file and against [existing]) are dropped.
  * Invalid-but-well-formed lines (e.g. `a..com`) are kept: the
- * engine reports them when the rules are pushed, and the Rules tab
+ * engine reports them when the rules are pushed, and the Rules page
  * shows the error line.
  */
 fun parseImportedRules(
@@ -85,7 +85,7 @@ fun List<RuleEntry>.upsertRule(entry: RuleEntry): List<RuleEntry> {
 enum class RuleFilter { ALL, PROXY, DIRECT, BLOCK }
 
 /**
- * Filter + search helper for the Rules tab: keep the rules matching
+ * Filter + search helper for the Rules page: keep the rules matching
  * [filter] whose pattern contains [query] (case-insensitive, blank
  * query matches everything). List order is kept.
  */

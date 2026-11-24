@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -106,7 +107,7 @@ fun SettingsScreen(
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
     // The restart flag lives in ProxyController so other screens (e.g.
-    // the Rules tab) can read it too.
+    // the Rules page) can read it too.
     val restartNeeded by ProxyController.restartNeeded.collectAsStateWithLifecycle()
     var showIdleDialog by rememberSaveable { mutableStateOf(false) }
     // Manual update check: transient state, reset on rotation.
@@ -252,7 +253,7 @@ fun SettingsScreen(
 }
 
 /** Which sub-page of Settings is open, if any. */
-enum class SettingsPage { SERVER, SECURITY, LIMITS, BATTERY, APPEARANCE, BACKUP }
+enum class SettingsPage { SERVER, SECURITY, RULES, LIMITS, BATTERY, APPEARANCE, BACKUP }
 
 @Composable
 private fun SettingsList(
@@ -319,6 +320,39 @@ private fun SettingsDetail(
     onShowSnackbar: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Routing rules (0.7.1) is a full screen of its own (segmented
+    // control + LazyColumn), so it does not go inside the scrollable
+    // detail Column: it gets the back row + title, then the screen
+    // with no second status-bar inset.
+    if (page == SettingsPage.RULES) {
+        Column(
+            modifier = modifier.fillMaxSize().statusBarsPadding(),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                }
+                Text(
+                    text = stringResource(pageTitle(page)),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            // The banners rely on the parent's side padding here.
+            Box(Modifier.padding(horizontal = 16.dp)) {
+                SettingsBanners(
+                    running = running,
+                    restartNeeded = restartNeeded,
+                    settings = settings,
+                    onRestart = onRestart,
+                )
+            }
+            RulesScreen(modifier = Modifier.weight(1f), topInset = false)
+        }
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -355,6 +389,8 @@ private fun SettingsDetail(
                 settings = settings,
                 saveRestart = saveRestart,
             )
+            // RULES is rendered above, outside the scroll Column.
+            SettingsPage.RULES -> {}
             SettingsPage.LIMITS -> LimitsSettings(
                 settings = settings,
                 saveRestart = saveRestart,
@@ -531,6 +567,7 @@ private fun SettingsRow(page: SettingsPage, summary: String, onOpen: () -> Unit)
 private fun pageIcon(page: SettingsPage): ImageVector = when (page) {
     SettingsPage.SERVER -> Icons.Filled.Build
     SettingsPage.SECURITY -> Icons.Filled.Lock
+    SettingsPage.RULES -> Icons.Filled.Edit
     SettingsPage.LIMITS -> Icons.Filled.List
     SettingsPage.BATTERY -> Icons.Filled.PlayArrow
     SettingsPage.APPEARANCE -> Icons.Filled.Face
@@ -540,6 +577,7 @@ private fun pageIcon(page: SettingsPage): ImageVector = when (page) {
 private fun pageTitle(page: SettingsPage): Int = when (page) {
     SettingsPage.SERVER -> R.string.settings_server
     SettingsPage.SECURITY -> R.string.settings_security
+    SettingsPage.RULES -> R.string.settings_rules
     SettingsPage.LIMITS -> R.string.settings_limits
     SettingsPage.BATTERY -> R.string.settings_battery_startup
     SettingsPage.APPEARANCE -> R.string.settings_appearance
@@ -549,6 +587,7 @@ private fun pageTitle(page: SettingsPage): Int = when (page) {
 private fun pageSummary(page: SettingsPage, settings: AppSettings): String = when (page) {
     SettingsPage.SERVER -> serverSummary(settings)
     SettingsPage.SECURITY -> securitySummary(settings)
+    SettingsPage.RULES -> rulesSummary(settings)
     SettingsPage.LIMITS -> limitsSummary(settings)
     SettingsPage.BATTERY -> batterySummary(settings)
     SettingsPage.APPEARANCE -> appearanceSummary(settings)

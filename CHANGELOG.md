@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.1 — Rules move into Settings
+
+- The Rules bottom tab is gone: routing rules live in Settings
+  only, as Settings > Routing rules. The bottom bar is back to
+  three tabs (Home, Activity, Settings); the Health "Fix" that
+  opens Security now goes to tab 2. The Settings list shows a
+  "Routing rules" row with a live summary ("3 rules · 2 rule
+  sets" / "No rules yet"), and the page opens with the same back
+  row + title as the other sub-pages. RulesScreen gained a
+  topInset flag (false when the wrapper already added the
+  status-bar inset, same pattern as ConnectionsScreen), so the
+  page is not double-padded. The `nav_rules` string is gone.
+
 ## 0.7.0 — Domains view in Activity (from the 0.7.0 prompt)
 
 - Activity gains a "Domains" segment (Live | Domains | History |

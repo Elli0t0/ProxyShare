@@ -66,22 +66,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Rules tab (0.6.7, 0.6.8): two pages under one segmented control.
- * Manual (0.6.7) is the manual routing rules: search + All/Proxy/
- * Direct/Block chips, Add (dialog), Import file (one action for the
- * whole file), Export (engine text). Tap a row to change its action
- * or delete it. Rules are stored in DataStore and pushed to the
- * engine hot (ProxyController.pushRules) — no restart. The one-line
- * status under the buttons is the push result: "Applied N rules" or
- * the engine's error line (a bad rule rejects the whole set, so the
- * previous rules stay live until it is fixed or deleted).
- * Rule sets (0.6.8) is the built-in Ads & trackers list plus
- * user-made named lists (see RuleSetsScreen.kt).
+ * Rules page (0.6.7, 0.6.8; moved into Settings in 0.7.1): two pages
+ * under one segmented control. Manual (0.6.7) is the manual routing
+ * rules: search + All/Proxy/Direct/Block chips, Add (dialog), Import
+ * file (one action for the whole file), Export (engine text). Tap a
+ * row to change its action or delete it. Rules are stored in
+ * DataStore and pushed to the engine hot (ProxyController.pushRules)
+ * — no restart. The one-line status under the buttons is the push
+ * result: "Applied N rules" or the engine's error line (a bad rule
+ * rejects the whole set, so the previous rules stay live until it is
+ * fixed or deleted). Rule sets (0.6.8) is the built-in Ads & trackers
+ * list plus user-made named lists (see RuleSetsScreen.kt).
+ * [topInset] is false when a wrapper already added the status-bar
+ * inset (Settings detail does, same pattern as ConnectionsScreen).
  */
 private enum class RulesPage { MANUAL, SETS }
 
 @Composable
-fun RulesScreen(modifier: Modifier = Modifier) {
+fun RulesScreen(modifier: Modifier = Modifier, topInset: Boolean = true) {
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val rulesStatus by ProxyController.rulesStatus.collectAsStateWithLifecycle()
@@ -91,7 +93,8 @@ fun RulesScreen(modifier: Modifier = Modifier) {
     var page by rememberSaveable { mutableStateOf(RulesPage.MANUAL) }
 
     Column(
-        modifier = modifier.fillMaxSize().statusBarsPadding()
+        modifier = modifier.fillMaxSize()
+            .let { if (topInset) it.statusBarsPadding() else it }
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

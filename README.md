@@ -20,10 +20,11 @@ phone's active VPN. No root.
   the "Connect your laptop" page.
 - Routing rules engine: PROXY / DIRECT / BLOCK rules per domain or IP/CIDR
   (hot-reloaded, no restart); DIRECT traffic goes out through the phone's
-  real non-VPN network. The Rules tab (search, filters, add/import/export)
-  edits them, and tapping a row in Activity > Domains (or a
-  long-press on a host in History) adds one.
-  Rule sets (Rules > Rule sets): a built-in Ads & trackers list (OISD
+  real non-VPN network. Settings > Routing rules (search, filters,
+  add/import/export) edits them, and tapping a row in Activity >
+  Domains (or a long-press on a host in History) adds one.
+  Rule sets (Settings > Routing rules > Rule sets): a built-in Ads
+  & trackers list (OISD
   small, 61,063 domains, off by default) and user-made named lists
   (Direct or Block); manual rules always win, sets apply in order.
   Subscriptions are rule sets fetched from an https URL ("Update now",
@@ -104,7 +105,7 @@ the previous one.
 
 ## Credits
 
-- Ads & trackers list (Rules > Rule sets, bundled as
+- Ads & trackers list (Settings > Routing rules > Rule sets, bundled as
   `app/src/main/assets/rules/ads-oisd-small.txt`): OISD small
   (oisd.nl), CC BY-NC-SA 4.0.
 - Rule sets are modelled on hxmy proxy's Rules page.

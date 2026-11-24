@@ -2,6 +2,10 @@ package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.AppSettings
+import io.github.elli0t0.proxyshare.data.BUILTIN_RULE_SET_META
+import io.github.elli0t0.proxyshare.data.RuleAction
+import io.github.elli0t0.proxyshare.data.RuleEntry
+import io.github.elli0t0.proxyshare.data.RuleSetMeta
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -28,6 +32,30 @@ class SettingsLogicTest {
     @Test
     fun serverSummaryDefaults() {
         assertEquals("HTTP 8080 · SOCKS 1080", serverSummary(AppSettings()))
+    }
+
+    @Test
+    fun rulesSummaryCountsRulesAndLists() {
+        assertEquals("No rules yet", rulesSummary(AppSettings()))
+        assertEquals(
+            "1 rule",
+            rulesSummary(AppSettings(rules = listOf(RuleEntry("a.com", RuleAction.BLOCK)))),
+        )
+        assertEquals(
+            "2 rules · 1 rule set",
+            rulesSummary(
+                AppSettings(
+                    rules = listOf(
+                        RuleEntry("a.com", RuleAction.BLOCK),
+                        RuleEntry("b.com", RuleAction.DIRECT),
+                    ),
+                    ruleSets = listOf(
+                        BUILTIN_RULE_SET_META,
+                        RuleSetMeta("c1", "Work", RuleAction.DIRECT, true, false, 5),
+                    ),
+                ),
+            ),
+        )
     }
 
     @Test

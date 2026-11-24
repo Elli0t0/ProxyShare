@@ -355,7 +355,7 @@ fun normalizeDomainQuery(query: String): String {
 /**
  * The manual rule written for this exact host (`host` or `=host`),
  * if any. Suffix rules (a rule for `a.com` covering `sub.a.com`)
- * are not matched here: the Rules tab owns those.
+ * are not matched here: the Rules page owns those.
  */
 fun ruleForHost(host: String, rules: List<RuleEntry>): RuleEntry? =
     rules.firstOrNull { it.pattern == host || it.pattern == "=$host" }
