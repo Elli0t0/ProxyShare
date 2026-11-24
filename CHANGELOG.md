@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.9 — Rule subscriptions (URL lists, from the 0.6.9 prompt)
+
+- Rules > Rule sets: "Add subscription" (name, https URL, Direct or
+  Block). A subscription is a rule set whose content comes from the
+  URL instead of a file import. "Update now" per subscription and
+  "Update all"; the proxy refreshes a subscription once on start
+  when its last update is older than 24 h. No background worker.
+- Fetch (Kotlin only, HttpURLConnection): https only, 10 s
+  connect/read timeout, text/plain only, max 3 redirects (https
+  only), 5 MB max body. Parsed with the 0.6.7 importer; a failed
+  download, or one with 0 valid lines, keeps the old content and
+  shows "Failed: <reason> · kept old list" under the subscription.
+  The fetch runs on the DEFAULT network (it may go through the
+  phone's VPN, that is expected). The URL is never logged, not even
+  its query string — failures are stored as short labels
+  ("timeout", "cannot resolve host", "HTTP 404", "list too large").
+- Each subscription card shows its URL, when it was last updated
+  ("Updated 2 h ago" / "Never updated") and its last error. Editing
+  a subscription can change its URL (a new URL starts over: the old
+  list stays until the next update).
+
 ## 0.6.8 — Ad-block rule set + custom rule sets (from the 0.6.8 prompt)
 
 - Rules tab now has two pages under a Manual | Rule sets segmented

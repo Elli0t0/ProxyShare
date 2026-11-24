@@ -2,6 +2,7 @@ package io.github.elli0t0.proxyshare.ui.screens
 
 import android.content.Context
 import android.net.Uri
+import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -41,12 +42,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.data.BUILTIN_RULE_SET_ID
 import io.github.elli0t0.proxyshare.data.RuleAction
 import io.github.elli0t0.proxyshare.data.RuleSetMeta
+import io.github.elli0t0.proxyshare.data.isSubscription
 import io.github.elli0t0.proxyshare.data.countRuleSetLines
 import io.github.elli0t0.proxyshare.data.deleteRuleSetFile
 import io.github.elli0t0.proxyshare.data.loadRuleSetFileText
@@ -64,7 +67,10 @@ import kotlinx.coroutines.withContext
 /**
  * Rule sets page (0.6.8), the second half of the Rules tab: the
  * built-in Ads & trackers list (OISD small, bundled as an asset,
- * Block only) and user-made named lists. A set is one action for all
+ * Block only) and user-made named lists. Subscriptions (0.6.9) are
+ * named lists whose content comes from an https URL instead of a
+ * file import: "Update now" per set, "Update all", and one automatic
+ * refresh on proxy start when the last update is older than 24 h. A set is one action for all
  * its domains; manual rules always win over every set, and the sets
  * apply in list order, first hit wins. Toggling, importing, creating
  * and editing push hot through ProxyController.pushRuleSets — no
@@ -80,6 +86,7 @@ fun RuleSetsPage(settings: AppSettings) {
     val customs = sets.filter { !it.builtin }
 
     var showCreate by rememberSaveable { mutableStateOf(false) }
+    var showSubscription by rememberSaveable { mutableStateOf(false) }
     var editTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var menuTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var importTargetId by remember { mutableStateOf<String?>(null) }
@@ -165,6 +172,7 @@ fun RuleSetsPage(settings: AppSettings) {
                     onImport = {},
                     onEdit = {},
                     onDelete = {},
+                    onUpdate = null,
                 )
             }
         }
@@ -175,8 +183,22 @@ fun RuleSetsPage(settings: AppSettings) {
             )
         }
         item(key = "create") {
-            OutlinedButton(onClick = { showCreate = true }) {
-                Text(stringResource(R.string.rulesets_create))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { showCreate = true }) {
+                    Text(stringResource(R.string.rulesets_create))
+                }
+                OutlinedButton(onClick = { showSubscription = true }) {
+                    Text(stringResource(R.string.subscriptions_add))
+                }
+            }
+        }
+        if (customs.any { it.isSubscription }) {
+            item(key = "update-all") {
+                OutlinedButton(
+                    onClick = { ProxyController.refreshAllSubscriptions() },
+                ) {
+                    Text(stringResource(R.string.subscriptions_update_all))
+                }
             }
         }
         if (importResult != null) {
@@ -218,6 +240,14 @@ fun RuleSetsPage(settings: AppSettings) {
                 onEdit = {
                     menuTarget = null
                     editTarget = meta.id
+                },
+                onUpdate = if (meta.isSubscription) {
+                    {
+                        menuTarget = null
+                        ProxyController.refreshSubscription(meta.id)
+                    }
+                } else {
+                    null
                 },
                 onDelete = {
                     menuTarget = null
@@ -269,12 +299,39 @@ fun RuleSetsPage(settings: AppSettings) {
             },
         )
     }
+    if (showSubscription) {
+        AddSubscriptionDialog(
+            onDismiss = { showSubscription = false },
+            onCreate = { name, url, action ->
+                showSubscription = false
+                val id = UUID.randomUUID().toString()
+                val meta = RuleSetMeta(
+                    id = id,
+                    name = name,
+                    action = action,
+                    enabled = true,
+                    builtin = false,
+                    count = 0,
+                    url = url,
+                )
+                scope.launch {
+                    ProxyController.updateSettings {
+                        updateRuleSets(
+                            ProxyController.settings.value.ruleSets + meta
+                        )
+                    }
+                    // Fetch the list right away, so the new set is not empty.
+                    ProxyController.refreshSubscription(id)
+                }
+            },
+        )
+    }
     val editMeta = editTarget?.let { id -> customs.firstOrNull { it.id == id } }
     if (editMeta != null) {
         EditRuleSetDialog(
             meta = editMeta,
             onDismiss = { editTarget = null },
-            onSave = { name, action ->
+            onSave = { name, action, url ->
                 editTarget = null
                 scope.launch {
                     // The file stores ACTION<TAB>pattern lines, so a
@@ -291,17 +348,27 @@ fun RuleSetsPage(settings: AppSettings) {
                             )
                         }
                     }
+                    val urlChanged = url != editMeta.url
                     ProxyController.updateSettings {
                         updateRuleSets(
                             ProxyController.settings.value.ruleSets.map {
                                 if (it.id == editMeta.id) {
-                                    it.copy(name = name, action = action)
+                                    it.copy(
+                                        name = name,
+                                        action = action,
+                                        url = url,
+                                        // A new source starts over: the old
+                                        // list stays until the next update.
+                                        lastUpdatedMs = if (urlChanged) 0L else it.lastUpdatedMs,
+                                        lastError = if (urlChanged) "" else it.lastError,
+                                    )
                                 } else {
                                     it
                                 }
                             }
                         )
                     }
+                    if (urlChanged) ProxyController.refreshSubscription(editMeta.id)
                 }
             },
         )
@@ -318,6 +385,7 @@ private fun RuleSetCard(
     onImport: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onUpdate: (() -> Unit)?,
 ) {
     // The card and its menu share one Box, so the menu anchors under
     // the card instead of at the list's left edge.
@@ -347,6 +415,40 @@ private fun RuleSetCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (meta.isSubscription) {
+                        Text(
+                            text = meta.url,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = if (meta.lastUpdatedMs == 0L) {
+                                stringResource(R.string.subscriptions_never_updated)
+                            } else {
+                                stringResource(
+                                    R.string.subscriptions_updated,
+                                    DateUtils.getRelativeTimeSpanString(
+                                        meta.lastUpdatedMs,
+                                        System.currentTimeMillis(),
+                                        DateUtils.MINUTE_IN_MILLIS,
+                                    ),
+                                )
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (meta.lastError.isNotEmpty()) {
+                            Text(
+                                text = stringResource(
+                                    R.string.subscriptions_failed, meta.lastError
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                 }
                 ActionTag(meta.action)
                 Switch(checked = meta.enabled, onCheckedChange = onToggle)
@@ -354,6 +456,12 @@ private fun RuleSetCard(
         }
         if (onOpenMenu != null) {
             DropdownMenu(expanded = menuOpen, onDismissRequest = onDismissMenu) {
+                if (onUpdate != null) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.subscriptions_update_now)) },
+                        onClick = onUpdate,
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.rules_import)) },
                     onClick = onImport,
@@ -402,6 +510,60 @@ private fun SetActionSegmentedRow(
 }
 
 @Composable
+private fun AddSubscriptionDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String, String, RuleAction) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var url by rememberSaveable { mutableStateOf("") }
+    var action by rememberSaveable { mutableStateOf(RuleAction.BLOCK) }
+    val urlOk = url.startsWith("https://")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.subscriptions_add)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.rulesets_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text(stringResource(R.string.subscriptions_url)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (url.isNotBlank() && !urlOk) {
+                    Text(
+                        text = stringResource(R.string.subscriptions_url_https),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                SetActionSegmentedRow(selected = action, onSelect = { action = it })
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onCreate(name.trim(), url.trim(), action) },
+                enabled = name.isNotBlank() && urlOk,
+            ) {
+                Text(stringResource(R.string.subscriptions_add))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
 private fun CreateRuleSetDialog(
     onDismiss: () -> Unit,
     onCreate: (String, RuleAction) -> Unit,
@@ -443,10 +605,12 @@ private fun CreateRuleSetDialog(
 private fun EditRuleSetDialog(
     meta: RuleSetMeta,
     onDismiss: () -> Unit,
-    onSave: (String, RuleAction) -> Unit,
+    onSave: (String, RuleAction, String) -> Unit,
 ) {
     var name by rememberSaveable { mutableStateOf(meta.name) }
     var action by rememberSaveable { mutableStateOf(meta.action) }
+    var url by rememberSaveable { mutableStateOf(meta.url) }
+    val urlOk = !meta.isSubscription || url.startsWith("https://")
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.rulesets_edit_title)) },
@@ -459,13 +623,29 @@ private fun EditRuleSetDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (meta.isSubscription) {
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it },
+                        label = { Text(stringResource(R.string.subscriptions_url)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (url.isNotBlank() && !urlOk) {
+                        Text(
+                            text = stringResource(R.string.subscriptions_url_https),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
                 SetActionSegmentedRow(selected = action, onSelect = { action = it })
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(name.trim(), action) },
-                enabled = name.isNotBlank(),
+                onClick = { onSave(name.trim(), action, url.trim()) },
+                enabled = name.isNotBlank() && urlOk,
             ) {
                 Text(stringResource(R.string.rulesets_edit))
             }

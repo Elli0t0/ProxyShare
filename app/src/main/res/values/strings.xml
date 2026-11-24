@@ -58,6 +58,14 @@
     <string name="rulesets_name">Name</string>
     <string name="rulesets_domains">%1$d domains</string>
     <string name="rulesets_blocked">Blocked: %1$d</string>
+    <string name="subscriptions_add">Add subscription</string>
+    <string name="subscriptions_update_now">Update now</string>
+    <string name="subscriptions_update_all">Update all</string>
+    <string name="subscriptions_url">URL</string>
+    <string name="subscriptions_url_https">Must start with https://</string>
+    <string name="subscriptions_updated">Updated %1$s</string>
+    <string name="subscriptions_never_updated">Never updated</string>
+    <string name="subscriptions_failed">Failed: %1$s · kept old list</string>
     <string name="rules_moved_note">Blocked domains moved to the Rules tab.</string>
     <string name="rules_open">Open Rules</string>
     <string name="rule_dialog_title">Add rule</string>

@@ -268,6 +268,15 @@ second parameter.
   pushes through `ProxyController.pushRuleSets` on start and on every
   metadata change while running. Home shows "Blocked: N" under the
   address card from `blocked_by_set` when it is > 0.
+- Subscriptions (0.6.9) are Kotlin-only, no new JNI: a custom set
+  with an https `url` in its metadata. `ProxyController.refreshSubscription`
+  fetches it with `fetchList` (https only, 10 s timeouts, text/plain
+  only, max 3 redirects, 5 MB cap, on the DEFAULT network) and applies
+  it with `updateSubscriptionContent` — a failed download, or one with
+  0 valid lines, keeps the old file and records a short error label
+  (`lastError`, never the URL). "Update now" per set, "Update all",
+  and one automatic refresh on proxy start when `lastUpdatedMs` is
+  older than 24 h; no background worker.
 
 ## Authentication (0.0.9)
 

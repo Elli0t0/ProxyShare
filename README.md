@@ -25,6 +25,9 @@ phone's active VPN. No root.
   Rule sets (Rules > Rule sets): a built-in Ads & trackers list (OISD
   small, 61,063 domains, off by default) and user-made named lists
   (Direct or Block); manual rules always win, sets apply in order.
+  Subscriptions are rule sets fetched from an https URL ("Update now",
+  "Update all", auto-refresh on proxy start when older than 24 h;
+  a failed update keeps the old list).
 - Backup: export and import all settings as a JSON file
   (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill

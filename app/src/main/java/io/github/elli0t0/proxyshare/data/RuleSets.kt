@@ -27,7 +27,21 @@ data class RuleSetMeta(
     val builtin: Boolean,
     /** Domains in the set (0 until counted: the built-in count is filled in when the asset is first read). */
     val count: Int,
+    /**
+     * Subscription source (0.6.9): "" for a plain set, an https URL for
+     * a subscription whose content is fetched from that URL. The URL
+     * itself is never logged (not even its query string).
+     */
+    val url: String = "",
+    /** Unix time of the last successful subscription update (0 = never). */
+    val lastUpdatedMs: Long = 0L,
+    /** Short label of the last failed update ("" = none). Never contains the URL. */
+    val lastError: String = "",
 )
+
+/** True when the set's content comes from a URL (0.6.9). */
+val RuleSetMeta.isSubscription: Boolean
+    get() = url.isNotBlank()
 
 /** The built-in set, off by default: the user opts into ad-blocking. */
 val BUILTIN_RULE_SET_META = RuleSetMeta(
@@ -55,7 +69,10 @@ fun List<RuleSetMeta>.toRuleSetsJson(): String {
                 .put("action", m.action.wire)
                 .put("enabled", m.enabled)
                 .put("builtin", m.builtin)
-                .put("count", m.count),
+                .put("count", m.count)
+                .put("url", m.url)
+                .put("lastUpdatedMs", m.lastUpdatedMs)
+                .put("lastError", m.lastError),
         )
     }
     return array.toString()
@@ -80,6 +97,10 @@ fun ruleSetsFromJson(text: String): List<RuleSetMeta> {
                         enabled = obj.optBoolean("enabled", false),
                         builtin = obj.optBoolean("builtin", false),
                         count = obj.optInt("count", 0).coerceAtLeast(0),
+                        // Added in 0.6.9: older stored JSON lacks them.
+                        url = obj.optString("url", ""),
+                        lastUpdatedMs = obj.optLong("lastUpdatedMs", 0L).coerceAtLeast(0L),
+                        lastError = obj.optString("lastError", ""),
                     ),
                 )
             }

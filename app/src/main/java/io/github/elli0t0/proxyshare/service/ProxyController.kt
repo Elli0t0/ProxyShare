@@ -9,9 +9,14 @@ import io.github.elli0t0.proxyshare.data.RuleAction
 import io.github.elli0t0.proxyshare.data.RuleEntry
 import io.github.elli0t0.proxyshare.data.RuleSetMeta
 import io.github.elli0t0.proxyshare.data.SettingsRepository
+import io.github.elli0t0.proxyshare.data.fetchList
+import io.github.elli0t0.proxyshare.data.isSubscriptionStale
 import io.github.elli0t0.proxyshare.data.loadRuleSetFileText
 import io.github.elli0t0.proxyshare.data.pushRuleSets
 import io.github.elli0t0.proxyshare.data.readBuiltinRuleSetText
+import io.github.elli0t0.proxyshare.data.saveRuleSetFileText
+import io.github.elli0t0.proxyshare.data.SubscriptionUpdate
+import io.github.elli0t0.proxyshare.data.updateSubscriptionContent
 import io.github.elli0t0.proxyshare.data.UsageHistoryStore
 import io.github.elli0t0.proxyshare.data.VpnWatcher
 import io.github.elli0t0.proxyshare.data.networkChanges
@@ -222,6 +227,59 @@ object ProxyController {
     fun clearRuleSet(id: String, action: RuleAction) {
         if (!started) return
         engine.setRuleSet(id, action.wire, "")
+    }
+
+    /**
+     * Refresh one subscription from its URL (0.6.9). Runs on the
+     * DEFAULT network (the fetch may go through the phone's VPN, that
+     * is expected). A failed download, or one with 0 valid lines,
+     * keeps the old content and records a short error label (never
+     * the URL) under the subscription. The rule-sets job pushes the
+     * new content to the engine when the metadata changes.
+     */
+    fun refreshSubscription(id: String) {
+        scope.launch {
+            val ctx = appContext ?: return@launch
+            val meta = _settings.value.ruleSets
+                .firstOrNull { it.id == id && it.url.isNotBlank() } ?: return@launch
+            val update = updateSubscriptionContent(fetchList(meta.url), meta.action)
+            if (update is SubscriptionUpdate.Updated) {
+                withContext(Dispatchers.IO) {
+                    ctx.saveRuleSetFileText(id, update.text)
+                }
+            }
+            val now = System.currentTimeMillis()
+            val updated = when (update) {
+                is SubscriptionUpdate.Updated ->
+                    meta.copy(count = update.count, lastUpdatedMs = now, lastError = "")
+                is SubscriptionUpdate.KeptOld ->
+                    meta.copy(lastError = update.reason)
+            }
+            updateSettings {
+                updateRuleSets(
+                    _settings.value.ruleSets.map {
+                        if (it.id == id) updated else it
+                    }
+                )
+            }
+        }
+    }
+
+    /** Refresh every subscription (0.6.9). Each one fetches in its own coroutine. */
+    fun refreshAllSubscriptions() {
+        for (meta in _settings.value.ruleSets) {
+            if (meta.url.isNotBlank()) refreshSubscription(meta.id)
+        }
+    }
+
+    /** Refresh the subscriptions whose last update is older than 24 h (0.6.9). */
+    fun refreshStaleSubscriptions() {
+        val now = System.currentTimeMillis()
+        for (meta in _settings.value.ruleSets) {
+            if (meta.url.isNotBlank() && isSubscriptionStale(meta.lastUpdatedMs, now)) {
+                refreshSubscription(meta.id)
+            }
+        }
     }
 
     /** A set's content by id: the asset (built-in, cached) or its file. Runs on Dispatchers.IO via pushRuleSets. */
@@ -475,6 +533,10 @@ object ProxyController {
                 pushRules(settings.rules)
                 // Rule sets (0.6.8): same, via the rule-sets job.
                 pushRuleSets(settings.ruleSets)
+                // Subscriptions (0.6.9): refresh once on start when
+                // the last update is older than 24 h. No background
+                // worker: this is the only automatic refresh.
+                refreshStaleSubscriptions()
             }
         } catch (_: Exception) {
             started = false
