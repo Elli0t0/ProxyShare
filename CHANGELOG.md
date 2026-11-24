@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 — Settings as a short list + sub-pages
+
+- Settings is now a short list of 5 rows (icon, title, one-line live
+  summary), each opening a sub-page: Server, Security, Limits, Battery &
+  startup, Appearance. Pure refactor: same settings, same behaviour,
+  same saveRestart/saveLive logic, same dialogs.
+- Navigation is plain state, same style as AppRoot: a SettingsPage enum
+  (SERVER, SECURITY, LIMITS, BATTERY, APPEARANCE) + BackHandler; the
+  detail page is back arrow + title + the same cards. Backup and Rules
+  will add rows to the enum and the list loop (0.6.3, 0.6.7).
+- Each SectionCard body moved into its own private composable
+  (ServerSettings, ProtocolsSettings, SecuritySettings, LimitsSettings,
+  BatterySettings, AppearanceSettings, AboutSettings) without changing
+  its logic. Protocols lives on the Server page; About stays on the
+  list, below the rows. The restart and open-proxy banners show on the
+  list and on every detail page.
+- Summaries are pure functions in SettingsLogic.kt, unit-tested:
+  serverSummary ("HTTP 8080 · SOCKS 1080", or "Port 8080" in
+  single-port mode), securitySummary ("Password on · private only"),
+  limitsSummary ("Unlimited" or "↓ 2 MB/s ↑ 1 MB/s"),
+  batterySummary ("Saver on · Boot off"), appearanceSummary
+  ("System theme"). The status-bar inset rule is unchanged: the
+  Scaffold passes no insets, each page adds statusBarsPadding once.
+- Tests: Kotlin 142 → 150 (8 new summary tests), Rust 170.
+
 ## 0.5.9 — Simpler Home
 
 - Home is now four things, top to bottom: the red VPN-down banner (moved

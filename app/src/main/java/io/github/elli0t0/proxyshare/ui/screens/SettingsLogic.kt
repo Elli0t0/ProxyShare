@@ -1,6 +1,7 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.R
+import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.engine.NativeEngine
 
 /** Validation kinds for [validate]: must match rust/engine/src/validate.rs. */
@@ -73,4 +74,53 @@ fun idleStopLabelRes(minutes: Int): Int = when (minutes) {
     60 -> R.string.idle_stop_60
     120 -> R.string.idle_stop_120
     else -> R.string.idle_stop_off
+}
+
+/** Live one-line summary for the Server row: "HTTP 8080 · SOCKS 1080" (or "Port 8080" in single-port mode). */
+fun serverSummary(s: AppSettings): String {
+    if (!s.separatePorts) return "Port ${s.port}"
+    val parts = buildList {
+        if ("http" in s.protocols) add("HTTP ${s.httpPort}")
+        if ("socks4" in s.protocols || "socks5" in s.protocols) add("SOCKS ${s.socksPort}")
+    }
+    return parts.joinToString(" · ")
+}
+
+/** Live one-line summary for the Security row: "Password on · private only". */
+fun securitySummary(s: AppSettings): String {
+    val parts = buildList {
+        add(if (s.authEnabled) "Password on" else "No password")
+        if (s.privateOnly) add("private only")
+    }
+    return parts.joinToString(" · ")
+}
+
+/** Format one speed limit (KB/s) for the Limits summary: 2000 -> "2 MB/s", 2500 -> "2.5 MB/s", 500 -> "500 KB/s". */
+fun formatSpeedKbps(kbps: Int): String {
+    if (kbps >= 1000) {
+        if (kbps % 1000 == 0) return "${kbps / 1000} MB/s"
+        val tenths = kbps / 100
+        return "${tenths / 10}.${tenths % 10} MB/s"
+    }
+    return "$kbps KB/s"
+}
+
+/** Live one-line summary for the Limits row: "Unlimited" or "↓ 2 MB/s ↑ 1 MB/s". */
+fun limitsSummary(s: AppSettings): String {
+    val parts = buildList {
+        if (s.limitDownKbps > 0) add("↓ ${formatSpeedKbps(s.limitDownKbps)}")
+        if (s.limitUpKbps > 0) add("↑ ${formatSpeedKbps(s.limitUpKbps)}")
+    }
+    return if (parts.isEmpty()) "Unlimited" else parts.joinToString(" ")
+}
+
+/** Live one-line summary for the Battery & startup row: "Saver on · Boot off". */
+fun batterySummary(s: AppSettings): String =
+    "Saver ${if (s.batterySaver) "on" else "off"} · Boot ${if (s.startOnBoot) "on" else "off"}"
+
+/** Live one-line summary for the Appearance row: "System theme". */
+fun appearanceSummary(s: AppSettings): String = when (s.themeMode) {
+    "light" -> "Light theme"
+    "dark" -> "Dark theme"
+    else -> "System theme"
 }
