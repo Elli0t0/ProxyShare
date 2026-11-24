@@ -42,7 +42,7 @@
     </plurals>
     <string name="health_fix">Fix</string>
     <string name="health_notifications">Notifications</string>
-    <string name="health_notifications_off">Off — the running notification won't show</string>
+    <string name="health_notifications_off">Off — the running notification won\'t show</string>
     <string name="health_battery">Battery</string>
     <string name="health_battery_optimized">Optimization is on — the system may stop the proxy</string>
     <string name="health_vpn">VPN</string>
