@@ -232,6 +232,11 @@
     <string name="laptop_windows_steps">Settings → Network → Proxy → Manual proxy setup. Enter the host and port shown above.</string>
     <string name="connect_tab_quick">Quick test</string>
     <string name="connect_tab_linux">Linux/macOS</string>
+    <string name="connect_scan_title">Scan to set up</string>
+    <string name="connect_scan_enable">Turn on PAC / setup page</string>
+    <string name="pac_label">PAC / setup page</string>
+    <string name="pac_subtitle">Serve a setup page and proxy auto-config for laptops</string>
+    <string name="pac_port_label">PAC port</string>
     <string name="connect_show">Show</string>
     <string name="connect_hide">Hide</string>
     <string name="laptop_firefox_title">Firefox</string>

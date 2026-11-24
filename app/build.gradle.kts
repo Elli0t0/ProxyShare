@@ -172,6 +172,9 @@ dependencies {
     // lifecycle-runtime-compose does NOT bring in transitively.
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    // QR codes on the Connect page (0.6.5): the pure-Java ZXing core,
+    // no Android or camera code.
+    implementation(libs.zxing.core)
     testImplementation(libs.junit)
     // Test-only: the real org.json, so parseLatestRelease can run on
     // the JVM (android.jar's org.json is a stub in unit tests).

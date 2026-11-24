@@ -67,6 +67,9 @@ pub struct Config {
     /// emits IdleStop. 0 = off. The Kotlin side stops the proxy on
     /// that event; the engine never stops itself.
     pub idle_stop_secs: u64,
+    /// Port for the PAC / setup-page server (0.6.5). 0 = off.
+    /// Default 8899. Binds to the same bind_addr as the proxy.
+    pub pac_port: u16,
 }
 
 impl Default for Config {
@@ -90,6 +93,7 @@ impl Default for Config {
             require_vpn: false,
             block_private: false,
             idle_stop_secs: 0,
+            pac_port: 8899,
         }
     }
 }
@@ -139,6 +143,7 @@ impl Config {
                 "idle_stop_secs" => {
                     config.idle_stop_secs = parse_u64(value, line_no, key)?
                 }
+                "pac_port" => config.pac_port = parse_u16(value, line_no, key)?,
                 _ => { /* unknown keys are ignored */ }
             }
         }
@@ -182,8 +187,13 @@ impl Config {
         } else {
             String::new()
         };
+        let pac = if self.pac_port != 0 {
+            format!(", pac {}", self.pac_port)
+        } else {
+            String::new()
+        };
         format!(
-            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}{block_private}{idle_stop}",
+            "bind {} {ports}, protocols {}, private_only {}, max {}, auth {}, {} blocked domains{limits}{vpn}{block_private}{idle_stop}{pac}",
             self.bind_addr,
             protocols.join("+"),
             self.private_only,
@@ -349,6 +359,13 @@ fn parse_u64(value: &str, line_no: usize, key: &str) -> Result<u64, String> {
     value
         .parse::<u64>()
         .map_err(|_| bad_value(value, line_no, key, "expected a whole number of seconds >= 0"))
+}
+
+/// A port 0-65535 (0 = off, for pac_port). Unlike parse_port, 0 is allowed.
+fn parse_u16(value: &str, line_no: usize, key: &str) -> Result<u16, String> {
+    value
+        .parse::<u16>()
+        .map_err(|_| bad_value(value, line_no, key, "expected a port 0-65535"))
 }
 
 #[cfg(test)]
@@ -556,6 +573,20 @@ connect_timeout_s = 5
         assert!(config.block_private);
         assert!(config.summary().contains("block_private on"));
         assert!(Config::parse("block_private = maybe").is_err());
+    }
+
+    #[test]
+    fn pac_port_parses_and_shows_in_summary() {
+        assert_eq!(Config::default().pac_port, 8899);
+        assert!(Config::default().summary().contains("pac 8899"));
+        let config = Config::parse("pac_port = 0").expect("pac_port 0 parses (off)");
+        assert_eq!(config.pac_port, 0);
+        assert!(!config.summary().contains("pac"));
+        let config = Config::parse("pac_port = 8081").expect("pac_port parses");
+        assert_eq!(config.pac_port, 8081);
+        assert!(config.summary().contains("pac 8081"));
+        assert!(Config::parse("pac_port = 65536").is_err());
+        assert!(Config::parse("pac_port = abc").is_err());
     }
 
     #[test]

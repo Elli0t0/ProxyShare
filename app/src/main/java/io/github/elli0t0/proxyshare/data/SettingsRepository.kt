@@ -20,6 +20,9 @@ data class AppSettings(
     val separatePorts: Boolean = true,
     val httpPort: Int = 8080,
     val socksPort: Int = 1080,
+    /** Serve the PAC / setup page (0.6.5). Off by default. Sent to the engine as pac_port (0 = off). */
+    val pacEnabled: Boolean = false,
+    val pacPort: Int = 8899,
     val protocols: Set<String> = setOf("http", "socks4", "socks5"),
     val authEnabled: Boolean = true,
     val authUser: String = "proxy",
@@ -65,6 +68,8 @@ fun AppSettings.toEngineConfig(): String = buildString {
     } else {
         appendLine("port=$port")
     }
+    // Always sent: the engine default is 8899 (on), so "off" must be explicit.
+    appendLine("pac_port=${if (pacEnabled) pacPort else 0}")
     appendLine("protocols=${protocols.joinToString(",")}")
     if (authEnabled && authUser.isNotBlank() && authPass.isNotBlank()) {
         appendLine("auth_user=$authUser")
@@ -128,6 +133,8 @@ class SettingsRepository(context: Context) {
             separatePorts = prefs[Keys.SEPARATE_PORTS] ?: defaults.separatePorts,
             httpPort = prefs[Keys.HTTP_PORT] ?: defaults.httpPort,
             socksPort = prefs[Keys.SOCKS_PORT] ?: defaults.socksPort,
+            pacEnabled = prefs[Keys.PAC_ENABLED] ?: defaults.pacEnabled,
+            pacPort = prefs[Keys.PAC_PORT] ?: defaults.pacPort,
             protocols = prefs[Keys.PROTOCOLS] ?: defaults.protocols,
             authEnabled = prefs[Keys.AUTH_ENABLED] ?: defaults.authEnabled,
             authUser = prefs[Keys.AUTH_USER] ?: defaults.authUser,
@@ -191,6 +198,14 @@ class SettingsRepository(context: Context) {
 
     suspend fun updateSocksPort(value: Int) {
         dataStore.edit { it[Keys.SOCKS_PORT] = value }
+    }
+
+    suspend fun updatePacEnabled(value: Boolean) {
+        dataStore.edit { it[Keys.PAC_ENABLED] = value }
+    }
+
+    suspend fun updatePacPort(value: Int) {
+        dataStore.edit { it[Keys.PAC_PORT] = value }
     }
 
     suspend fun updateProtocols(value: Set<String>) {
@@ -302,6 +317,8 @@ class SettingsRepository(context: Context) {
             prefs[Keys.SEPARATE_PORTS] = s.separatePorts
             prefs[Keys.HTTP_PORT] = s.httpPort
             prefs[Keys.SOCKS_PORT] = s.socksPort
+            prefs[Keys.PAC_ENABLED] = s.pacEnabled
+            prefs[Keys.PAC_PORT] = s.pacPort
             prefs[Keys.PROTOCOLS] = s.protocols
             prefs[Keys.AUTH_ENABLED] = s.authEnabled
             prefs[Keys.ALLOWED_CLIENTS] = s.allowedClients.joinToString(",")
@@ -332,6 +349,8 @@ class SettingsRepository(context: Context) {
         val SEPARATE_PORTS = booleanPreferencesKey("separate_ports")
         val HTTP_PORT = intPreferencesKey("http_port")
         val SOCKS_PORT = intPreferencesKey("socks_port")
+        val PAC_ENABLED = booleanPreferencesKey("pac_enabled")
+        val PAC_PORT = intPreferencesKey("pac_port")
         val PROTOCOLS = stringSetPreferencesKey("protocols")
         val AUTH_ENABLED = booleanPreferencesKey("auth_enabled")
         val AUTH_USER = stringPreferencesKey("auth_user")

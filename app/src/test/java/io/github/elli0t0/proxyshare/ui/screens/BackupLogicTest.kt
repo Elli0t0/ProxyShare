@@ -19,6 +19,8 @@ class BackupLogicTest {
         separatePorts = true,
         httpPort = 8081,
         socksPort = 1081,
+        pacEnabled = true,
+        pacPort = 8899,
         protocols = setOf("http", "socks5"),
         authEnabled = true,
         authUser = "alice",

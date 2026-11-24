@@ -56,6 +56,8 @@ data class Snapshot(
     /** Latest 1 s speed samples from the engine sampler (bytes/s). */
     val speedUp: Long = 0,
     val speedDown: Long = 0,
+    /** False when the PAC server failed to bind (0.6.5); true when it is off or up. */
+    val pacOk: Boolean = true,
 )
 
 /**
@@ -100,10 +102,10 @@ fun parseConnLine(line: String): ConnInfo? {
 
 /**
  * Parse the snapshot text from nativeSnapshot (see docs/ENGINE_API.md):
- * first line "state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down",
+ * first line "state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down<TAB>pac_ok",
  * then one tab-separated line per connection: id, client, host, port,
  * proto, started_ms, up, down, blocked. The trailing head fields are
- * optional (older snapshots lack them: 0). Returns null when there is
+ * optional (older snapshots lack them: 0, pac_ok: true). Returns null when there is
  * no usable head line; a malformed connection line is skipped, never
  * a crash.
  */
@@ -126,6 +128,7 @@ fun parseSnapshot(text: String): Snapshot? {
         devices = head.getOrNull(9)?.toIntOrNull() ?: 0,
         speedUp = head.getOrNull(10)?.toLongOrNull() ?: 0L,
         speedDown = head.getOrNull(11)?.toLongOrNull() ?: 0L,
+        pacOk = head.getOrNull(12)?.toIntOrNull() != 0,
     )
 }
 

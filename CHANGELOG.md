@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.5 — PAC server + Scan-to-set-up QR
+
+- New Settings > Server switch "PAC / setup page" (default off) with a
+  port field (default 8899). A tiny web server on the phone serves
+  /proxy.pac and a one-page setup site, so a laptop can configure
+  itself from a QR code instead of typing host and port.
+- Rust: new module pac.rs — config key `pac_port` (0 = off, default
+  8899), bound to the same bind_addr as the proxy; same client rules
+  as the proxy (allowed_clients / private_only, rejected client closed
+  with no reply); no auth on the PAC itself (it only contains ip:port).
+  Routes: GET /proxy.pac (application/x-ns-proxy-autoconfig), GET /
+  and /setup (small HTML, no JS, no external resources), else 404;
+  at most 4 KB of request, 3 s timeout, close after reply. The proxy
+  host in the PAC is the address the client connected to
+  (stream.local_addr()), so it works on hotspot, Wi-Fi and USB;
+  IPv6 literals bracketed. A PAC bind failure must NOT stop the proxy:
+  WARN in the diagnostics log + snapshot `pac_ok=false`. The setup
+  page has "Auto (PAC)" with the PAC URL, "Manual" with HTTP/SOCKS
+  host:port, short steps for Windows, macOS, Linux, Firefox, and says
+  the browser will ask for the username and password when auth is on
+  (never prints the password).
+- Kotlin: new dependency com.google.zxing:core:3.5.3 (the one allowed
+  new library); Connect page gains a "Scan to set up" item with the QR
+  of `http://<selected host>:<pac_port>/` and the URL as copyable
+  text; when PAC is off it shows a button that turns it on
+  (saveRestart). QR renders on a white background so it scans on a
+  dark theme. Tests: Rust +16 (pac_body x4, route x2, setup page x2,
+  pac_ports, http response, live loop x4, oversized request dropped;
+  config pac_port parse/summary), Kotlin +5 (qrPixels 512x512 non-blank
+  + deterministic + differs per text, pac off sends 0, pac on sends
+  the port; backup round trip covers the new fields).
+
 ## 0.6.4 — Block private networks
 
 - New Settings > Security switch "Block private networks" (default

@@ -14,6 +14,7 @@ class SettingsRepositoryTest {
             "bind_addr=0.0.0.0\n" +
                 "http_port=8080\n" +
                 "socks_port=1080\n" +
+                "pac_port=0\n" +
                 "protocols=http,socks4,socks5\n" +
                 "auth_user=proxy\n" +
                 "auth_pass=secret\n" +
@@ -23,6 +24,19 @@ class SettingsRepositoryTest {
                 "connect_timeout_s=10\n",
             config
         )
+    }
+
+    @Test
+    fun pacOffSendsZero() {
+        // The engine default is 8899 (on), so "off" must be explicit.
+        val config = AppSettings().toEngineConfig()
+        assertTrue(config.contains("pac_port=0\n"))
+    }
+
+    @Test
+    fun pacOnSendsPort() {
+        val config = AppSettings(pacEnabled = true, pacPort = 8899).toEngineConfig()
+        assertTrue(config.contains("pac_port=8899\n"))
     }
 
     @Test

@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ import io.github.elli0t0.proxyshare.data.rankInterfaces
 import io.github.elli0t0.proxyshare.engine.EngineState
 import io.github.elli0t0.proxyshare.service.ProxyController
 import java.net.URLEncoder
+import kotlinx.coroutines.launch
 
 /** One copyable command shown on the Connect page. */
 data class Cmd(val title: String, val text: String)
@@ -162,6 +164,7 @@ fun commandsForTab(cmds: List<Cmd>, tab: Int): List<Cmd> = when (tab) {
 fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
@@ -316,6 +319,43 @@ fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                             }
                             TextButton(onClick = { copyToClipboard(context, settings.authPass) }) {
                                 Text(stringResource(R.string.copy))
+                            }
+                        }
+                    }
+                }
+            }
+            item(key = "qr") {
+                // No QR for the carrier address: it is not reachable
+                // from the laptop, so the page shows the hotspot hint
+                // instead (see the address item above).
+                if (cmdHost != null && !mobileOnly) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.connect_scan_title),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        if (settings.pacEnabled) {
+                            val setupUrl = "http://$cmdHost:${settings.pacPort}/"
+                            QrImage(setupUrl)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = setupUrl,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { copyToClipboard(context, setupUrl) }) {
+                                    Text(stringResource(R.string.copy))
+                                }
+                            }
+                        } else {
+                            FilledTonalButton(onClick = {
+                                scope.launch {
+                                    ProxyController.updateSettings { updatePacEnabled(true) }
+                                    if (state is EngineState.Running) ProxyController.markRestartNeeded()
+                                }
+                            }) {
+                                Text(stringResource(R.string.connect_scan_enable))
                             }
                         }
                     }

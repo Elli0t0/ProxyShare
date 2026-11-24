@@ -134,6 +134,9 @@ struct EngineInner {
     /// Distinct client IPs with their open-connection counts: one
     /// device per IP, however many connections it holds.
     devices: HashMap<IpAddr, usize>,
+    /// Whether the PAC server is up: true when it is off (pac_port=0)
+    /// or bound, false when the bind failed. Read by snapshot().
+    pac_ok: bool,
     /// Last 120 seconds of speed, sampled while busy.
     history: crate::history::History,
     /// Last 500 closed connections, with monotonically increasing ids.
@@ -274,7 +277,8 @@ fn is_private_or_local(ip: &IpAddr) -> bool {
 
 /// A client may connect when it is in `allowed_clients` (or when that
 /// list is empty) and, when `private_only` holds, is private or local.
-fn client_allowed(config: &Config, ip: &IpAddr) -> bool {
+/// Shared by the proxy accept path and the PAC server (pac.rs).
+pub(crate) fn client_allowed(config: &Config, ip: &IpAddr) -> bool {
     if !config.allowed_clients.is_empty()
         && !config.allowed_clients.iter().any(|c| c.contains(ip))
     {
@@ -306,6 +310,7 @@ impl Engine {
                 denied: HashSet::new(),
                 effective_max: 256,
                 devices: HashMap::new(),
+                pac_ok: true,
                 history: crate::history::History::new(),
                 session_log: crate::sessionlog::SessionLog::new(),
                 sampler_task: None,
@@ -441,7 +446,9 @@ impl Engine {
             // belong to the previous session. Any sampler or idle-stop
             // countdown left over from it is aborted (its ticks would
             // push into the new session's ring); the next Busy edge
-            // starts a new sampler.
+            // starts a new sampler. The PAC flag resets too: a failed
+            // bind from the previous run must not stick.
+            inner.pac_ok = true;
             inner.history.clear();
             if let Some(task) = inner.sampler_task.take() {
                 task.abort();
@@ -511,6 +518,37 @@ impl Engine {
                     }
                 }
             }));
+        }
+        // The PAC server is best-effort: a bind failure must not stop
+        // the proxy. It is reported in the snapshot (pac_ok=false) and
+        // the diagnostics log, and the proxy keeps running.
+        if config.pac_port != 0 {
+            match Self::bind_listener(config.bind_addr, config.pac_port) {
+                Ok(std_pac_listener) => {
+                    let (http, socks) = crate::pac::pac_ports(&config);
+                    let pac_config = config.clone();
+                    let shutdown = shutdown_rx.clone();
+                    accept_tasks.push(rt.spawn(async move {
+                        match TcpListener::from_std(std_pac_listener) {
+                            Ok(listener) => {
+                                crate::pac::pac_accept_loop(
+                                    listener, pac_config, http, socks, shutdown,
+                                )
+                                .await;
+                            }
+                            Err(e) => {
+                                crate::diag::log_error(format!(
+                                    "failed to wrap pac listener: {e}"
+                                ));
+                            }
+                        }
+                    }));
+                }
+                Err(e) => {
+                    inner.pac_ok = false;
+                    crate::diag::log_warn(format!("pac bind failed: {e}"));
+                }
+            }
         }
         inner.accept_tasks = accept_tasks;
         inner.shutdown_tx = Some(shutdown_tx);
@@ -595,7 +633,7 @@ impl Engine {
 
     /// The snapshot text (see docs/ENGINE_API.md).
     pub fn snapshot(&self) -> String {
-        let (state, total_up, total_down, rejected, live, devices, speed, mut conns);
+        let (state, total_up, total_down, rejected, live, devices, speed, pac_ok, mut conns);
         {
             let inner = lock_inner(&self.inner);
             state = inner.state.clone();
@@ -611,6 +649,7 @@ impl Engine {
                 self.live_down.load(Ordering::Relaxed),
             );
             devices = inner.devices.len();
+            pac_ok = inner.pac_ok;
             let latest = inner.history.latest();
             speed = (latest.up_bps, latest.down_bps);
             conns = inner
@@ -628,6 +667,7 @@ impl Engine {
             live,
             devices,
             speed,
+            pac_ok,
         )
     }
 

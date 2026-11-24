@@ -156,6 +156,8 @@ fun AppSettings.toBackupJson(): String = JSONObject().apply {
     put("separatePorts", separatePorts)
     put("httpPort", httpPort)
     put("socksPort", socksPort)
+    put("pacEnabled", pacEnabled)
+    put("pacPort", pacPort)
     put("protocols", JSONArray(protocols.toList()))
     put("authEnabled", authEnabled)
     // authUser and authPass are NEVER exported.
@@ -219,6 +221,8 @@ fun settingsFromBackupJson(
         separatePorts = o.optBoolean("separatePorts", base.separatePorts),
         httpPort = o.optInt("httpPort", base.httpPort).coerceIn(1, 65535),
         socksPort = o.optInt("socksPort", base.socksPort).coerceIn(1, 65535),
+        pacEnabled = o.optBoolean("pacEnabled", base.pacEnabled),
+        pacPort = o.optInt("pacPort", base.pacPort).coerceIn(1, 65535),
         protocols = protocols,
         authEnabled = o.optBoolean("authEnabled", base.authEnabled),
         allowedClients = jsonStringList(o, "allowedClients").filter(isValidCidr),

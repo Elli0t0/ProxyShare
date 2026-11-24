@@ -15,6 +15,9 @@ phone's active VPN. No root.
   failing item.
 - Settings: port, bind address, protocols, auth, allowed clients, blocked
   domains, block private networks, limits, theme (System/Light/Dark).
+- PAC server (Settings > Server, off by default): serves /proxy.pac and a
+  setup page, so a laptop can configure itself by scanning the QR code on
+  the "Connect your laptop" page.
 - Backup: export and import all settings as a JSON file
   (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill

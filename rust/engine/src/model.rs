@@ -198,7 +198,8 @@ impl Event {
 /// including closed connections, so Kotlin no longer adds the active
 /// connections' bytes itself). devices is the distinct-client count.
 /// speed_up/speed_down are the latest 1 s samples (EMA, bytes/s).
-/// See docs/ENGINE_API.md.
+/// pac_ok is false when the PAC server failed to bind (0.6.5); true
+/// when it is off or up. See docs/ENGINE_API.md.
 pub fn snapshot_text(
     state: &EngineState,
     totals: (u64, u64),
@@ -207,9 +208,10 @@ pub fn snapshot_text(
     live: (u64, u64),
     devices: usize,
     speed: (u64, u64),
+    pac_ok: bool,
 ) -> String {
     let mut text = format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         state.as_str(),
         totals.0,
         totals.1,
@@ -222,6 +224,7 @@ pub fn snapshot_text(
         devices,
         speed.0,
         speed.1,
+        if pac_ok { 1 } else { 0 },
     );
     for conn in conns {
         text.push('\n');
@@ -285,8 +288,8 @@ mod tests {
     #[test]
     fn snapshot_text_shape() {
         assert_eq!(
-            snapshot_text(&EngineState::Stopped, (0, 0), &[], (0, 0, 0), (0, 0), 0, (0, 0)),
-            "stopped\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0"
+            snapshot_text(&EngineState::Stopped, (0, 0), &[], (0, 0, 0), (0, 0), 0, (0, 0), true),
+            "stopped\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t1"
         );
         let conn = sample_conn();
         assert_eq!(
@@ -297,9 +300,10 @@ mod tests {
                 (3, 1, 2),
                 (4096, 8192),
                 2,
-                (500, 600)
+                (500, 600),
+                false
             ),
-            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
+            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\t0\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
         );
     }
 

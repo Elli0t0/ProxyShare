@@ -140,6 +140,36 @@ second parameter.
   ("blocked {host}:{port} from {ip} (private target)"). UDP ASSOCIATE
   datagrams are NOT filtered, like blocked domains.
 
+## PAC server (0.6.5)
+
+- Config key `pac_port` (default `8899`, 0 = off). A tiny HTTP server
+  on the same `bind_addr` as the proxy, serving `/proxy.pac` and a
+  one-page setup site at `/` and `/setup` (no JavaScript, no external
+  resources). The Kotlin side sends `pac_port=0` when its switch is
+  off, because the engine default is on.
+- Routes: `GET /proxy.pac` (Content-Type
+  `application/x-ns-proxy-autoconfig`), `GET /` and `/setup` (the
+  setup page: "Auto (PAC)" with the PAC URL, "Manual" with the
+  HTTP/SOCKS host:port, short steps for Windows, macOS, Linux and
+  Firefox), anything else 404. At most 4 KB of request is read, 3 s
+  timeout, one reply then close. A request over 4 KB, or one that
+  never completes a header, is dropped with no reply.
+- The proxy host in the PAC and the setup page is the address the
+  client connected to (`stream.local_addr()`), so it works on hotspot,
+  Wi-Fi and USB without the user choosing an address; IPv6 literals
+  are bracketed. The PAC sends plain hostnames, `localhost` and
+  private ranges DIRECT, then the proxy chain (HTTP `PROXY`, SOCKS5
+  `SOCKS5`, whichever protocols are on), then DIRECT.
+- Same client rules as the proxy (`allowed_clients` /
+  `private_only`); a rejected client gets the connection closed with
+  no reply. No auth on the PAC itself: it only contains ip:port.
+  When auth is on, the setup page says the browser will ask for the
+  username and password; it never prints the password.
+- A PAC bind failure must NOT stop the proxy: the engine logs a WARN
+  in the diagnostics log and reports `pac_ok=false` in the snapshot.
+  The pure pieces are in `rust/engine/src/pac.rs`: `pac_body`,
+  `route`, `setup_page`, `pac_ports`.
+
 ## Authentication (0.0.9)
 
 - When the config has both `auth_user` and `auth_pass`, every protocol
@@ -332,6 +362,7 @@ The engine is configured with a plain text of `key=value` lines, parsed by
 | `require_vpn` | `true` / `false` | `false` | Refuse new connections while no VPN is active (the live state arrives through `nativeSetVpnActive`). Existing connections are never closed. See "VPN watchdog". |
 | `block_private` | `true` / `false` | `false` | Refuse targets that resolve only to private addresses. Enforced after DNS in the Connector. See "Block private networks". |
 | `idle_stop_secs` | seconds ≥ 0 | `0` | Stop the proxy after this many seconds with no active connection. 0 = off. See "Engine-owned stats". |
+| `pac_port` | 0–65535 | `8899` | Port of the PAC / setup-page server, on the same `bind_addr`. 0 = off. See "PAC server". |
 
 Example:
 
@@ -367,7 +398,7 @@ Parsing rules:
 text. First line:
 
 ```
-state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down
+state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down<TAB>pac_ok
 ```
 
 Then one line per connection:
@@ -392,6 +423,9 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blo
   connection. `speed_up` / `speed_down` are the latest sampler
   reading in bytes per second (see "Engine-owned stats"). All five
   are optional in the Kotlin parser (older snapshots lack them: 0).
+  `pac_ok` is "1" when the PAC server is off or up, "0" when its
+  bind failed (see "PAC server"); absent in older snapshots, where
+  the Kotlin parser reads it as true.
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
   milliseconds, `up` / `down` the connection's byte counts, `blocked`

@@ -622,6 +622,25 @@ private fun ServerSettings(
                 onValid = { saveRestart { updatePort(it) } },
             )
         }
+        SettingRow(
+            title = stringResource(R.string.pac_label),
+            subtitle = stringResource(R.string.pac_subtitle),
+            trailing = {
+                Switch(
+                    checked = settings.pacEnabled,
+                    onCheckedChange = { saveRestart { updatePacEnabled(it) } },
+                )
+            },
+        )
+        if (settings.pacEnabled) {
+            NumberField(
+                label = stringResource(R.string.pac_port_label),
+                value = settings.pacPort,
+                errorText = stringResource(R.string.port_error),
+                validate = ::validatePort,
+                onValid = { saveRestart { updatePacPort(it) } },
+            )
+        }
         Text(
             text = stringResource(R.string.bind_label),
             style = MaterialTheme.typography.bodyLarge,
