@@ -122,7 +122,7 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
         }
         // Live brings its own 16dp padding; the log contents relied
         // on the old LogsScreen column for theirs, so it is added here.
-        val logModifier = Modifier.weight(1f).padding(horizontal = 16.dp, bottom = 16.dp)
+        val logModifier = Modifier.weight(1f).padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
         when (seg) {
             0 -> ConnectionsScreen(
                 modifier = Modifier.weight(1f),
