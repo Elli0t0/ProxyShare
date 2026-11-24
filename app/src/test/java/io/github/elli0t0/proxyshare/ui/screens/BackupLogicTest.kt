@@ -26,7 +26,6 @@ class BackupLogicTest {
         authUser = "alice",
         authPass = "secret",
         allowedClients = listOf("192.168.1.0/24"),
-        blockedDomains = listOf("ads.example.com", "*.tracker.example"),
         privateOnly = false,
         blockPrivate = true,
         maxConnections = 100,
@@ -52,7 +51,6 @@ class BackupLogicTest {
         val restored = settingsFromBackupJson(
             original.toBackupJson(),
             isValidCidr = acceptAll,
-            isValidDomain = acceptAll,
         ).getOrThrow()
         assertEquals(original.copy(authUser = "proxy", authPass = ""), restored)
     }
@@ -77,7 +75,6 @@ class BackupLogicTest {
         val restored = settingsFromBackupJson(
             "{\"version\": 1, \"port\": 99999, \"httpPort\": 0, \"maxConnections\": 99999}",
             isValidCidr = acceptAll,
-            isValidDomain = acceptAll,
         ).getOrThrow()
         assertEquals(65535, restored.port)
         assertEquals(1, restored.httpPort)
@@ -89,7 +86,6 @@ class BackupLogicTest {
         val restored = settingsFromBackupJson(
             "{\"version\": 1, \"port\": 1234}",
             isValidCidr = acceptAll,
-            isValidDomain = acceptAll,
         ).getOrThrow()
         assertEquals(AppSettings().copy(port = 1234), restored)
     }
@@ -98,12 +94,9 @@ class BackupLogicTest {
     fun invalidListEntriesAreDropped() {
         val restored = settingsFromBackupJson(
             "{\"version\": 1, " +
-                "\"allowedClients\": [\"10.0.0.0/8\", \"nonsense\"], " +
-                "\"blockedDomains\": [\"ads.example.com\", \"bad domain\"]}",
+                "\"allowedClients\": [\"10.0.0.0/8\", \"nonsense\"]}",
             isValidCidr = { it.startsWith("10.") },
-            isValidDomain = { it == "ads.example.com" },
         ).getOrThrow()
         assertEquals(listOf("10.0.0.0/8"), restored.allowedClients)
-        assertEquals(listOf("ads.example.com"), restored.blockedDomains)
     }
 }

@@ -97,7 +97,6 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     requestedPage: SettingsPage? = null,
     onRequestedPageShown: () -> Unit = {},
-    onOpenRules: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -202,7 +201,6 @@ fun SettingsScreen(
                 saveRestart = ::saveRestart,
                 saveLive = ::saveLive,
                 onShowIdleDialog = { showIdleDialog = true },
-                onOpenRules = onOpenRules,
                 onShowSnackbar = { message ->
                     scope.launch { snackbarHostState.showSnackbar(message) }
                 },
@@ -318,7 +316,6 @@ private fun SettingsDetail(
     saveRestart: (suspend SettingsRepository.() -> Unit) -> Unit,
     saveLive: (suspend SettingsRepository.() -> Unit) -> Unit,
     onShowIdleDialog: () -> Unit,
-    onOpenRules: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -357,7 +354,6 @@ private fun SettingsDetail(
             SettingsPage.SECURITY -> SecuritySettings(
                 settings = settings,
                 saveRestart = saveRestart,
-                onOpenRules = onOpenRules,
             )
             SettingsPage.LIMITS -> LimitsSettings(
                 settings = settings,
@@ -706,7 +702,6 @@ private fun ProtocolsSettings(
 private fun SecuritySettings(
     settings: AppSettings,
     saveRestart: (suspend SettingsRepository.() -> Unit) -> Unit,
-    onOpenRules: () -> Unit,
 ) {
     SectionCard(title = stringResource(R.string.settings_security)) {
         OptionRow(
@@ -791,33 +786,6 @@ private fun SecuritySettings(
             }
         }
         CidrAddRow(onAdd = { saveRestart { updateAllowedClients(settings.allowedClients + it) } })
-        Text(
-            text = stringResource(R.string.blocked_domains_label),
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        Text(
-            text = stringResource(R.string.blocked_domains_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // Blocked domains are read-only here since 0.6.7: the list was
-        // migrated into BLOCK rules (see Rules.kt), and the Rules tab
-        // owns editing now. The field stays (empty) for one version.
-        for (domain in settings.blockedDomains) {
-            Text(
-                text = domain,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        Text(
-            text = stringResource(R.string.rules_moved_note),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(onClick = onOpenRules) {
-            Text(stringResource(R.string.rules_open))
-        }
     }
 }
 

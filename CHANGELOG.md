@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.0 — Domains view in Activity (from the 0.7.0 prompt)
+
+- Activity gains a "Domains" segment (Live | Domains | History |
+  Engine | Usage): one row per host, aggregated from the session
+  log plus the live connections — host, "N requests · 12.3 MB", a
+  route tag (Proxy/Direct/Block) and, when one exists, the row's
+  own rule tag. Search ("Search a domain or URL", scheme/path/
+  query/port stripped), three dropdowns: Status (All / Active /
+  Blocked), Route (All / Proxy / Direct / Block), Sort (Active
+  first / Most traffic / Most requests / A–Z). Tap a row to set
+  its rule (Proxy / Direct / Block, include-subdomains checkbox
+  except for IP literals) or remove it, through the 0.6.7 dialog.
+  The session log is pulled once a second, only while the segment
+  is visible. Empty state: "No traffic yet".
+- Cleanup (the deprecated blockedDomains setting is gone): the
+  AppSettings field, its DataStore key, toEngineConfig's
+  blocked_domains line, updateBlockedDomains, the one-time
+  migrateBlockedDomainsOnce (and migrateRules), the Security
+  section's read-only list + "Open Rules" button, parseBlockedList,
+  the backup JSON's blockedDomains key, and the now-unused strings
+  (blocked_domains_label/subtitle/invalid, rules_moved_note,
+  rules_open). A backup from 0.6.6 simply drops its blockedDomains
+  on import — the migration already ran at app start in 0.6.7+.
+
 ## 0.6.9 — Rule subscriptions (URL lists, from the 0.6.9 prompt)
 
 - Rules > Rule sets: "Add subscription" (name, https URL, Direct or

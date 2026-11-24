@@ -416,10 +416,6 @@ object ProxyController {
         scope.launch {
             selector.network.collect { _network.value = it }
         }
-        // One-time migration (0.6.7): blocked domains become BLOCK
-        // rules. Runs once at app start, before any proxy start, so
-        // the Rules tab and the engine both see the migrated rules.
-        scope.launch { repo.migrateBlockedDomainsOnce() }
         // Push the rules to the engine whenever they change while
         // running (hot, no restart). distinctUntilChanged so an
         // unrelated settings change does not re-push the same text.

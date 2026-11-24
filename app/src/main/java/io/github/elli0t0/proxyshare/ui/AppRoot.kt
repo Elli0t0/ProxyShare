@@ -108,7 +108,6 @@ fun AppRoot() {
                         modifier = Modifier.padding(padding),
                         requestedPage = openSettingsPage,
                         onRequestedPageShown = { openSettingsPage = null },
-                        onOpenRules = { tab = 2 },
                     )
                 }
             }

@@ -2,6 +2,8 @@ package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.data.IfKind
 import io.github.elli0t0.proxyshare.data.NetIf
+import io.github.elli0t0.proxyshare.data.RuleAction
+import io.github.elli0t0.proxyshare.data.RuleEntry
 import io.github.elli0t0.proxyshare.engine.ConnInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -294,5 +296,159 @@ class ConnectionsLogicTest {
         assertEquals(1, filterSessionLog(log, "", true).size)
         assertEquals(1, filterSessionLog(log, "ADS", true).size)
         assertEquals(0, filterSessionLog(log, "nope", false).size)
+    }
+
+    // Domains view (0.7.0).
+
+    private fun entry(
+        host: String,
+        up: Long = 0,
+        down: Long = 0,
+        closedAtMs: Long = 1_000L,
+        blocked: Boolean = false,
+        route: String = "proxy",
+    ) = SessionLogEntry("10.0.0.2", host, 443, "http", up, down, 100L, closedAtMs, blocked, route)
+
+    private fun live(
+        host: String,
+        up: Long = 0,
+        down: Long = 0,
+        startedMs: Long = 1_000L,
+        blocked: Boolean = false,
+        route: String = "proxy",
+    ) = ConnInfo(1L, "10.0.0.2", host, 443, "http", startedMs, up, down, blocked, route)
+
+    @Test
+    fun aggregationGroupsCaseAndTrailingDot() {
+        val rows = aggregateDomains(
+            listOf(
+                entry("Example.COM", up = 100, down = 50),
+                entry("example.com.", up = 10, down = 5),
+                entry("EXAMPLE.com", up = 1, down = 1),
+                entry("other.com", up = 7, down = 7),
+            ),
+            emptyList(),
+        )
+        assertEquals(2, rows.size)
+        val main = rows.first { it.host == "example.com" }
+        assertEquals(3, main.count)
+        assertEquals(111L, main.up)
+        assertEquals(56L, main.down)
+        assertFalse(main.active)
+        assertFalse(main.blocked)
+    }
+
+    @Test
+    fun aggregationSumsAndNewestRouteWins() {
+        val rows = aggregateDomains(
+            listOf(
+                entry("a.com", up = 100, closedAtMs = 1_000L, route = "direct"),
+                entry("a.com", up = 50, closedAtMs = 2_000L, route = "proxy"),
+            ),
+            emptyList(),
+        )
+        assertEquals(1, rows.size)
+        assertEquals(2, rows[0].count)
+        assertEquals(150L, rows[0].up)
+        assertEquals("proxy", rows[0].route)
+        assertEquals(2_000L, rows[0].lastSeenMs)
+    }
+
+    @Test
+    fun aggregationBlockedFlagAndLiveIsNewest() {
+        val rows = aggregateDomains(
+            listOf(
+                entry("a.com", closedAtMs = 5_000L, route = "direct"),
+                entry("b.com", blocked = true),
+            ),
+            listOf(live("a.com", startedMs = 1_000L, route = "proxy")),
+            nowMs = 9_999L,
+        )
+        val a = rows.first { it.host == "a.com" }
+        assertTrue(a.active)
+        assertEquals("proxy", a.route)
+        assertEquals(9_999L, a.lastSeenMs)
+        assertFalse(a.blocked)
+        val b = rows.first { it.host == "b.com" }
+        assertTrue(b.blocked)
+        assertFalse(b.active)
+    }
+
+    @Test
+    fun filterDomainsStatusRouteAndQuery() {
+        val rows = listOf(
+            DomainRow("a.com", 1, 10, 0, 1_000L, "proxy", false, true),
+            DomainRow("b.com", 2, 20, 0, 1_000L, "direct", false, false),
+            DomainRow("c.com", 3, 30, 0, 1_000L, "block", true, false),
+        )
+        assertEquals(3, filterDomains(rows, DomainStatusFilter.ALL, DomainRouteFilter.ALL, "").size)
+        assertEquals(
+            listOf("a.com"),
+            filterDomains(rows, DomainStatusFilter.ACTIVE, DomainRouteFilter.ALL, "").map { it.host },
+        )
+        assertEquals(
+            listOf("c.com"),
+            filterDomains(rows, DomainStatusFilter.BLOCKED, DomainRouteFilter.ALL, "").map { it.host },
+        )
+        assertEquals(
+            listOf("b.com"),
+            filterDomains(rows, DomainStatusFilter.ALL, DomainRouteFilter.DIRECT, "").map { it.host },
+        )
+        assertEquals(
+            listOf("b.com"),
+            filterDomains(rows, DomainStatusFilter.ALL, DomainRouteFilter.ALL, "https://B.com/x").map { it.host },
+        )
+        assertEquals(
+            0,
+            filterDomains(rows, DomainStatusFilter.ACTIVE, DomainRouteFilter.BLOCK, "").size,
+        )
+    }
+
+    @Test
+    fun sortDomainsEachOrderIsDeterministic() {
+        val rows = listOf(
+            DomainRow("b.com", 5, 100, 0, 1_000L, "proxy", false, false),
+            DomainRow("a.com", 5, 100, 0, 1_000L, "proxy", false, true),
+            DomainRow("c.com", 1, 500, 0, 1_000L, "proxy", false, false),
+        )
+        // Ties break on host, so the order is the same every run.
+        assertEquals(
+            listOf("a.com", "c.com", "b.com"),
+            sortDomains(rows, DomainSort.ACTIVE_FIRST).map { it.host },
+        )
+        assertEquals(
+            listOf("c.com", "a.com", "b.com"),
+            sortDomains(rows, DomainSort.MOST_TRAFFIC).map { it.host },
+        )
+        assertEquals(
+            listOf("a.com", "b.com", "c.com"),
+            sortDomains(rows, DomainSort.MOST_REQUESTS).map { it.host },
+        )
+        assertEquals(
+            listOf("a.com", "b.com", "c.com"),
+            sortDomains(rows, DomainSort.AZ).map { it.host },
+        )
+    }
+
+    @Test
+    fun normalizeDomainQueryStripsSchemePathQueryPortAndDot() {
+        assertEquals("sub.example.com", normalizeDomainQuery("https://Sub.Example.com/path?q=1"))
+        assertEquals("example.com", normalizeDomainQuery("example.com:443"))
+        assertEquals("example.com", normalizeDomainQuery("EXAMPLE.COM."))
+        assertEquals("a.com", normalizeDomainQuery("http://a.com#frag"))
+        assertEquals("::1", normalizeDomainQuery("::1"))
+        assertEquals("", normalizeDomainQuery("  "))
+    }
+
+    @Test
+    fun ruleForHostFindsOnlyExactHostRules() {
+        val rules = listOf(
+            RuleEntry("a.com", RuleAction.BLOCK),
+            RuleEntry("=b.com", RuleAction.DIRECT),
+        )
+        assertEquals(RuleEntry("a.com", RuleAction.BLOCK), ruleForHost("a.com", rules))
+        assertEquals(RuleEntry("=b.com", RuleAction.DIRECT), ruleForHost("b.com", rules))
+        assertEquals(null, ruleForHost("sub.a.com", rules))
+        assertEquals(null, ruleForHost("c.com", rules))
     }
 }

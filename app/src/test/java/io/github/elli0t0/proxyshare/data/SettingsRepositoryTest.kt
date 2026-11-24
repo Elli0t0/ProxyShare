@@ -110,15 +110,6 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun blockedDomainsAreJoined() {
-        val config = AppSettings(
-            authPass = "secret",
-            blockedDomains = listOf("ads.example.com", "*.tracker.example"),
-        ).toEngineConfig()
-        assertTrue(config.contains("blocked_domains=ads.example.com,*.tracker.example\n"))
-    }
-
-    @Test
     fun outboundSettingsDoNotChangeEngineConfig() {
         val base = AppSettings(authPass = "secret").toEngineConfig()
         val changed = AppSettings(

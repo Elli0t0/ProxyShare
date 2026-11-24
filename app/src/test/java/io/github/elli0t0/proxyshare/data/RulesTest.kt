@@ -69,40 +69,6 @@ class RulesTest {
     }
 
     @Test
-    fun migrationIsIdempotent() {
-        val (once, remaining) = migrateRules(
-            emptyList(),
-            listOf("ads.example.com", "*.tracker.com"),
-        )
-        assertEquals(
-            listOf(
-                RuleEntry("ads.example.com", RuleAction.BLOCK),
-                RuleEntry("*.tracker.com", RuleAction.BLOCK),
-            ),
-            once
-        )
-        assertTrue(remaining.isEmpty())
-        val (twice, remaining2) = migrateRules(once, remaining)
-        assertEquals(once, twice)
-        assertTrue(remaining2.isEmpty())
-    }
-
-    @Test
-    fun migrationKeepsExistingActionForDuplicatePattern() {
-        val (out, _) = migrateRules(
-            listOf(RuleEntry("a.com", RuleAction.DIRECT)),
-            listOf("a.com", "b.com"),
-        )
-        assertEquals(
-            listOf(
-                RuleEntry("a.com", RuleAction.DIRECT),
-                RuleEntry("b.com", RuleAction.BLOCK),
-            ),
-            out
-        )
-    }
-
-    @Test
     fun upsertReplacesSamePatternAndKeepsOrder() {
         val rules = listOf(
             RuleEntry("a.com", RuleAction.PROXY),

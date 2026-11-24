@@ -2,6 +2,7 @@ package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.data.IfKind
 import io.github.elli0t0.proxyshare.data.NetIf
+import io.github.elli0t0.proxyshare.data.RuleEntry
 import io.github.elli0t0.proxyshare.engine.ConnInfo
 import io.github.elli0t0.proxyshare.engine.LogIds
 import java.util.Locale
@@ -207,3 +208,154 @@ fun sessionLogJson(log: List<SessionLogEntry>): String = buildString {
 
 private fun jsonString(s: String): String =
     "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+/**
+ * Domains view (0.7.0): one row per host, aggregated from the
+ * session log (last 500 closed connections) plus live connections.
+ */
+
+/** One domain's traffic: counts and bytes sum over its connections. */
+data class DomainRow(
+    val host: String,
+    val count: Int,
+    val up: Long,
+    val down: Long,
+    val lastSeenMs: Long,
+    val route: String,
+    val blocked: Boolean,
+    /** True when the host has a live connection right now. */
+    val active: Boolean,
+)
+
+/**
+ * Aggregate closed connections ([entries], oldest first) plus live
+ * connections ([live]) by host (lowercased, trailing dot stripped).
+ * Bytes and counts sum; lastSeenMs is the newest close, or now when
+ * the host is active; route is the newest connection's route (a live
+ * connection counts as newest); blocked is true when any connection
+ * for the host was refused.
+ */
+fun aggregateDomains(
+    entries: List<SessionLogEntry>,
+    live: List<ConnInfo>,
+    nowMs: Long = System.currentTimeMillis(),
+): List<DomainRow> {
+    class Acc {
+        var count = 0
+        var up = 0L
+        var down = 0L
+        var lastSeenMs = 0L
+        var route = "proxy"
+        var blocked = false
+        var active = false
+        var lastLiveStartedMs = -1L
+    }
+    val accs = LinkedHashMap<String, Acc>()
+    for (e in entries) {
+        val host = e.host.lowercase().trimEnd('.')
+        if (host.isEmpty()) continue
+        val a = accs.getOrPut(host) { Acc() }
+        a.count++
+        a.up += e.up
+        a.down += e.down
+        if (e.closedAtMs >= a.lastSeenMs) {
+            a.lastSeenMs = e.closedAtMs
+            a.route = e.route
+        }
+        a.blocked = a.blocked || e.blocked
+    }
+    for (c in live) {
+        val host = c.host.lowercase().trimEnd('.')
+        if (host.isEmpty()) continue
+        val a = accs.getOrPut(host) { Acc() }
+        a.count++
+        a.up += c.up
+        a.down += c.down
+        // Live is newest: its route is the host's current routing.
+        // Among live connections the latest-started one decides.
+        if (c.startedMs >= a.lastLiveStartedMs) {
+            a.lastLiveStartedMs = c.startedMs
+            a.route = c.route
+        }
+        a.lastSeenMs = nowMs
+        a.blocked = a.blocked || c.blocked
+        a.active = true
+    }
+    return accs.map { (host, a) ->
+        DomainRow(host, a.count, a.up, a.down, a.lastSeenMs, a.route, a.blocked, a.active)
+    }
+}
+
+enum class DomainStatusFilter { ALL, ACTIVE, BLOCKED }
+enum class DomainRouteFilter { ALL, PROXY, DIRECT, BLOCK }
+enum class DomainSort { ACTIVE_FIRST, MOST_TRAFFIC, MOST_REQUESTS, AZ }
+
+/** Filter rows by status, route and a (normalised) search query. */
+fun filterDomains(
+    rows: List<DomainRow>,
+    status: DomainStatusFilter,
+    route: DomainRouteFilter,
+    query: String,
+): List<DomainRow> {
+    val q = normalizeDomainQuery(query)
+    return rows.filter { r ->
+        (status == DomainStatusFilter.ALL ||
+            (status == DomainStatusFilter.ACTIVE && r.active) ||
+            (status == DomainStatusFilter.BLOCKED && r.blocked)) &&
+            (route == DomainRouteFilter.ALL ||
+                r.route == route.name.lowercase()) &&
+            (q.isEmpty() || r.host.contains(q))
+    }
+}
+
+/**
+ * Sort rows. Every order is total (ties break on host), so the list
+ * is stable and deterministic for the same input.
+ */
+fun sortDomains(rows: List<DomainRow>, sort: DomainSort): List<DomainRow> =
+    when (sort) {
+        DomainSort.ACTIVE_FIRST -> rows.sortedWith(
+            compareByDescending<DomainRow> { it.active }
+                .thenByDescending { it.up + it.down }
+                .thenBy { it.host },
+        )
+        DomainSort.MOST_TRAFFIC -> rows.sortedWith(
+            compareByDescending<DomainRow> { it.up + it.down }
+                .thenBy { it.host },
+        )
+        DomainSort.MOST_REQUESTS -> rows.sortedWith(
+            compareByDescending<DomainRow> { it.count }
+                .thenBy { it.host },
+        )
+        DomainSort.AZ -> rows.sortedBy { it.host }
+    }
+
+/**
+ * Normalise a domain search: strip a scheme and any path, query,
+ * fragment or port, lowercase, drop a trailing dot. "https://
+ * Sub.Example.com/path?q=1" becomes "sub.example.com". An IPv6
+ * literal keeps its colons (a port is only stripped when there is
+ * exactly one colon).
+ */
+fun normalizeDomainQuery(query: String): String {
+    var q = query.trim().lowercase()
+    val scheme = q.indexOf("://")
+    if (scheme >= 0) q = q.substring(scheme + 3)
+    val slash = q.indexOf('/')
+    if (slash >= 0) q = q.substring(0, slash)
+    val queryMark = q.indexOf('?')
+    if (queryMark >= 0) q = q.substring(0, queryMark)
+    val hash = q.indexOf('#')
+    if (hash >= 0) q = q.substring(0, hash)
+    val colon = q.indexOf(':')
+    if (colon >= 0 && q.indexOf(':', colon + 1) < 0) q = q.substring(0, colon)
+    return q.trimEnd('.')
+}
+
+/**
+ * The manual rule written for this exact host (`host` or `=host`),
+ * if any. Suffix rules (a rule for `a.com` covering `sub.a.com`)
+ * are not matched here: the Rules tab owns those.
+ */
+fun ruleForHost(host: String, rules: List<RuleEntry>): RuleEntry? =
+    rules.firstOrNull { it.pattern == host || it.pattern == "=$host" }

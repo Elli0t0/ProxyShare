@@ -35,9 +35,9 @@ import io.github.elli0t0.proxyshare.service.ProxyController
 
 /**
  * Activity tab: the old Connections (Live) and Logs screens merged
- * into one tab, switched with a segmented row: Live | History |
- * Engine | Usage. The wrapper adds statusBarsPadding once; the old
- * screens get topInset = false. The ⋮ menu beside the segments
+ * into one tab, switched with a segmented row: Live | Domains |
+ * History | Engine | Usage. The wrapper adds statusBarsPadding once;
+ * the old screens get topInset = false. The ⋮ menu beside the segments
  * shares or clears whichever log segment is shown (the old Logs
  * menu, moved here); Live keeps its own menu inside
  * ConnectionsScreen, Usage has its own Reset button. A segment's
@@ -49,6 +49,7 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
     var seg by rememberSaveable { mutableIntStateOf(0) }
     val labels = listOf(
         R.string.act_live,
+        R.string.act_domains,
         R.string.act_history,
         R.string.act_engine,
         R.string.act_usage,
@@ -58,8 +59,8 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
     val diagText by ProxyController.diagLogText.collectAsStateWithLifecycle()
     val canShare = when (seg) {
-        1 -> sessionLog.isNotEmpty()
-        2 -> diagText.isNotBlank()
+        2 -> sessionLog.isNotEmpty()
+        3 -> diagText.isNotBlank()
         else -> false
     }
 
@@ -80,7 +81,7 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
             // The menu and its button share one Box, so the menu
             // anchors under the ⋮ button instead of at the row's
             // left edge (a DropdownMenu anchors to its parent).
-            if (seg == 1 || seg == 2) {
+            if (seg == 2 || seg == 3) {
                 Box {
                     IconButton(onClick = { showMenu = true }) {
                         Icon(
@@ -96,7 +97,7 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
                             text = { Text(stringResource(R.string.diag_share)) },
                             onClick = {
                                 showMenu = false
-                                if (seg == 1) {
+                                if (seg == 2) {
                                     exportSessionLog(context, sessionLog)
                                 } else {
                                     shareDiagLog(context, diagText)
@@ -108,7 +109,7 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
                             text = { Text(stringResource(R.string.clear_log)) },
                             onClick = {
                                 showMenu = false
-                                if (seg == 1) {
+                                if (seg == 2) {
                                     ProxyController.clearSessionLog()
                                 } else {
                                     ProxyController.clearDiagLog()
@@ -128,10 +129,11 @@ fun ActivityScreen(modifier: Modifier = Modifier, onGoHome: () -> Unit) {
                 modifier = Modifier.weight(1f),
                 topInset = false,
                 onGoHome = onGoHome,
-                onGoLogs = { seg = 1 },
+                onGoLogs = { seg = 2 },
             )
-            1 -> SessionLogContent(modifier = logModifier)
-            2 -> EngineLogContent(modifier = logModifier)
+            1 -> DomainsContent(modifier = logModifier)
+            2 -> SessionLogContent(modifier = logModifier)
+            3 -> EngineLogContent(modifier = logModifier)
             else -> UsageContent(modifier = logModifier)
         }
     }

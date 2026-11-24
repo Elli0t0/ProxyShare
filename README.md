@@ -13,15 +13,16 @@ phone's active VPN. No root.
   tapping it lists the checks (notifications, battery, VPN, shareable
   address, port listening, password) with a Fix button for each
   failing item.
-- Settings: port, bind address, protocols, auth, allowed clients, blocked
-  domains, block private networks, limits, theme (System/Light/Dark).
+- Settings: port, bind address, protocols, auth, allowed clients,
+  routing rules, block private networks, limits, theme (System/Light/Dark).
 - PAC server (Settings > Server, off by default): serves /proxy.pac and a
   setup page, so a laptop can configure itself by scanning the QR code on
   the "Connect your laptop" page.
 - Routing rules engine: PROXY / DIRECT / BLOCK rules per domain or IP/CIDR
   (hot-reloaded, no restart); DIRECT traffic goes out through the phone's
   real non-VPN network. The Rules tab (search, filters, add/import/export)
-  edits them, and a long-press on a host in Activity > History adds one.
+  edits them, and tapping a row in Activity > Domains (or a
+  long-press on a host in History) adds one.
   Rule sets (Rules > Rule sets): a built-in Ads & trackers list (OISD
   small, 61,063 domains, off by default) and user-made named lists
   (Direct or Block); manual rules always win, sets apply in order.
@@ -42,6 +43,9 @@ phone's active VPN. No root.
   optional "Start on boot".
 - In-app session log screen (Activity tab > History): search, "Blocked only"
   filter, tap a host to copy it, long-press a hostname to block it.
+- Domains view (Activity tab > Domains): per-domain requests and traffic,
+  Status (All / Active / Blocked) and Route filters, four sort orders,
+  tap a row to set or remove its routing rule.
 - Engine diagnostics log (Activity tab > Engine): last 1000 lines,
   level filters, search, Follow toggle, repeat counts (×N),
   refreshed once a second only while visible, shareable with

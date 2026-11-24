@@ -164,20 +164,27 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
 }
 
 /**
- * Long-press a hostname in History: add a routing rule for it.
- * "Include subdomains" (on by default) writes `host` (the domain
- * and all its subdomains); off writes `=host` (that exact host
- * only). The host comes from a live connection, so it is valid by
- * construction — no validation round-trip.
+ * Long-press a hostname in History (or tap a row in Domains): add a
+ * routing rule for it. "Include subdomains" (on by default) writes
+ * `host` (the domain and all its subdomains); off writes `=host`
+ * (that exact host only). The host comes from a live connection, so
+ * it is valid by construction — no validation round-trip. Domains
+ * passes the row's current rule as the initial state, hides the
+ * subdomains checkbox for IP literals, and offers [onRemove] to
+ * delete that rule.
  */
 @Composable
-private fun RuleForHostDialog(
+fun RuleForHostDialog(
     host: String,
     onDismiss: () -> Unit,
     onAdd: (String, RuleAction) -> Unit,
+    initialAction: RuleAction = RuleAction.BLOCK,
+    initialIncludeSubdomains: Boolean = true,
+    showSubdomainsCheckbox: Boolean = true,
+    onRemove: (() -> Unit)? = null,
 ) {
-    var action by rememberSaveable { mutableStateOf(RuleAction.BLOCK) }
-    var includeSubdomains by rememberSaveable { mutableStateOf(true) }
+    var action by rememberSaveable { mutableStateOf(initialAction) }
+    var includeSubdomains by rememberSaveable { mutableStateOf(initialIncludeSubdomains) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.rule_dialog_title)) },
@@ -208,28 +215,42 @@ private fun RuleForHostDialog(
                         }
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = includeSubdomains,
-                        onCheckedChange = { includeSubdomains = it },
-                    )
-                    Text(
-                        text = stringResource(R.string.rule_dialog_subdomains),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                if (showSubdomainsCheckbox) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = includeSubdomains,
+                            onCheckedChange = { includeSubdomains = it },
+                        )
+                        Text(
+                            text = stringResource(R.string.rule_dialog_subdomains),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onAdd(if (includeSubdomains) host else "=$host", action)
+                // An IP literal has no subdomains: it is always the
+                // plain pattern (a bare IP is a valid host route).
+                onAdd(
+                    if (!showSubdomainsCheckbox || includeSubdomains) host else "=$host",
+                    action,
+                )
             }) {
                 Text(stringResource(R.string.rule_dialog_add))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel))
+            Row {
+                if (onRemove != null) {
+                    TextButton(onClick = onRemove) {
+                        Text(stringResource(R.string.domains_remove_rule))
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
             }
         },
     )

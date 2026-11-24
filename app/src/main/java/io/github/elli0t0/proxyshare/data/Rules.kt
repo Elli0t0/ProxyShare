@@ -96,29 +96,3 @@ fun filterRules(rules: List<RuleEntry>, filter: RuleFilter, query: String): List
             (q.isEmpty() || entry.pattern.lowercase().contains(q))
     }
 }
-
-/**
- * The one-time migration (0.6.7): every blocked domain becomes a
- * BLOCK rule, and blockedDomains is cleared so the engine never
- * receives the same domain twice (once as blocked_domains, once as
- * a BLOCK rule). A pattern already in [rules] keeps its existing
- * action. Idempotent: run it twice and the second run is a no-op,
- * because the first run empties the blocked list. Returns the new
- * rules and the remaining blocked list (always empty, unless the
- * input list was already empty).
- */
-fun migrateRules(
-    rules: List<RuleEntry>,
-    blockedDomains: List<String>,
-): Pair<List<RuleEntry>, List<String>> {
-    if (blockedDomains.isEmpty()) return rules to emptyList()
-    var out = rules
-    for (domain in blockedDomains) {
-        val pattern = domain.trim()
-        if (pattern.isEmpty()) continue
-        if (out.none { it.pattern == pattern }) {
-            out = out + RuleEntry(pattern, RuleAction.BLOCK)
-        }
-    }
-    return out to emptyList()
-}

@@ -29,8 +29,6 @@ val validationErrorRes: Map<String, Int> = mapOf(
     "has_path" to R.string.validation_has_path,
     "bad_cidr" to R.string.allowed_clients_invalid,
     "bad_port" to R.string.port_error,
-    "bad_domain" to R.string.blocked_domains_invalid,
-    "bad_kind" to R.string.blocked_domains_invalid,
 )
 
 /** Port 1024-65535, or null when the text is not a valid port (validated in Rust). */
@@ -43,34 +41,6 @@ fun validateBlockedDomain(text: String): Boolean = validate(VALIDATE_DOMAIN, tex
 /** A whole number inside [range], or null when not a number or out of range. */
 fun validateIntInRange(text: String, range: IntRange): Int? =
     text.toIntOrNull()?.takeIf { it in range }
-
-/**
- * Split pasted text into the entries to add and the invalid count:
- * one per line, blank lines and #-comments ignored, duplicates
- * (within the paste and against [existing]) dropped silently.
- * Each line is validated through the same Rust call as the single
- * add row (one JNI call per line; this is not a hot path).
- * [isValid] is injectable so JVM unit tests can check the splitting
- * without loading the native library.
- */
-fun parseBlockedList(
-    text: String,
-    existing: List<String> = emptyList(),
-    isValid: (String) -> Boolean = ::validateBlockedDomain,
-): Pair<List<String>, Int> {
-    val added = mutableListOf<String>()
-    var invalid = 0
-    for (raw in text.lines()) {
-        val line = raw.trim()
-        if (line.isEmpty() || line.startsWith("#")) continue
-        if (!isValid(line)) {
-            invalid++
-        } else if (line !in existing && line !in added) {
-            added += line
-        }
-    }
-    return added to invalid
-}
 
 /** Map idle-stop minutes to its label string. 0 = off. */
 fun idleStopLabelRes(minutes: Int): Int = when (minutes) {
@@ -164,7 +134,6 @@ fun AppSettings.toBackupJson(): String = JSONObject().apply {
     put("authEnabled", authEnabled)
     // authUser and authPass are NEVER exported.
     put("allowedClients", JSONArray(allowedClients))
-    put("blockedDomains", JSONArray(blockedDomains))
     // Rules (0.6.7): one object per rule, {pattern, action}.
     put("rules", JSONArray(rules.map { rule ->
         JSONObject().apply {
@@ -198,14 +167,13 @@ fun AppSettings.toBackupJson(): String = JSONObject().apply {
  * ignored, and missing keys keep [base] (the current settings on
  * import, the defaults in tests). Secrets are never in the file:
  * authUser/authPass always keep [base]'s values.
- * The validators are injectable so JVM unit tests can run without
- * loading the native library (same pattern as [parseBlockedList]).
+ * The validator is injectable so JVM unit tests can run without
+ * loading the native library.
  */
 fun settingsFromBackupJson(
     text: String,
     base: AppSettings = AppSettings(),
     isValidCidr: (String) -> Boolean = { validate(VALIDATE_CIDR, it).isEmpty() },
-    isValidDomain: (String) -> Boolean = ::validateBlockedDomain,
 ): Result<AppSettings> = runCatching {
     val o = JSONObject(text)
     require(o.optInt("version", 0) >= BACKUP_VERSION)
@@ -251,7 +219,6 @@ fun settingsFromBackupJson(
         protocols = protocols,
         authEnabled = o.optBoolean("authEnabled", base.authEnabled),
         allowedClients = jsonStringList(o, "allowedClients").filter(isValidCidr),
-        blockedDomains = jsonStringList(o, "blockedDomains").filter(isValidDomain),
         rules = rules,
         privateOnly = o.optBoolean("privateOnly", base.privateOnly),
         blockPrivate = o.optBoolean("blockPrivate", base.blockPrivate),
