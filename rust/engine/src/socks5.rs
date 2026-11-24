@@ -246,6 +246,7 @@ pub async fn handle(
     mut client: TcpStream,
     outbound: &Connector,
     config: &Config,
+    rules: &crate::rules::RuleSet,
     record: &std::sync::Arc<ConnRecord>,
     vpn_down: bool,
     up_limiter: Option<&Arc<RateLimiter>>,
@@ -263,7 +264,12 @@ pub async fn handle(
         return Ok(());
     }
     match cmd {
-        0x01 => connect(client, outbound, config, record, target, port, up_limiter, down_limiter).await,
+        0x01 => {
+            connect(
+                client, outbound, config, rules, record, target, port, up_limiter, down_limiter,
+            )
+            .await
+        }
         0x03 => associate(client, config, record).await,
         other => {
             let _ = send_error_reply(&mut client, REP_COMMAND_NOT_SUPPORTED).await;
@@ -284,6 +290,7 @@ async fn connect(
     mut client: TcpStream,
     outbound: &Connector,
     config: &Config,
+    rules: &crate::rules::RuleSet,
     record: &std::sync::Arc<ConnRecord>,
     target: Target,
     port: u16,
@@ -298,16 +305,47 @@ async fn connect(
         let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
         return Ok(());
     }
+    // Routing rules (0.6.6), checked after blocked_domains and
+    // before connect: a Block rule refuses like a blocked domain.
+    // The route is recorded now (from the domain rule) and corrected
+    // after connect when the resolved address decided it.
+    let action = rules.lookup(&host);
+    if action == Some(crate::rules::Action::Block) {
+        record.mark_blocked();
+        record.set_route(crate::rules::Action::Block);
+        crate::diag::log_info(format!(
+            "blocked {host} from {} (rule)",
+            record.client_ip
+        ));
+        let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
+        return Ok(());
+    }
+    record.set_route(action.unwrap_or(crate::rules::Action::Proxy));
     let upstream = match outbound
-        .connect(
+        .connect_routed(
             &host,
             port,
             Duration::from_secs(config.connect_timeout_s),
             config.block_private,
+            action,
+            rules,
         )
         .await
     {
-        Ok(stream) => stream,
+        Ok((stream, route)) => {
+            record.set_route(route);
+            stream
+        }
+        Err(ConnectError::RuleBlocked(_)) => {
+            record.mark_blocked();
+            record.set_route(crate::rules::Action::Block);
+            crate::diag::log_info(format!(
+                "blocked {host}:{port} from {} (rule)",
+                record.client_ip
+            ));
+            let _ = send_error_reply(&mut client, REP_NOT_ALLOWED).await;
+            return Ok(());
+        }
         Err(ConnectError::Blocked(_)) => {
             record.mark_blocked();
             crate::diag::log_info(format!(

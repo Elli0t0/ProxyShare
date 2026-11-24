@@ -113,6 +113,19 @@ class EngineTest {
     }
 
     @Test
+    fun parseConnLineReadsRouteField() {
+        val direct = parseConnLine("7\t192.168.1.10\texample.com\t443\thttps\t1700000000000\t500\t4000\t0\tdirect")
+        assertEquals("direct", direct?.route)
+        assertEquals(false, direct?.blocked)
+        val blocked = parseConnLine("7\t192.168.1.10\tads.example.com\t443\thttps\t1700000000000\t500\t4000\t1\tblock")
+        assertEquals("block", blocked?.route)
+        assertEquals(true, blocked?.blocked)
+        // A 9-field line (older engine) has no route: proxy.
+        val plain = parseConnLine("7\t192.168.1.10\texample.com\t443\thttps\t1700000000000\t500\t4000\t0")
+        assertEquals("proxy", plain?.route)
+    }
+
+    @Test
     fun parseConnLineRejectsShortAndBadLines() {
         assertEquals(null, parseConnLine("7\t192.168.1.10\texample.com"))
         assertEquals(null, parseConnLine("x\t192.168.1.10\texample.com\t443\thttps\t1\t2\t3"))

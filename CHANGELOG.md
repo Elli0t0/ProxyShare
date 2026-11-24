@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.6 — Routing rules engine
+
+- Rust: new module rules.rs — PROXY / DIRECT / BLOCK rules, one per
+  line (`a.com` and all subdomains, `*.a.com` exactly one label,
+  `=a.com` exact host only, `1.2.3.4` one IP, `10.0.0.0/8` CIDR;
+  `#` comments, blank lines ignored, case-insensitive, trailing dot
+  ignored; precedence exact > most specific domain > CIDR/IP, later
+  duplicate wins). Check order per request (after auth, before
+  connect): blocked_domains, then the domain rule (Block refuses like
+  a blocked domain: HTTP 403, SOCKS5 0x02, SOCKS4 0x5B, record marked
+  blocked); a domain whose resolved address matches an IP/CIDR rule
+  is caught after DNS, only when no domain rule matched. DIRECT goes
+  out through the phone's real non-VPN network (new
+  `nativeSetDirectNetwork`, second handle on the Connector; DNS runs
+  on the route's network when the route is decided by a domain rule;
+  no direct network set falls back to the default network with one
+  WARN per minute). Hot reload via `nativeSetRules` (one
+  `ACTION<TAB>pattern` line per rule, returns "ok <count>" or "error
+  line N: msg", atomic — a bad line rejects the whole text, nothing
+  applied, existing connections never closed). The connection record
+  carries `route` ("proxy" | "direct" | "block") as the last field of
+  the snapshot line, so old parsers keep working. Tests: Rust +14
+  (every pattern kind, precedence, one-level, trailing dot and case,
+  IP/CIDR, later duplicate wins, invalid lines with the right line
+  number, empty set, 60k-domain load < 200 ms and lookups < 5 us
+  average; Direct uses the direct network handle, rule-blocked IP
+  refused after DNS, Direct IP rule routes after DNS), Kotlin +3.
+- Kotlin (minimal, no UI yet — the Rules tab comes in 0.6.7):
+  `Engine.setRules(text)` and `Engine.setDirectNetwork(handle)`;
+  `NetworkSelector.directNetwork()` picks the best validated non-VPN
+  network (Mobile when the hotspot is on, else Wi-Fi); ProxyController
+  pushes it to the engine on start and on every network change.
+  `parseConnLine` reads the new route field (absent in older lines:
+  "proxy"); the session-log JSON export carries it as `"route"`.
+
 ## 0.6.5 — PAC server + Scan-to-set-up QR
 
 - New Settings > Server switch "PAC / setup page" (default off) with a

@@ -7,6 +7,7 @@ import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.data.SettingsRepository
 import io.github.elli0t0.proxyshare.data.UsageHistoryStore
 import io.github.elli0t0.proxyshare.data.VpnWatcher
+import io.github.elli0t0.proxyshare.data.networkChanges
 import io.github.elli0t0.proxyshare.engine.Engine
 import io.github.elli0t0.proxyshare.engine.EngineEvent
 import io.github.elli0t0.proxyshare.engine.EngineState
@@ -85,8 +86,10 @@ object ProxyController {
 
     private var repository: SettingsRepository? = null
     private var selector: NetworkSelector? = null
+    private var appContext: Context? = null
     private var started = false
     private var networkJob: Job? = null
+    private var directNetworkJob: Job? = null
     private var vpnJob: Job? = null
 
     private var usageStore: UsageHistoryStore? = null
@@ -244,10 +247,16 @@ object ProxyController {
         vpnJob = null
     }
 
+    private fun stopDirectNetworkJob() {
+        directNetworkJob?.cancel()
+        directNetworkJob = null
+    }
+
     /** Called once from ProxyShareApp.onCreate. Safe to call twice. */
     fun init(context: Context) {
         if (repository != null) return
         val appContext = context.applicationContext
+        this.appContext = appContext
         val repo = SettingsRepository(appContext)
         repository = repo
         val store = UsageHistoryStore(appContext)
@@ -284,6 +293,7 @@ object ProxyController {
                 networkJob?.cancel()
                 networkJob = null
                 stopVpnJob()
+                stopDirectNetworkJob()
                 started = false
                 startLocked()
             }
@@ -322,11 +332,24 @@ object ProxyController {
                         runCatching { engine.stop() }
                         flushUsage()
                         stopVpnJob()
+                        stopDirectNetworkJob()
                         engine.setError("VPN lost — proxy stopped")
                         networkJob?.cancel()
                         return@collect
                     }
                     engine.setOutboundNetwork(net?.networkHandle ?: 0L)
+                }
+            }
+            // The DIRECT network (0.6.6): set on start and on every
+            // network change (hotspot toggle, Wi-Fi connect/disconnect).
+            // networkChanges emits once immediately, so it is set
+            // before the engine starts.
+            directNetworkJob?.cancel()
+            directNetworkJob = scope.launch {
+                val ctx = appContext ?: return@launch
+                networkChanges(ctx).collect {
+                    if (!started) return@collect
+                    engine.setDirectNetwork(selector.directNetwork()?.networkHandle ?: 0L)
                 }
             }
             val error = engine.start(settings)
@@ -335,6 +358,7 @@ object ProxyController {
                 networkJob?.cancel()
                 networkJob = null
                 stopVpnJob()
+                stopDirectNetworkJob()
             } else {
                 // A fresh start applies the current settings.
                 _restartNeeded.value = false
@@ -347,6 +371,7 @@ object ProxyController {
             networkJob?.cancel()
             networkJob = null
             stopVpnJob()
+            stopDirectNetworkJob()
             runCatching { engine.stop() }
         }
     }
@@ -358,6 +383,7 @@ object ProxyController {
                 networkJob?.cancel()
                 networkJob = null
                 stopVpnJob()
+                stopDirectNetworkJob()
                 deniedClientsState.clear()
                 _deniedClients.value = emptySet()
                 selector?.select(OutboundMode.DEFAULT)

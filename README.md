@@ -18,6 +18,9 @@ phone's active VPN. No root.
 - PAC server (Settings > Server, off by default): serves /proxy.pac and a
   setup page, so a laptop can configure itself by scanning the QR code on
   the "Connect your laptop" page.
+- Routing rules engine: PROXY / DIRECT / BLOCK rules per domain or IP/CIDR
+  (hot-reloaded, no restart); DIRECT traffic goes out through the phone's
+  real non-VPN network. The Rules tab UI comes next.
 - Backup: export and import all settings as a JSON file
   (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill

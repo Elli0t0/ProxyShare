@@ -31,6 +31,8 @@ data class ConnInfo(
     val down: Long,
     /** True when the connection was refused for a blocked domain. */
     val blocked: Boolean = false,
+    /** How the connection is routed: "proxy" | "direct" | "block" (0.6.6). */
+    val route: String = "proxy",
 )
 
 /** The whole snapshot: totals plus one line per active connection. */
@@ -84,7 +86,7 @@ fun engineStateFromName(name: String, message: String = ""): EngineState = when 
     else -> EngineState.Stopped
 }
 
-/** Parse one connection line: the 9 tab-separated fields of a snapshot line, or the payload (b) of a type 2/3/4 event. The 9th field is "1" when the connection was refused for a blocked domain (absent in older lines: false). Null when malformed. */
+/** Parse one connection line: the 10 tab-separated fields of a snapshot line, or the payload (b) of a type 2/3/4 event. The 9th field is "1" when the connection was refused for a blocked domain (absent in older lines: false). The 10th field is the route ("proxy" | "direct" | "block", absent in older lines: "proxy"). Null when malformed. */
 fun parseConnLine(line: String): ConnInfo? {
     val f = line.split('\t')
     if (f.size < 8) return null
@@ -97,6 +99,7 @@ fun parseConnLine(line: String): ConnInfo? {
         up = f[6].toLongOrNull() ?: return null,
         down = f[7].toLongOrNull() ?: return null,
         blocked = f.getOrNull(8) == "1",
+        route = f.getOrNull(9) ?: "proxy",
     )
 }
 
@@ -280,6 +283,23 @@ class Engine(
     fun setVpnActive(active: Boolean) {
         if (closed) return
         NativeEngine.nativeSetVpnActive(handle, active)
+    }
+
+    /**
+     * Replace the routing rules from hot-reload text (see docs/ENGINE_API.md):
+     * one "ACTION<TAB>pattern" line per rule. Returns "ok <count>" on
+     * success, or "error line N: msg" with nothing applied. No-op after
+     * close (returns "error: engine closed").
+     */
+    fun setRules(text: String): String {
+        if (closed) return "error: engine closed"
+        return NativeEngine.nativeSetRules(handle, text)
+    }
+
+    /** Set the Android Network handle for DIRECT connections (0 = none set). No-op after close. */
+    fun setDirectNetwork(network: Long) {
+        if (closed) return
+        NativeEngine.nativeSetDirectNetwork(handle, network)
     }
 
     /**

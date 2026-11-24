@@ -32,6 +32,18 @@ object NativeEngine {
     @JvmStatic
     external fun nativeSetVpnActive(handle: Long, active: Boolean)
 
+    /**
+     * Replace the routing rules from hot-reload text (see docs/ENGINE_API.md):
+     * one "ACTION<TAB>pattern" line per rule. Returns "ok <count>" on
+     * success, or "error line N: msg" with nothing applied.
+     */
+    @JvmStatic
+    external fun nativeSetRules(handle: Long, text: String): String
+
+    /** Set the Android Network handle for DIRECT connections (0 = none set). */
+    @JvmStatic
+    external fun nativeSetDirectNetwork(handle: Long, network: Long)
+
     /** Abort every open connection from one client IP (see docs/ENGINE_API.md). */
     @JvmStatic
     external fun nativeCloseClient(handle: Long, ip: String)

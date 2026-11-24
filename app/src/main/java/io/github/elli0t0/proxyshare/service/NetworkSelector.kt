@@ -4,7 +4,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import io.github.elli0t0.proxyshare.data.IfKind
+import io.github.elli0t0.proxyshare.data.classifyInterface
+import io.github.elli0t0.proxyshare.data.connectedWifiIface
 import java.net.HttpURLConnection
+import java.net.NetworkInterface
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.UnknownHostException
@@ -59,6 +63,46 @@ class NetworkSelector(private val cm: ConnectivityManager) {
         }
         callback = cb
         cm.registerNetworkCallback(builder.build(), cb)
+    }
+
+    /**
+     * The best validated non-VPN network for DIRECT routing (out
+     * through the phone's real network, bypassing the VPN): prefer
+     * Mobile when the hotspot is on, else Wi-Fi, else any validated
+     * non-VPN network. Null when no validated non-VPN network exists.
+     * A network is "validated" when the OS confirmed it reaches the
+     * internet (NET_CAPABILITY_VALIDATED). When the hotspot is on,
+     * the phone is not a Wi-Fi client, so the cellular network is the
+     * one carrying the hotspot's traffic.
+     */
+    fun directNetwork(): Network? {
+        val wifiIface = runCatching { connectedWifiIface(cm) }.getOrNull()
+        val hotspotOn = runCatching {
+            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty().any {
+                it.isUp && !it.isLoopback &&
+                    classifyInterface(it.name, wifiIface) == IfKind.HOTSPOT
+            }
+        }.getOrNull() == true
+        val candidates = cm.allNetworks.mapNotNull { net ->
+            val caps = cm.getNetworkCapabilities(net) ?: return@mapNotNull null
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                return@mapNotNull null
+            }
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                return@mapNotNull null
+            }
+            net to caps
+        }
+        if (candidates.isEmpty()) return null
+        if (hotspotOn) {
+            candidates.firstOrNull { (_, caps) ->
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+            }?.let { return it.first }
+        }
+        candidates.firstOrNull { (_, caps) ->
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        }?.let { return it.first }
+        return candidates.firstOrNull()?.first
     }
 }
 

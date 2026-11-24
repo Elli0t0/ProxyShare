@@ -86,6 +86,7 @@ mod tests {
             up: 100,
             down: 200,
             blocked: false,
+            route: crate::rules::Action::Proxy,
         }
     }
 

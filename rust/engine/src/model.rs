@@ -70,16 +70,20 @@ pub struct ConnInfo {
     pub down: u64,
     /// True when the connection was refused for a blocked domain.
     pub blocked: bool,
+    /// How this connection is routed (0.6.6): Proxy by default, Direct
+    /// when a rule routes it out through the phone's real network,
+    /// Block when a rule refused it.
+    pub route: crate::rules::Action,
 }
 
 impl ConnInfo {
     /// One snapshot line:
-    /// "id\tclient\thost\tport\tproto\tstarted_ms\tup\tdown\tblocked"
+    /// "id\tclient\thost\tport\tproto\tstarted_ms\tup\tdown\tblocked\troute"
     /// (blocked is "1" when the connection was refused for a blocked
-    /// domain, else "0").
+    /// domain, else "0"; route is "proxy" | "direct" | "block").
     pub fn snapshot_line(&self) -> String {
         format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             self.id,
             self.client_ip,
             self.host,
@@ -88,7 +92,8 @@ impl ConnInfo {
             self.started_ms,
             self.up,
             self.down,
-            if self.blocked { "1" } else { "0" }
+            if self.blocked { "1" } else { "0" },
+            self.route.as_str()
         )
     }
 }
@@ -253,6 +258,7 @@ mod tests {
             up: 1024,
             down: 2048,
             blocked: false,
+            route: crate::rules::Action::Proxy,
         }
     }
 
@@ -278,13 +284,20 @@ mod tests {
     fn conn_snapshot_line() {
         assert_eq!(
             sample_conn().snapshot_line(),
-            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0"
+            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0\tproxy"
         );
         let mut blocked = sample_conn();
         blocked.blocked = true;
+        blocked.route = crate::rules::Action::Block;
         assert_eq!(
             blocked.snapshot_line(),
-            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t1"
+            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t1\tblock"
+        );
+        let mut direct = sample_conn();
+        direct.route = crate::rules::Action::Direct;
+        assert_eq!(
+            direct.snapshot_line(),
+            "1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0\tdirect"
         );
     }
 

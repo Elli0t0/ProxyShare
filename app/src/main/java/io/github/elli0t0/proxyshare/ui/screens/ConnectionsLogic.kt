@@ -105,6 +105,8 @@ data class SessionLogEntry(
     val closedAtMs: Long,
     /** True when the connection was refused for a blocked domain. */
     val blocked: Boolean = false,
+    /** How the connection was routed: "proxy" | "direct" | "block" (0.6.6). */
+    val route: String = "proxy",
     /**
      * Process-wide unique id, assigned at creation. Identical entries
      * (same ms, same host, 0 bytes) must still get distinct LazyColumn
@@ -125,12 +127,14 @@ fun sessionLogEntry(conn: ConnInfo, closedAtMs: Long): SessionLogEntry =
         durationMs = (closedAtMs - conn.startedMs).coerceAtLeast(0),
         closedAtMs = closedAtMs,
         blocked = conn.blocked,
+        route = conn.route,
     )
 
 /**
  * Parse the engine session-log text (see docs/ENGINE_API.md): one
- * "log_id<TAB>conn_id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked"
- * line per record, oldest first. Returns (log id, entry) pairs;
+ * "log_id<TAB>conn_id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked<TAB>route"
+ * line per record, oldest first. The route field is absent in older
+ * lines (read as "proxy"). Returns (log id, entry) pairs;
  * malformed lines are skipped, never a crash. `closedAtMs` is the
  * time the UI received the records (the engine does not stamp the
  * close time).
@@ -151,6 +155,7 @@ fun parseSessionLog(text: String, closedAtMs: Long): List<Pair<Long, SessionLogE
             up = f[7].toLongOrNull() ?: return@mapNotNull null,
             down = f[8].toLongOrNull() ?: return@mapNotNull null,
             blocked = f[9] == "1",
+            route = f.getOrNull(10) ?: "proxy",
         )
         logId to sessionLogEntry(conn, closedAtMs)
     }.toList()
@@ -192,7 +197,8 @@ fun sessionLogJson(log: List<SessionLogEntry>): String = buildString {
         append("\"up\":${e.up},")
         append("\"down\":${e.down},")
         append("\"durationMs\":${e.durationMs},")
-        append("\"closedAtMs\":${e.closedAtMs}")
+        append("\"closedAtMs\":${e.closedAtMs},")
+        append("\"route\":${jsonString(e.route)}")
         if (e.blocked) append(",\"blocked\":true")
         append("}")
     }

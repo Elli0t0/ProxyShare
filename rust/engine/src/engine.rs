@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -64,6 +64,9 @@ pub struct ConnRecord {
     pub down: AtomicU64,
     /// True when the connection was refused for a blocked domain.
     pub blocked: AtomicBool,
+    /// How this connection is routed (0.6.6): 0 = proxy, 1 = direct,
+    /// 2 = block (see [`crate::rules::Action`]).
+    pub route: AtomicU8,
     /// Engine-wide live totals (shared with every connection): every
     /// byte counted here is also counted there, so the snapshot's
     /// liveUp/liveDown are monotonic and include closed connections.
@@ -80,6 +83,13 @@ impl ConnRecord {
     /// Mark this connection as refused for a blocked domain.
     pub fn mark_blocked(&self) {
         self.blocked.store(true, Ordering::Relaxed);
+    }
+
+    /// Record how this connection is routed (set by the handler from
+    /// the domain rule before connect, corrected with the route the
+    /// connector actually used after a successful connect).
+    pub fn set_route(&self, action: crate::rules::Action) {
+        self.route.store(action.to_u8(), Ordering::Relaxed);
     }
 
     /// Count bytes read from the client, into the record and the
@@ -108,6 +118,7 @@ impl ConnRecord {
             up: self.up.load(Ordering::Relaxed),
             down: self.down.load(Ordering::Relaxed),
             blocked: self.blocked.load(Ordering::Relaxed),
+            route: crate::rules::Action::from_u8(self.route.load(Ordering::Relaxed)),
         }
     }
 }
@@ -184,6 +195,10 @@ pub struct Engine {
     /// The outbound used to dial targets. It holds the Android Network
     /// handle for outbound sockets (0 = default network).
     outbound: std::sync::Arc<Connector>,
+    /// Routing rules (0.6.6), hot-reloaded through nativeSetRules.
+    /// The Arc inside is swapped whole, so a connection clones it
+    /// once and matches against a stable set while a reload lands.
+    rules: std::sync::Arc<std::sync::RwLock<std::sync::Arc<crate::rules::RuleSet>>>,
     /// Failed-auth throttle: 5 failures in 60 s block an IP for 5 min.
     auth_guard: crate::auth::AuthGuard,
 }
@@ -329,6 +344,9 @@ impl Engine {
             live_up: std::sync::Arc::new(AtomicU64::new(0)),
             live_down: std::sync::Arc::new(AtomicU64::new(0)),
             outbound: std::sync::Arc::new(Connector::default()),
+            rules: std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::new(
+                crate::rules::RuleSet::default(),
+            ))),
             auth_guard: crate::auth::AuthGuard::default(),
         }
     }
@@ -348,6 +366,42 @@ impl Engine {
     /// opened after the call.
     pub fn set_outbound_network(&self, handle: u64) {
         self.outbound.set_network(handle);
+    }
+
+    /// The current rule set, for one connection to match against.
+    /// The read lock is held only long enough to clone the Arc.
+    pub fn rules(&self) -> std::sync::Arc<crate::rules::RuleSet> {
+        self.rules
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Replace the rule set from hot-reload text (one
+    /// `ACTION<TAB>pattern` line per rule). Returns "ok <count>" on
+    /// success, or "error line N: msg" with nothing applied (see
+    /// RuleSet::from_text). Applies without restarting and never
+    /// closes existing connections.
+    pub fn set_rules(&self, text: &str) -> String {
+        match crate::rules::RuleSet::from_text(text) {
+            Ok((set, count)) => {
+                *self
+                    .rules
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner()) = std::sync::Arc::new(set);
+                format!("ok {count}")
+            }
+            Err((line, msg)) => format!("error line {line}: {msg}"),
+        }
+    }
+
+    /// Set the Android Network handle (net_handle_t) for DIRECT
+    /// connections (0.6.6): the phone's real non-VPN network. 0 means
+    /// no direct network is set (a Direct route falls back to the
+    /// default network with a WARN, at most once a minute). Applies
+    /// to connections opened after the call.
+    pub fn set_direct_network(&self, handle: u64) {
+        self.outbound.set_direct_network(handle);
     }
 
     /// Tell the engine whether a VPN network is active right now.
@@ -980,6 +1034,7 @@ impl Engine {
             up: AtomicU64::new(0),
             down: AtomicU64::new(0),
             blocked: AtomicBool::new(false),
+            route: AtomicU8::new(0),
             live_up: std::sync::Arc::clone(&self.live_up),
             live_down: std::sync::Arc::clone(&self.live_down),
         });
@@ -1242,6 +1297,10 @@ async fn handle_connection(
     // Read once here, not in each handler: the flag is live state,
     // and every handler for this connection must agree on it.
     let vpn_down = engine.vpn_down_refused();
+    // Clone the rule set once: the handlers match against this
+    // snapshot, so a hot reload mid-connection cannot change the
+    // route of a request already being handled.
+    let rules = engine.rules();
     if !allowed.contains(&protocol) {
         consume_one(&mut stream).await;
         return; // sniffed protocol is not served on this listener: close, no event
@@ -1254,6 +1313,7 @@ async fn handle_connection(
                 stream,
                 &engine.outbound,
                 &config,
+                &rules,
                 &record,
                 vpn_down,
                 up_limiter.as_ref(),
@@ -1272,6 +1332,7 @@ async fn handle_connection(
                 stream,
                 &engine.outbound,
                 &config,
+                &rules,
                 &record,
                 vpn_down,
                 up_limiter.as_ref(),
@@ -1288,6 +1349,7 @@ async fn handle_connection(
                 stream,
                 &engine.outbound,
                 &config,
+                &rules,
                 &record,
                 vpn_down,
                 up_limiter.as_ref(),

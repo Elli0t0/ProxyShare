@@ -177,6 +177,31 @@ class ConnectionsLogicTest {
     }
 
     @Test
+    fun sessionLogJsonIncludesRoute() {
+        val json = sessionLogJson(
+            listOf(
+                sessionLogEntry(conn(), closedAtMs = 4000),
+                sessionLogEntry(conn().copy(route = "direct"), closedAtMs = 5000),
+            )
+        )
+        assertTrue(json.contains("\"route\":\"proxy\""))
+        assertTrue(json.contains("\"route\":\"direct\""))
+    }
+
+    @Test
+    fun parseSessionLogReadsRouteField() {
+        val text = "1\t7\t192.168.1.10\texample.com\t443\thttps\t1000\t500\t4000\t0\tdirect\n" +
+            "2\t8\t192.168.1.10\tads.example.com\t443\thttps\t2000\t100\t200\t1\tblock\n" +
+            "3\t9\t192.168.1.10\tnews.example.com\t443\thttps\t3000\t100\t200\t0\n"
+        val entries = parseSessionLog(text, closedAtMs = 4000)
+        assertEquals(3, entries.size)
+        assertEquals("direct", entries[0].second.route)
+        assertEquals("block", entries[1].second.route)
+        // An older 10-field line has no route: proxy.
+        assertEquals("proxy", entries[2].second.route)
+    }
+
+    @Test
     fun sessionLogJsonFlagsBlockedEntries() {
         val json = sessionLogJson(
             listOf(

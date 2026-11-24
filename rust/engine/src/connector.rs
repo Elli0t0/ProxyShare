@@ -33,6 +33,7 @@ use std::os::raw::{c_char, c_int};
 #[cfg(target_os = "android")]
 use std::sync::OnceLock;
 
+use crate::rules::{Action, RuleSet};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::task::JoinSet;
 
@@ -56,6 +57,10 @@ pub enum ConnectError {
     /// it like a blocked domain: HTTP 403, SOCKS5 0x02, SOCKS4 0x5B,
     /// record marked blocked.
     Blocked(io::Error),
+    /// The target (or every address it resolved to) matches a Block
+    /// routing rule. Handlers map it like a blocked domain, with a
+    /// "(rule)" log line instead of "(private target)".
+    RuleBlocked(io::Error),
 }
 
 impl fmt::Display for ConnectError {
@@ -69,6 +74,9 @@ impl fmt::Display for ConnectError {
             ConnectError::Blocked(e) => {
                 write!(f, "target is private and block_private is on: {e}")
             }
+            ConnectError::RuleBlocked(e) => {
+                write!(f, "target is blocked by a routing rule: {e}")
+            }
         }
     }
 }
@@ -79,7 +87,8 @@ impl std::error::Error for ConnectError {
             ConnectError::Dns(e)
             | ConnectError::Connect(e)
             | ConnectError::Unreachable(e)
-            | ConnectError::Blocked(e) => Some(e),
+            | ConnectError::Blocked(e)
+            | ConnectError::RuleBlocked(e) => Some(e),
         }
     }
 }
@@ -90,7 +99,8 @@ impl From<ConnectError> for io::Error {
             ConnectError::Dns(e)
             | ConnectError::Connect(e)
             | ConnectError::Unreachable(e)
-            | ConnectError::Blocked(e) => e,
+            | ConnectError::Blocked(e)
+            | ConnectError::RuleBlocked(e) => e,
         }
     }
 }
@@ -105,6 +115,10 @@ impl From<ConnectError> for io::Error {
 pub struct Connector {
     /// Android net_handle_t for outbound sockets; 0 = default network.
     network: AtomicU64,
+    /// Android net_handle_t for DIRECT routes (0.6.6): the phone's
+    /// real non-VPN network; 0 = none set (a Direct route falls back
+    /// to the default network with a WARN, at most once a minute).
+    direct_network: AtomicU64,
 }
 
 impl Connector {
@@ -117,6 +131,36 @@ impl Connector {
     }
     pub fn network(&self) -> u64 {
         self.network.load(Ordering::Relaxed)
+    }
+
+    /// Set the network handle for DIRECT routes. Unlike set_network,
+    /// this does NOT clear the DNS cache: the cache key already
+    /// contains the network handle, so entries cached under the old
+    /// direct handle never collide with the new one.
+    pub fn set_direct_network(&self, handle: u64) {
+        self.direct_network.store(handle, Ordering::Relaxed);
+    }
+    pub fn direct_network(&self) -> u64 {
+        self.direct_network.load(Ordering::Relaxed)
+    }
+
+    /// The network handle a route connects on: the outbound network
+    /// for Proxy, the direct network for Direct. A Direct route with
+    /// no direct network set falls back to the default network (0)
+    /// and warns at most once a minute.
+    fn network_for(&self, action: Action) -> u64 {
+        match action {
+            Action::Direct => {
+                let direct = self.direct_network();
+                if direct != 0 {
+                    direct
+                } else {
+                    log_direct_fallback_once_per_minute();
+                    0
+                }
+            }
+            _ => self.network(),
+        }
     }
 
     /// Drop the cached DNS entries (engine start does this, so a fresh
@@ -132,7 +176,9 @@ impl Connector {
     /// private addresses are dropped from the resolved list after DNS
     /// (never judged on the hostname, so a domain pointing at a
     /// private address is caught too); when nothing is left, the
-    /// attempt is refused with [ConnectError::Blocked].
+    /// attempt is refused with [ConnectError::Blocked]. Same as
+    /// [Connector::connect_routed] with no pre-decided route and an
+    /// empty rule set: the route is always Proxy.
     pub async fn connect(
         &self,
         host: &str,
@@ -140,7 +186,42 @@ impl Connector {
         timeout: Duration,
         block_private: bool,
     ) -> Result<TcpStream, ConnectError> {
-        let mut addrs = self.resolve(host, port, timeout).await?;
+        let rules = RuleSet::default();
+        self.connect_routed(host, port, timeout, block_private, None, &rules)
+            .await
+            .map(|(stream, _)| stream)
+    }
+
+    /// Connect with a routing decision (0.6.6). `action` is the domain
+    /// rule the handler already looked up (None when no domain rule
+    /// matched); `rules` is the set to check the resolved addresses
+    /// against. Returns the stream and the route actually used.
+    /// With a pre-decided route, DNS runs on that route's network;
+    /// without one, DNS runs on the outbound network and the route is
+    /// decided from the resolved addresses below (a second lookup on
+    /// the direct network would double the DNS traffic). When no
+    /// domain rule matched, addresses a Block IP/CIDR rule matches
+    /// are dropped after DNS (like block_private); when nothing is
+    /// left the attempt is refused with [ConnectError::RuleBlocked],
+    /// and the route follows the first remaining address in connect
+    /// order (Direct when it matches a Direct IP/CIDR rule).
+    pub async fn connect_routed(
+        &self,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+        block_private: bool,
+        action: Option<Action>,
+        rules: &RuleSet,
+    ) -> Result<(TcpStream, Action), ConnectError> {
+        // With a pre-decided route, DNS runs on that route's network;
+        // without one, DNS runs on the outbound network and the route
+        // is decided from the resolved addresses below.
+        let network = match action {
+            Some(a) => self.network_for(a),
+            None => self.network(),
+        };
+        let mut addrs = self.resolve(host, port, timeout, network).await?;
         if addrs.is_empty() {
             return Err(ConnectError::Dns(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -157,6 +238,27 @@ impl Connector {
             }
         }
         order_addrs(&mut addrs);
+        // IP/CIDR rules, only when no domain rule matched: drop
+        // addresses a Block rule matches (like block_private above);
+        // when nothing is left the target is refused. The route
+        // follows the first remaining address in connect order.
+        let route = match action {
+            Some(a) => a,
+            None => {
+                addrs.retain(|a| rules.lookup_ip(&a.ip()) != Some(Action::Block));
+                if addrs.is_empty() {
+                    return Err(ConnectError::RuleBlocked(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("{host} resolves only to rule-blocked addresses"),
+                    )));
+                }
+                if rules.lookup_ip(&addrs[0].ip()) == Some(Action::Direct) {
+                    Action::Direct
+                } else {
+                    Action::Proxy
+                }
+            }
+        };
         // While the IPv6 breaker is down, IPv6 addresses are skipped
         // when IPv4 ones exist; an IPv6-only target is refused at
         // once instead of burning the 5 s cap.
@@ -171,7 +273,7 @@ impl Connector {
             }
         };
         let cap = attempt_timeout(timeout);
-        let network = self.network();
+        let network = self.network_for(route);
         let mut pending = JoinSet::new();
         let mut next = 1usize;
         let mut last_err =
@@ -192,7 +294,7 @@ impl Connector {
                             stream
                                 .set_nodelay(true)
                                 .map_err(ConnectError::Connect)?;
-                            return Ok(stream);
+                            return Ok((stream, route));
                         }
                         Ok(Err((addr, e))) => {
                             if addr.is_ipv6() {
@@ -216,17 +318,19 @@ impl Connector {
     /// IP literal. On Android with a non-default network, DNS runs on
     /// that same network (see resolve_on_network); otherwise, or when
     /// the network resolver is unavailable, the default lookup runs.
+    /// `network` is the handle DNS runs on, and part of the cache key.
     async fn resolve(
         &self,
         host: &str,
         port: u16,
         timeout: Duration,
+        network: u64,
     ) -> Result<Vec<SocketAddr>, ConnectError> {
         // IP literals need no lookup and are never cached.
         let key: Option<DnsKey> = if host.parse::<IpAddr>().is_ok() {
             None
         } else {
-            Some((self.network(), host.to_lowercase(), port))
+            Some((network, host.to_lowercase(), port))
         };
         if let Some(key) = &key {
             if let Some(cached) = DNS_CACHE.get(key, Instant::now()) {
@@ -238,7 +342,7 @@ impl Connector {
                 });
             }
         }
-        let result = self.resolve_uncached(host, port, timeout).await;
+        let result = self.resolve_uncached(host, port, timeout, network).await;
         if let Some(key) = key {
             let cached: Result<Vec<SocketAddr>, ()> = match &result {
                 Ok(addrs) => Ok(addrs.clone()),
@@ -255,8 +359,8 @@ impl Connector {
         host: &str,
         port: u16,
         timeout: Duration,
+        network: u64,
     ) -> Result<Vec<SocketAddr>, ConnectError> {
-        let network = self.network();
         if network != 0 {
             let host_owned = host.to_string();
             let outcome = tokio::time::timeout(
@@ -374,6 +478,26 @@ fn mark_v6_down() {
 
 fn mark_v6_up() {
     V6_DOWN_UNTIL_MS.store(0, Ordering::Relaxed);
+}
+
+/// Last time the Direct-without-a-direct-network WARN was logged
+/// (unix ms): at most one per minute, so a busy proxy does not flood
+/// the diagnostics log.
+static DIRECT_FALLBACK_WARN_LAST_MS: AtomicU64 = AtomicU64::new(0);
+
+fn log_direct_fallback_once_per_minute() {
+    let now = now_ms();
+    let last = DIRECT_FALLBACK_WARN_LAST_MS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) >= 60_000
+        && DIRECT_FALLBACK_WARN_LAST_MS
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        crate::diag::log_warn(
+            "direct route requested but no direct network is set; using the default network"
+                .to_string(),
+        );
+    }
 }
 
 /// While the breaker is down at `now` (deadline passed in, so tests
@@ -681,6 +805,82 @@ mod tests {
             .await
             .expect("connect with a network handle set");
         assert!(stream.nodelay().expect("read nodelay"), "TCP_NODELAY is set");
+        assert_eq!(stream.peer_addr().expect("peer").port(), port);
+    }
+
+    #[tokio::test]
+    async fn direct_route_uses_the_direct_network_handle() {
+        let connector = Connector::default();
+        // No direct network set: Direct falls back to the default
+        // network (0), and the connect still works on the host.
+        assert_eq!(connector.network_for(Action::Direct), 0);
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let (stream, route) = connector
+            .connect_routed(
+                "127.0.0.1",
+                port,
+                Duration::from_secs(2),
+                false,
+                Some(Action::Direct),
+                &RuleSet::default(),
+            )
+            .await
+            .expect("direct connect to a listening socket");
+        assert_eq!(route, Action::Direct);
+        assert_eq!(stream.peer_addr().expect("peer").port(), port);
+        // With a direct network set, Direct uses it.
+        connector.set_direct_network(7);
+        assert_eq!(connector.network_for(Action::Direct), 7);
+        assert_eq!(connector.network_for(Action::Proxy), 0);
+        let (stream, route) = connector
+            .connect_routed(
+                "127.0.0.1",
+                port,
+                Duration::from_secs(2),
+                false,
+                Some(Action::Direct),
+                &RuleSet::default(),
+            )
+            .await
+            .expect("direct connect with a direct network set");
+        assert_eq!(route, Action::Direct);
+        assert_eq!(stream.peer_addr().expect("peer").port(), port);
+    }
+
+    #[tokio::test]
+    async fn rule_blocked_ip_is_refused_after_dns() {
+        // 127.0.0.0/8 is Block: the loopback listener is refused even
+        // though it is listening.
+        let rules = RuleSet::from_text("block\t127.0.0.0/8\n")
+            .expect("test rules are valid")
+            .0;
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let err = Connector::default()
+            .connect_routed("127.0.0.1", port, Duration::from_secs(2), false, None, &rules)
+            .await
+            .expect_err("a rule-blocked address is refused");
+        assert!(
+            matches!(err, ConnectError::RuleBlocked(_)),
+            "a rule-blocked target is a RuleBlocked error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_ip_rule_routes_after_dns() {
+        // No domain rule matched (the target is an IP literal), but
+        // its address matches a Direct CIDR: the route is Direct.
+        let rules = RuleSet::from_text("direct\t127.0.0.0/8\n")
+            .expect("test rules are valid")
+            .0;
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let (stream, route) = Connector::default()
+            .connect_routed("127.0.0.1", port, Duration::from_secs(2), false, None, &rules)
+            .await
+            .expect("a direct-ruled address connects");
+        assert_eq!(route, Action::Direct);
         assert_eq!(stream.peer_addr().expect("peer").port(), port);
     }
 

@@ -47,6 +47,8 @@ second parameter.
 | `nativeAllowClient(h: Long, ip: String)` | `Engine::allow_client` | Lifts a block set by nativeDenyClient. Safe on an unknown handle or a malformed IP (no-op). |
 | `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeSetVpnActive(h: Long, active: Boolean)` | `Engine::set_vpn_active` | Tells the engine whether a VPN network is active right now. Only consulted when the config sets `require_vpn` (see "VPN watchdog"). Safe on a stopped or unknown handle (no-op). |
+| `nativeSetRules(h: Long, text: String): String` | `Engine::set_rules` | Replaces the routing rules from hot-reload text (see "Routing rules"). Returns `"ok <count>"` or `"error line N: msg"`. Safe on an unknown handle (returns an error text). |
+| `nativeSetDirectNetwork(h: Long, network: Long)` | `Engine::set_direct_network` | Sets the Android Network handle (net_handle_t) for DIRECT connections; 0 means none is set. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
 | `nativeHistory(h: Long): String` | `Engine::history` | The last 120 seconds of speed samples as `up,down;up,down;…` (oldest first, one pair per second, gaps filled with `0,0`), or `""` for an unknown handle. See "Engine-owned stats". |
@@ -169,6 +171,61 @@ second parameter.
   in the diagnostics log and reports `pac_ok=false` in the snapshot.
   The pure pieces are in `rust/engine/src/pac.rs`: `pac_body`,
   `route`, `setup_page`, `pac_ports`.
+
+## Routing rules (0.6.6)
+
+- One rule per line, same syntax as hxmy: `a.com` (the domain and
+  all its subdomains, any depth), `*.a.com` (exactly one extra label:
+  `sub.a.com`, not `a.com`, not `x.y.a.com`), `=a.com` (that exact
+  host only), `1.2.3.4` (one IP), `10.0.0.0/8` (a CIDR, see
+  `rust/engine/src/cidr.rs`). Comments start with `#`, blank lines
+  are ignored, matching is case-insensitive, a trailing dot is
+  ignored. Precedence: exact beats the most specific domain match,
+  which beats an IP/CIDR match; a duplicate pattern is overwritten
+  by the later line. The pure matching lives in
+  `rust/engine/src/rules.rs` (`RuleSet`, `Action`).
+- Check order per request (after auth, before connect): old
+  `blocked_domains` (still works) -> `RuleSet.lookup(host)` -> Block
+  refuses like a blocked domain (HTTP 403, SOCKS5 0x02, SOCKS4 0x5B,
+  record marked blocked, "(rule)" in the diagnostics log). A domain
+  target whose resolved address matches an IP/CIDR rule is caught
+  after DNS, only when no domain rule matched: addresses a Block
+  rule matches are dropped from the resolved list (like
+  `block_private`); when nothing is left the attempt is refused the
+  same way, and the route follows the first remaining address in
+  connect order. SOCKS5 UDP ASSOCIATE is still not rule-filtered.
+- Actions: `proxy` (out through the proxy's outbound network,
+  usually the VPN), `direct` (out through the phone's real non-VPN
+  network), `block` (refused). No default action exists yet: no rule
+  means Proxy.
+- Hot reload: `nativeSetRules(h: Long, text: String): String` with
+  one `ACTION<TAB>pattern` line per rule (ACTION in `proxy` |
+  `direct` | `block`). Returns `"ok <count>"` (the number of rule
+  lines parsed) or `"error line N: msg"`; loading is atomic, so the
+  first invalid line rejects the whole text and the previous set
+  stays in force. Applies without restarting and never closes
+  existing connections. A connection clones the set once, so a reload
+  mid-connection cannot change the route of a request already being
+  handled.
+- Direct network: `nativeSetDirectNetwork(h: Long, network: Long)`
+  sets the Android Network handle (net_handle_t) DIRECT connections
+  use; 0 means none is set. Kotlin's `NetworkSelector.directNetwork()`
+  picks the best validated non-VPN network (prefer Mobile when the
+  hotspot is on, else Wi-Fi) and ProxyController pushes it to the
+  engine on start and on every network change. DNS runs on the
+  route's network when the route is decided by a domain rule; when
+  the route is decided after DNS, the lookup ran on the outbound
+  network (a second lookup on the direct network would double the
+  DNS traffic). The DNS cache key already contains the network
+  handle, so no cross-talk. When Direct is requested but no direct
+  network is set, the engine falls back to the default network (0)
+  and logs one WARN per minute. Direct routing needs the system
+  VPN's "Block connections without VPN" OFF, or the VPN lockdown
+  blocks the direct traffic too.
+- The connection record carries the route, appended as the LAST
+  field of the snapshot line (`"proxy" | "direct" | "block"`), so old
+  parsers keep working; the session-log JSON export carries it as
+  `"route"`. The Kotlin parser reads it as `"proxy"` when absent.
 
 ## Authentication (0.0.9)
 
@@ -404,7 +461,7 @@ state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_den
 Then one line per connection:
 
 ```
-id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked
+id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blocked<TAB>route
 ```
 
 - `state` is one of `stopped`, `starting`, `running`, `error`. The error
@@ -429,7 +486,10 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blo
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
   milliseconds, `up` / `down` the connection's byte counts, `blocked`
-  "1" when the connection was refused for a blocked domain, else "0".
+  "1" when the connection was refused for a blocked domain, else "0",
+  `route` one of `proxy`, `direct`, `block` (see "Routing rules";
+  absent in older snapshots, where the Kotlin parser reads it as
+  `proxy`).
   For a SOCKS5 connection the host and port are empty / 0 until the request is parsed;
   after that they are the target the client asked for.
 

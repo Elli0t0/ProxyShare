@@ -20,7 +20,8 @@
 //! [`listener`] (the JNI event callback), [`netbind`] (bind an outbound
 //! socket to an Android Network), [`history`] (speed history ring and
 //! sampler), [`sessionlog`] (session log ring), [`validate`] (the
-//! single validation source for settings text: CIDR, domain, port).
+//! single validation source for settings text: CIDR, domain, port),
+//! [`rules`] (routing rules: proxy / direct / block, pure matching).
 
 pub mod auth;
 pub mod cidr;
@@ -35,6 +36,7 @@ pub mod model;
 pub mod netbind;
 pub mod pac;
 pub mod relay;
+pub mod rules;
 pub mod sessionlog;
 pub mod sniffer;
 pub mod socks4;
@@ -52,7 +54,7 @@ use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
 /// The engine version string, e.g. "engine 0.5.2".
-pub const ENGINE_VERSION: &str = "engine 0.6.5";
+pub const ENGINE_VERSION: &str = "engine 0.6.6";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -223,6 +225,53 @@ pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nat
 ) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         with_engine(handle, |engine| engine.set_vpn_active(active != 0));
+    }));
+}
+
+/// Replace the routing rules from hot-reload text (see
+/// docs/ENGINE_API.md): one `ACTION<TAB>pattern` line per rule.
+/// Returns "ok <count>" on success, or "error line N: msg" with
+/// nothing applied. Applies without restarting and never closes
+/// existing connections. Safe on an unknown handle (returns an
+/// error text).
+#[no_mangle]
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSetRules<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    text: JString<'local>,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let text = match from_jstring(&mut env, &text) {
+            Ok(text) => text,
+            Err(e) => return to_jstring(&env, &e),
+        };
+        let out = with_engine(handle, |engine| engine.set_rules(&text))
+            .unwrap_or_else(|| "error: unknown engine handle".to_string());
+        to_jstring(&env, &out)
+    }));
+    match result {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Set the Android Network handle (net_handle_t) for DIRECT
+/// connections (see docs/ENGINE_API.md): the phone's real non-VPN
+/// network. 0 means no direct network is set. Safe on a stopped or
+/// unknown handle (no-op).
+#[no_mangle]
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSetDirectNetwork<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    network: jlong,
+) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        with_engine(handle, |engine| engine.set_direct_network(network as u64));
     }));
 }
 
