@@ -10,29 +10,23 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -43,16 +37,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -62,8 +57,6 @@ import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.NetworkWatcher
 import io.github.elli0t0.proxyshare.data.VpnWatcher
 import io.github.elli0t0.proxyshare.data.enabledPorts
-import io.github.elli0t0.proxyshare.data.IfKind
-import io.github.elli0t0.proxyshare.data.NetIf
 import io.github.elli0t0.proxyshare.data.rankInterfaces
 import io.github.elli0t0.proxyshare.engine.EngineState
 import io.github.elli0t0.proxyshare.service.ExitIpFailure
@@ -72,13 +65,9 @@ import io.github.elli0t0.proxyshare.service.OutboundMode
 import io.github.elli0t0.proxyshare.service.ProxyController
 import io.github.elli0t0.proxyshare.service.ProxyService
 import io.github.elli0t0.proxyshare.service.toOutboundMode
-import io.github.elli0t0.proxyshare.ui.components.CopyChip
-import io.github.elli0t0.proxyshare.ui.components.InfoChip
-import io.github.elli0t0.proxyshare.ui.components.OptionRow
 import io.github.elli0t0.proxyshare.ui.components.PowerButton
 import io.github.elli0t0.proxyshare.ui.components.SectionCard
 import io.github.elli0t0.proxyshare.ui.components.SettingRow
-import io.github.elli0t0.proxyshare.ui.components.StatTile
 import io.github.elli0t0.proxyshare.ui.components.toPowerState
 import kotlinx.coroutines.launch
 
@@ -87,7 +76,6 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
-    val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     val vpnActive by VpnWatcher.active.collectAsStateWithLifecycle()
@@ -151,6 +139,14 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
     val ranked = rankInterfaces(interfaces)
     val (httpPort, socksPort) = settings.enabledPorts()
     val heroAddress = advertiseAddress(ranked, httpPort, socksPort)
+    val mobileOnly = isMobileOnly(ranked)
+    val primary = remember(ranked, httpPort, socksPort) {
+        advertiseAddress(ranked, httpPort, socksPort)
+    }
+    val others = remember(ranked, httpPort, socksPort) {
+        otherAddresses(ranked, httpPort, socksPort)
+    }
+    val clipboard = LocalClipboardManager.current
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -161,10 +157,34 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.titleMedium,
-            )
+            // VPN banner first (only when needed): in Default or
+            // VPN-only mode the laptop's traffic silently bypasses a
+            // dropped VPN.
+            val outboundMode = settings.outboundMode.toOutboundMode()
+            if (running && !vpnActive &&
+                (outboundMode == OutboundMode.DEFAULT || outboundMode == OutboundMode.VPN_ONLY)
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (outboundMode == OutboundMode.VPN_ONLY) {
+                                R.string.vpn_down_paused
+                            } else {
+                                R.string.vpn_down_bypass
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
 
             // Hero card: power button, state headline, primary address.
             Card(
@@ -228,103 +248,19 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
                 }
             }
 
-            // Stat tiles, while running.
-            AnimatedVisibility(visible = running) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-                ) {
-                    StatTile(
-                        label = stringResource(R.string.stat_devices),
-                        value = snapshot.devices.toString(),
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                    StatTile(
-                        label = stringResource(R.string.stat_upload),
-                        value = formatBytes(snapshot.liveUp),
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                    StatTile(
-                        label = stringResource(R.string.stat_download),
-                        value = formatBytes(snapshot.liveDown),
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                    )
-                }
-            }
-
-            // Warning banner: open to the network with no auth.
-            if (!settings.authEnabled && !settings.privateOnly) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = stringResource(R.string.warning_open),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-            }
-
-            // VPN banner: in Default or VPN-only mode the laptop's
-            // traffic silently bypasses a dropped VPN.
-            val outboundMode = settings.outboundMode.toOutboundMode()
-            if (running && !vpnActive &&
-                (outboundMode == OutboundMode.DEFAULT || outboundMode == OutboundMode.VPN_ONLY)
-            ) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = stringResource(
-                            if (outboundMode == OutboundMode.VPN_ONLY) {
-                                R.string.vpn_down_paused
-                            } else {
-                                R.string.vpn_down_bypass
-                            },
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-            }
-
-            // Address card: first ranked interface is primary, with one
-            // row per enabled protocol; the rest expand under "Other addresses".
+            // Address card: the primary address, with the rest under
+            // "More addresses".
             AddressCard(
-                ranked = ranked,
-                vpnInterfaces = interfaces.filter { it.kind == IfKind.VPN },
-                httpPort = httpPort,
-                socksPort = socksPort,
-                socks5On = "socks5" in settings.protocols,
-            )
-
-            // One chip joining protocol, password state and private-only.
-            // It fills the width so long text wraps instead of shrinking.
-            val statusParts = buildList {
-                if ("http" in settings.protocols) add("HTTP")
-                if ("socks4" in settings.protocols) add("SOCKS4")
-                if ("socks5" in settings.protocols) add("SOCKS5")
-                add(if (settings.authEnabled) "Password" else "No password")
-                if (settings.privateOnly) add("private networks only")
-            }
-            InfoChip(
-                text = statusParts.joinToString(" · "),
-                modifier = Modifier.fillMaxWidth(),
+                primary = primary,
+                others = others,
+                mobileOnly = mobileOnly,
+                onConnect = onOpenConnect,
+                onCopy = { clipboard.setText(AnnotatedString(it)) },
             )
 
             // Outbound mode + exit-IP check.
             OutboundCard(
-                mode = settings.outboundMode.toOutboundMode(),
+                mode = outboundMode,
                 enabled = state is EngineState.Stopped,
                 onModeSelected = { mode ->
                     scope.launch { ProxyController.setOutboundMode(mode) }
@@ -347,9 +283,7 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
                             is ExitIpResult.Success -> {
                                 exitIpOk = true
                                 exitIpText = "${result.ip} · " +
-                                    context.getString(
-                                        modeLabel(settings.outboundMode.toOutboundMode()),
-                                    )
+                                    context.getString(modeLabel(outboundMode))
                             }
                             is ExitIpResult.Failure -> {
                                 exitIpOk = false
@@ -367,13 +301,6 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
                 },
             )
 
-            // Connect your laptop page.
-            FilledTonalButton(
-                onClick = onOpenConnect,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.laptop_button))
-            }
         }
     }
 }
@@ -387,20 +314,18 @@ private fun startProxy(context: Context) {
 
 @Composable
 private fun AddressCard(
-    ranked: List<NetIf>,
-    vpnInterfaces: List<NetIf>,
-    httpPort: Int?,
-    socksPort: Int?,
-    socks5On: Boolean,
+    primary: String?,
+    others: List<String>,
+    mobileOnly: Boolean,
+    onConnect: () -> Unit,
+    onCopy: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    var showOthers by rememberSaveable { mutableStateOf(false) }
-    val primary = ranked.firstOrNull()
-    val others = ranked.drop(1)
+    var expanded by rememberSaveable { mutableStateOf(false) }
     SectionCard(title = stringResource(R.string.addresses_title)) {
-        if (isMobileOnly(ranked)) {
-            // Carrier address only: no rows or copy chips, just the
-            // hint and a button to open the hotspot settings.
+        if (mobileOnly) {
+            // Carrier address only: no address rows, just the hint
+            // and a button to open the hotspot settings.
             Text(
                 text = stringResource(R.string.mobile_only_hint),
                 style = MaterialTheme.typography.bodyMedium,
@@ -414,126 +339,36 @@ private fun AddressCard(
             ) {
                 Text(stringResource(R.string.open_hotspot_settings))
             }
+        } else if (primary == null) {
+            Text(
+                text = stringResource(R.string.addresses_none),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         } else {
-            if (primary == null && vpnInterfaces.isEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = stringResource(R.string.addresses_none),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = primary,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.weight(1f),
                 )
-            }
-            if (primary != null) {
-                // Kind + raw name on one line, the name small and secondary.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = kindLabel(primary.kind),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = " · ${primary.name}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (httpPort != null) {
-                    ProtocolAddressRow(
-                        label = "HTTP",
-                        address = "${primary.ip}:$httpPort",
-                    )
-                }
-                if (socksPort != null) {
-                    ProtocolAddressRow(
-                        label = if (socks5On) "SOCKS5" else "SOCKS4",
-                        address = "${primary.ip}:$socksPort",
-                    )
-                }
-                if (primary.kind == IfKind.MOBILE) {
-                    Text(
-                        text = stringResource(R.string.mobile_unreachable),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // The carrier address is the only one: keep the
-                    // hotspot button visible so the laptop can connect.
-                    FilledTonalButton(
-                        onClick = { openHotspotSettings(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.open_hotspot_settings))
-                    }
+                TextButton(onClick = { onCopy(primary) }) {
+                    Text(stringResource(R.string.copy))
                 }
             }
-            // Toggle + VPN rows sit 8dp apart: the old TextButton's
-            // 40dp min height plus the card's 12dp gaps read as ~40dp.
-            if (others.isNotEmpty() || vpnInterfaces.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (others.isNotEmpty()) {
-                        Text(
-                            text = stringResource(R.string.other_addresses),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(role = Role.Button) {
-                                    showOthers = !showOthers
-                                }
-                                .padding(horizontal = 4.dp, vertical = 4.dp),
-                        )
-                        AnimatedVisibility(visible = showOthers) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                for (nif in others) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.weight(1f),
-                                        ) {
-                                            Text(
-                                                text = kindLabel(nif.kind),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                            )
-                                            Text(
-                                                text = " · ${nif.name}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        CopyChip(text = nif.ip)
-                                    }
-                                    if (nif.kind == IfKind.MOBILE) {
-                                        Text(
-                                            text = stringResource(R.string.mobile_unreachable),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    for (nif in vpnInterfaces) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${kindLabel(nif.kind)}: ${nif.ip}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = " · ${nif.name}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    if (vpnInterfaces.isNotEmpty()) {
-                        Text(
-                            text = stringResource(R.string.outbound_only),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+        }
+        FilledTonalButton(onClick = onConnect, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.connect_device))
+        }
+        if (others.isNotEmpty()) {
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(stringResource(R.string.more_addresses, others.size))
+            }
+            AnimatedVisibility(expanded) {
+                Column {
+                    others.forEach {
+                        Text(it, fontFamily = FontFamily.Monospace)
                     }
                 }
             }
@@ -556,35 +391,7 @@ fun openHotspotSettings(context: Context) {
     }
 }
 
-@Composable
-private fun ProtocolAddressRow(label: String, address: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.weight(1f),
-        )
-        CopyChip(text = address)
-    }
-}
-
-@Composable
-private fun kindLabel(kind: IfKind): String = stringResource(
-    when (kind) {
-        IfKind.WIFI -> R.string.if_wifi
-        IfKind.HOTSPOT -> R.string.if_hotspot
-        IfKind.ETHERNET -> R.string.if_ethernet
-        IfKind.USB -> R.string.if_usb
-        IfKind.MOBILE -> R.string.if_mobile
-        IfKind.VPN -> R.string.if_vpn
-        IfKind.OTHER -> R.string.if_other
-    }
-)
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OutboundCard(
     mode: OutboundMode,
@@ -599,81 +406,72 @@ private fun OutboundCard(
     onExitIpUrlChange: (String) -> Unit,
     onCheckExitIp: () -> Unit,
 ) {
+    var showMore by rememberSaveable { mutableStateOf(false) }
     SectionCard(title = stringResource(R.string.outbound_title)) {
-            OptionRow(
-                options = OutboundMode.entries.map { it to stringResource(modeLabel(it)) },
-                selected = mode,
-                onSelect = onModeSelected,
-                enabled = enabled,
-            )
-            // Default mode only: in VPN-only mode the kill switch
-            // already stops the proxy when the VPN drops. Disabled
-            // while running (an engine setting: applies at next start).
-            if (mode == OutboundMode.DEFAULT) {
-                SettingRow(
-                    title = stringResource(R.string.require_vpn_label),
-                    subtitle = stringResource(R.string.require_vpn_subtitle),
-                    trailing = {
-                        Switch(
-                            checked = requireVpn,
-                            onCheckedChange = onRequireVpnChange,
-                            enabled = enabled,
-                        )
-                    },
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutboundMode.entries.forEach { m ->
+                FilterChip(
+                    selected = mode == m,
+                    onClick = { onModeSelected(m) },
+                    label = { Text(stringResource(modeLabel(m))) },
+                    enabled = enabled,
                 )
             }
-            Button(
-                onClick = onCheckExitIp,
-                enabled = !checking,
-            ) {
-                Text(text = stringResource(R.string.check_exit_ip))
-            }
-            if (checking || exitIpText != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    if (checking) {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    } else if (exitIpOk) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.error
-                                    },
-                                    CircleShape,
-                                ),
-                        )
-                        Text(
-                            text = if (checking) {
-                                stringResource(R.string.check_exit_ip_checking)
-                            } else {
-                                exitIpText.orEmpty()
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
-                }
-            }
-            // Check URL (optional): empty means the built-in list.
-            OutlinedTextField(
-                value = exitIpUrl,
-                onValueChange = onExitIpUrlChange,
-                label = { Text(stringResource(R.string.check_url_label)) },
-                supportingText = { Text(stringResource(R.string.exit_ip_url_hint)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+        }
+        TextButton(onClick = onCheckExitIp, enabled = !checking) {
+            Text(stringResource(R.string.check_exit_ip))
+        }
+        if (checking || exitIpText != null) {
+            Text(
+                text = if (checking) {
+                    stringResource(R.string.check_exit_ip_checking)
+                } else {
+                    exitIpText.orEmpty()
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                color = if (!checking && !exitIpOk) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
             )
+        }
+        TextButton(onClick = { showMore = !showMore }) {
+            Text(stringResource(R.string.more_options))
+        }
+        AnimatedVisibility(visible = showMore) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Default mode only: in VPN-only mode the kill switch
+                // already stops the proxy when the VPN drops.
+                if (mode == OutboundMode.DEFAULT) {
+                    SettingRow(
+                        title = stringResource(R.string.require_vpn_label),
+                        subtitle = stringResource(R.string.require_vpn_subtitle),
+                        trailing = {
+                            Switch(
+                                checked = requireVpn,
+                                onCheckedChange = onRequireVpnChange,
+                                enabled = enabled,
+                            )
+                        },
+                    )
+                }
+                // Check URL (optional): empty means the built-in list.
+                OutlinedTextField(
+                    value = exitIpUrl,
+                    onValueChange = onExitIpUrlChange,
+                    label = { Text(stringResource(R.string.check_url_label)) },
+                    supportingText = { Text(stringResource(R.string.exit_ip_url_hint)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 

@@ -101,6 +101,30 @@ class ConnectionsLogicTest {
     }
 
     @Test
+    fun otherAddressesSkipsPrimaryAndMobile() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        val eth = NetIf("eth0", "192.168.1.3", IfKind.ETHERNET)
+        val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
+        assertEquals(
+            listOf("192.168.1.3:8080"),
+            otherAddresses(listOf(wifi, eth, mobile), 8080, 1080),
+        )
+    }
+
+    @Test
+    fun otherAddressesEmptyWhenOnlyPrimary() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        assertEquals(emptyList<String>(), otherAddresses(listOf(wifi), 8080, 1080))
+    }
+
+    @Test
+    fun otherAddressesFallsBackToSocksPort() {
+        val wifi = NetIf("wlan0", "192.168.1.2", IfKind.WIFI)
+        val eth = NetIf("eth0", "192.168.1.3", IfKind.ETHERNET)
+        assertEquals(listOf("192.168.1.3:1080"), otherAddresses(listOf(wifi, eth), null, 1080))
+    }
+
+    @Test
     fun mobileOnlyIsTrueForAllMobile() {
         val mobile = NetIf("rmnet0", "10.0.0.5", IfKind.MOBILE)
         assertTrue(isMobileOnly(listOf(mobile, mobile)))

@@ -80,6 +80,15 @@ fun advertiseAddress(ranked: List<NetIf>, httpPort: Int?, socksPort: Int?): Stri
     return "${primary.ip}:$port"
 }
 
+/**
+ * The "other" addresses for Home's address card: every ranked interface
+ * after the primary, as "ip:port" (same port choice as
+ * [advertiseAddress]). Mobile carrier addresses are skipped — they are
+ * not reachable from a laptop.
+ */
+fun otherAddresses(ranked: List<NetIf>, httpPort: Int?, socksPort: Int?): List<String> =
+    ranked.drop(1).mapNotNull { nif -> advertiseAddress(listOf(nif), httpPort, socksPort) }
+
 /** True when every ranked interface is a mobile carrier address (nothing reachable). */
 fun isMobileOnly(ranked: List<NetIf>): Boolean =
     ranked.isNotEmpty() && ranked.all { it.kind == IfKind.MOBILE }

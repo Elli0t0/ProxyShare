@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.9 — Simpler Home
+
+- Home is now four things, top to bottom: the red VPN-down banner (moved
+  above the power card, shown only when needed), the power card
+  (unchanged), one address card, and a compact outbound card. The screen
+  title, the live stat tiles, the open-warning banner, the protocol /
+  password status chip and the standalone laptop button are gone — the
+  stat tiles duplicated Connections, and the open-warning text still
+  shows in Settings.
+- Address card: the primary address as one large monospace "ip:port"
+  (advertiseAddress: HTTP port first, SOCKS port as fallback) with a
+  Copy button, a "Connect a device" button opening the Connect page, and
+  a "More addresses (N)" TextButton expanding to the other addresses.
+  Mobile-only still shows the hotspot hint + button instead of an
+  address. New pure helper otherAddresses (same port choice, mobile
+  skipped) + 3 tests. Home no longer collects the per-second snapshot —
+  the stat tiles were its only use.
+- Outbound card: one FlowRow of 4 FilterChips (Default, VPN only, Wi-Fi,
+  Mobile), a "Check exit IP" TextButton with the result as one plain
+  text line (red on failure), and a collapsed "More options" section at
+  the bottom holding the "Block traffic when VPN is down" switch (Default
+  mode only) and the check-URL field.
+- Deleted: ProtocolAddressRow, kindLabel, CopyChip, and 12 unused
+  strings (stat_devices, other_addresses, mobile_unreachable,
+  outbound_only, check_exit_ip_failed, if_wifi/hotspot/ethernet/usb/
+  mobile/vpn/other). PowerButton untouched.
+- Deviations from the prompt: the primary copy uses a "Copy" TextButton,
+  not a Copy icon — Icons.Filled.ContentCopy is extended-only and not in
+  the pinned core set (same as 0.5.8). The exit-IP URL field was kept
+  inside "More options": it is editable nowhere else, and removing it
+  would have orphaned the setting.
+- Tests: Kotlin 139 → 142 (3 new otherAddresses tests), Rust 170.
+
 ## 0.5.8 — Connect page replaces the laptop sheet
 
 - The laggy "Connect your laptop" ModalBottomSheet is gone: it started
