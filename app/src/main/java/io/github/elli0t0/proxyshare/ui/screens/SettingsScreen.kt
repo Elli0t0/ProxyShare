@@ -97,6 +97,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     requestedPage: SettingsPage? = null,
     onRequestedPageShown: () -> Unit = {},
+    onOpenRules: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -106,9 +107,8 @@ fun SettingsScreen(
     val netFlow = remember(context) { networkInterfaces(context) }
     val interfaces by netFlow.collectAsState(initial = emptyList())
     // The restart flag lives in ProxyController so other screens (e.g.
-    // the session log's "Block this domain") can set it too.
+    // the Rules tab) can read it too.
     val restartNeeded by ProxyController.restartNeeded.collectAsStateWithLifecycle()
-    var showPasteList by rememberSaveable { mutableStateOf(false) }
     var showIdleDialog by rememberSaveable { mutableStateOf(false) }
     // Manual update check: transient state, reset on rotation.
     var updateState by remember { mutableStateOf(UpdateCheckState.IDLE) }
@@ -202,7 +202,7 @@ fun SettingsScreen(
                 saveRestart = ::saveRestart,
                 saveLive = ::saveLive,
                 onShowIdleDialog = { showIdleDialog = true },
-                onShowPasteList = { showPasteList = true },
+                onOpenRules = onOpenRules,
                 onShowSnackbar = { message ->
                     scope.launch { snackbarHostState.showSnackbar(message) }
                 },
@@ -251,17 +251,9 @@ fun SettingsScreen(
             },
         )
     }
-
-    if (showPasteList) {
-        PasteListDialog(
-            existing = settings.blockedDomains,
-            onDismiss = { showPasteList = false },
-            onAdd = { saveRestart { updateBlockedDomains((settings.blockedDomains + it).distinct()) } },
-        )
-    }
 }
 
-/** Which sub-page of Settings is open, if any. Rules will add a row here (0.6.7). */
+/** Which sub-page of Settings is open, if any. */
 enum class SettingsPage { SERVER, SECURITY, LIMITS, BATTERY, APPEARANCE, BACKUP }
 
 @Composable
@@ -326,7 +318,7 @@ private fun SettingsDetail(
     saveRestart: (suspend SettingsRepository.() -> Unit) -> Unit,
     saveLive: (suspend SettingsRepository.() -> Unit) -> Unit,
     onShowIdleDialog: () -> Unit,
-    onShowPasteList: () -> Unit,
+    onOpenRules: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -365,7 +357,7 @@ private fun SettingsDetail(
             SettingsPage.SECURITY -> SecuritySettings(
                 settings = settings,
                 saveRestart = saveRestart,
-                onShowPasteList = onShowPasteList,
+                onOpenRules = onOpenRules,
             )
             SettingsPage.LIMITS -> LimitsSettings(
                 settings = settings,
@@ -714,7 +706,7 @@ private fun ProtocolsSettings(
 private fun SecuritySettings(
     settings: AppSettings,
     saveRestart: (suspend SettingsRepository.() -> Unit) -> Unit,
-    onShowPasteList: () -> Unit,
+    onOpenRules: () -> Unit,
 ) {
     SectionCard(title = stringResource(R.string.settings_security)) {
         OptionRow(
@@ -808,29 +800,23 @@ private fun SecuritySettings(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Blocked domains are read-only here since 0.6.7: the list was
+        // migrated into BLOCK rules (see Rules.kt), and the Rules tab
+        // owns editing now. The field stays (empty) for one version.
         for (domain in settings.blockedDomains) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            Text(
+                text = domain,
+                style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = domain,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = {
-                    saveRestart { updateBlockedDomains(settings.blockedDomains - domain) }
-                }) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = stringResource(R.string.remove_domain),
-                    )
-                }
-            }
+            )
         }
-        DomainAddRow(onAdd = { saveRestart { updateBlockedDomains(settings.blockedDomains + it) } })
-        TextButton(onClick = { onShowPasteList() }) {
-            Text(stringResource(R.string.paste_list))
+        Text(
+            text = stringResource(R.string.rules_moved_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onOpenRules) {
+            Text(stringResource(R.string.rules_open))
         }
     }
 }
@@ -1132,91 +1118,3 @@ private fun CidrAddRow(onAdd: (String) -> Unit) {
 }
 
 @Composable
-private fun DomainAddRow(onAdd: (String) -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
-    var errorCode by rememberSaveable { mutableStateOf<String?>(null) }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it; errorCode = null },
-                label = { Text(stringResource(R.string.blocked_domains_hint)) },
-                isError = errorCode != null,
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            Button(onClick = {
-                val code = validate(VALIDATE_DOMAIN, text.trim())
-                if (code.isEmpty()) {
-                    onAdd(text.trim())
-                    text = ""
-                    errorCode = null
-                } else {
-                    errorCode = code
-                }
-            }) {
-                Text(stringResource(R.string.blocked_domains_add))
-            }
-        }
-        if (errorCode != null) {
-            Text(
-                text = stringResource(
-                    validationErrorRes[errorCode] ?: R.string.blocked_domains_invalid,
-                ),
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-/** Bulk-add blocked domains: one per line, blanks and #-comments ignored. */
-@Composable
-private fun PasteListDialog(
-    existing: List<String>,
-    onDismiss: () -> Unit,
-    onAdd: (List<String>) -> Unit,
-) {
-    var text by rememberSaveable { mutableStateOf("") }
-    // Transient: the result of the last Add, reset on rotation.
-    var result by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.paste_list)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it; result = null },
-                    label = { Text(stringResource(R.string.paste_list_hint)) },
-                    minLines = 5,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                result?.let { (added, invalid) ->
-                    Text(
-                        text = stringResource(R.string.paste_list_result, added, invalid),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val (added, invalid) = parseBlockedList(text, existing)
-                if (added.isNotEmpty()) onAdd(added)
-                result = added.size to invalid
-                text = ""
-            }) {
-                Text(stringResource(R.string.blocked_domains_add))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.paste_list_done))
-            }
-        },
-    )
-}

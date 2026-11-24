@@ -2,7 +2,9 @@ package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.AppSettings
+import io.github.elli0t0.proxyshare.data.RuleEntry
 import io.github.elli0t0.proxyshare.data.parseClientNames
+import io.github.elli0t0.proxyshare.data.ruleActionFromWire
 import io.github.elli0t0.proxyshare.engine.NativeEngine
 import org.json.JSONArray
 import org.json.JSONObject
@@ -163,6 +165,13 @@ fun AppSettings.toBackupJson(): String = JSONObject().apply {
     // authUser and authPass are NEVER exported.
     put("allowedClients", JSONArray(allowedClients))
     put("blockedDomains", JSONArray(blockedDomains))
+    // Rules (0.6.7): one object per rule, {pattern, action}.
+    put("rules", JSONArray(rules.map { rule ->
+        JSONObject().apply {
+            put("pattern", rule.pattern)
+            put("action", rule.action.wire)
+        }
+    }))
     put("privateOnly", privateOnly)
     put("blockPrivate", blockPrivate)
     put("maxConnections", maxConnections)
@@ -215,6 +224,22 @@ fun settingsFromBackupJson(
         .takeIf { it in KNOWN_IDLE_STOP_MINUTES } ?: base.idleStopMinutes
     val clientNames = o.optJSONObject("clientNames")
         ?.let { parseClientNames(it.toString()) } ?: base.clientNames
+    // Rules (0.6.7): unknown actions and blank/overlong/whitespace
+    // patterns are dropped; a bad pattern the engine would reject is
+    // caught when the rules are pushed (the Rules tab shows the error).
+    val rules = o.optJSONArray("rules")?.let { arr ->
+        buildList {
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val action = ruleActionFromWire(item.optString("action", "")) ?: continue
+                val pattern = item.optString("pattern", "").trim()
+                if (pattern.isEmpty() || pattern.length > 253 ||
+                    pattern.any { it.isWhitespace() }
+                ) continue
+                if (none { it.pattern == pattern }) add(RuleEntry(pattern, action))
+            }
+        }
+    } ?: base.rules
     base.copy(
         bindAddr = bindAddr,
         port = o.optInt("port", base.port).coerceIn(1, 65535),
@@ -227,6 +252,7 @@ fun settingsFromBackupJson(
         authEnabled = o.optBoolean("authEnabled", base.authEnabled),
         allowedClients = jsonStringList(o, "allowedClients").filter(isValidCidr),
         blockedDomains = jsonStringList(o, "blockedDomains").filter(isValidDomain),
+        rules = rules,
         privateOnly = o.optBoolean("privateOnly", base.privateOnly),
         blockPrivate = o.optBoolean("blockPrivate", base.blockPrivate),
         maxConnections = o.optInt("maxConnections", base.maxConnections).coerceIn(1, 2000),

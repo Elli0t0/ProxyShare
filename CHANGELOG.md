@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.7 — Rules tab (manual rules)
+
+- Bottom bar is now Home, Activity, Rules, Settings. The Rules tab
+  (modelled on hxmy proxy's Rules page, simpler): search field,
+  All | Proxy | Direct | Block filter chips, Add rule (dialog:
+  text field + 3-way segmented action + format hint), Import file
+  (OpenDocument for text, one action picked for the whole file, one
+  pattern per line, `#` comments ignored, "Imported N, skipped M"),
+  Export (CreateDocument, engine text). Each row shows the pattern
+  and a colored action tag; tap opens a small menu (Proxy / Direct /
+  Block / Delete). Rules apply hot, no restart, with a one-line
+  inline status: "Applied N rules" or the engine's error line.
+- Data: `RuleEntry(pattern, action)` in DataStore (`rules`, stored
+  as engine text). `ProxyController.pushRules()` pushes on start
+  and whenever rules change while running. Migration: every
+  existing blockedDomains entry becomes a BLOCK rule once (at app
+  start and on backup import); blockedDomains stays read-only in
+  Settings > Security for one version and is never sent to the
+  engine twice. Backup JSON now carries `rules` too.
+- Warning card: if any Direct rule exists and the engine already
+  saw Direct traffic fail (WARN count from the diagnostics log —
+  the Direct fallback WARN or a "connect to … failed" WARN), the
+  tab shows "Direct rules may not work: turn off 'Block
+  connections without VPN' in your VPN's system settings." Never
+  guessed from system settings.
+- Long-press a host in Activity > History now opens a dialog with
+  Proxy / Direct / Block and an "Include subdomains" checkbox
+  (default on): writes `host` or `=host` as a rule, hot, no
+  restart. Tests: Kotlin +10 (toEngineText, engine-text round
+  trip, import with comments/blanks/spaces/duplicates, migration
+  idempotence + duplicate keeps its action, upsert order,
+  filter+search, Direct-failure WARN count).
+
 ## 0.6.6 — Routing rules engine
 
 - Rust: new module rules.rs — PROXY / DIRECT / BLOCK rules, one per

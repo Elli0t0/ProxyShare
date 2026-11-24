@@ -4,10 +4,12 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import io.github.elli0t0.proxyshare.data.AppSettings
+import io.github.elli0t0.proxyshare.data.RuleEntry
 import io.github.elli0t0.proxyshare.data.SettingsRepository
 import io.github.elli0t0.proxyshare.data.UsageHistoryStore
 import io.github.elli0t0.proxyshare.data.VpnWatcher
 import io.github.elli0t0.proxyshare.data.networkChanges
+import io.github.elli0t0.proxyshare.data.toEngineText
 import io.github.elli0t0.proxyshare.engine.Engine
 import io.github.elli0t0.proxyshare.engine.EngineEvent
 import io.github.elli0t0.proxyshare.engine.EngineState
@@ -25,8 +27,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -149,6 +153,38 @@ object ProxyController {
     private val _restartNeeded = MutableStateFlow(false)
     /** An engine setting changed while running: the proxy needs a restart to apply it. Cleared on start. */
     val restartNeeded: StateFlow<Boolean> = _restartNeeded.asStateFlow()
+
+    /** Result of the last rules push to the engine (0.6.7). */
+    sealed interface RulesStatus {
+        /** Nothing pushed yet (proxy never started, or no change). */
+        data object Idle : RulesStatus
+        /** The engine accepted the rules: how many lines it parsed. */
+        data class Applied(val count: Int) : RulesStatus
+        /** The engine rejected the text: its "error line N: msg" verbatim. */
+        data class Error(val text: String) : RulesStatus
+    }
+
+    private val _rulesStatus = MutableStateFlow<RulesStatus>(RulesStatus.Idle)
+    /** Result of the last [pushRules]: "Applied N rules" or the engine's error line. */
+    val rulesStatus: StateFlow<RulesStatus> = _rulesStatus.asStateFlow()
+
+    /**
+     * Push [rules] to the engine (hot, no restart). No-op while
+     * stopped: the start path pushes the current rules after
+     * engine.start, and the rules job pushes on every change while
+     * running. The engine validates the text atomically, so a bad
+     * rule rejects the whole set and the previous rules stay live;
+     * the error line is kept in [rulesStatus] for the Rules tab.
+     */
+    fun pushRules(rules: List<RuleEntry> = _settings.value.rules) {
+        if (!started) return
+        val result = engine.setRules(rules.toEngineText())
+        _rulesStatus.value = if (result.startsWith("ok ")) {
+            RulesStatus.Applied(result.removePrefix("ok ").trim().toIntOrNull() ?: rules.size)
+        } else {
+            RulesStatus.Error(result)
+        }
+    }
 
     /** Mark that an engine setting changed while running (shows the restart banner in Settings). */
     fun markRestartNeeded() {
@@ -274,6 +310,18 @@ object ProxyController {
         scope.launch {
             selector.network.collect { _network.value = it }
         }
+        // One-time migration (0.6.7): blocked domains become BLOCK
+        // rules. Runs once at app start, before any proxy start, so
+        // the Rules tab and the engine both see the migrated rules.
+        scope.launch { repo.migrateBlockedDomainsOnce() }
+        // Push the rules to the engine whenever they change while
+        // running (hot, no restart). distinctUntilChanged so an
+        // unrelated settings change does not re-push the same text.
+        scope.launch {
+            repo.settings.map { it.rules }.distinctUntilChanged().collect {
+                if (started) pushRules(it)
+            }
+        }
     }
 
     /** Read the settings, generate a password on first run, start the engine. */
@@ -365,6 +413,9 @@ object ProxyController {
                 flushedUp = 0L
                 flushedDown = 0L
                 startVpnJob()
+                // Rules (0.6.7): pushed on start, then on every
+                // change while running (see the rules job in init).
+                pushRules(settings.rules)
             }
         } catch (_: Exception) {
             started = false

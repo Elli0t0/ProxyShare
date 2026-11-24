@@ -18,9 +18,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,7 +47,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.elli0t0.proxyshare.R
-import io.github.elli0t0.proxyshare.engine.EngineState
+import io.github.elli0t0.proxyshare.data.RuleAction
+import io.github.elli0t0.proxyshare.data.RuleEntry
+import io.github.elli0t0.proxyshare.data.upsertRule
 import io.github.elli0t0.proxyshare.service.ProxyController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -52,22 +58,20 @@ import kotlinx.coroutines.launch
  * Session log content for the Activity tab's History segment: the
  * last 500 closed connections, newest first. Search filters
  * host/client, "Blocked only" shows refused connections. Tap a
- * row's host to copy it; long-press a hostname to block it (IP
- * literals cannot be blocked: the engine never matches them).
- * Reads ProxyController.sessionLog: no polling. The ⋮ menu lives
- * in ActivityScreen.
+ * row's host to copy it; long-press a hostname to add a routing
+ * rule for it (IP literals cannot be blocked: the engine never
+ * matches them). Reads ProxyController.sessionLog: no polling. The
+ * ⋮ menu lives in ActivityScreen.
  */
 @Composable
 fun SessionLogContent(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
     var search by rememberSaveable { mutableStateOf("") }
     var blockedOnly by rememberSaveable { mutableStateOf(false) }
-    var blockTarget by rememberSaveable { mutableStateOf<String?>(null) }
-    val running = state is EngineState.Running
+    var ruleTarget by rememberSaveable { mutableStateOf<String?>(null) }
 
     val entries = remember(sessionLog, search, blockedOnly) {
         filterSessionLog(sessionLog, search, blockedOnly).reversed()
@@ -134,42 +138,101 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
                             entry = entry,
                             name = settings.clientNames[entry.client],
                             onCopyHost = { copyText(context, entry.host) },
-                            onBlock = { blockTarget = entry.host },
+                            onBlock = { ruleTarget = entry.host },
                         )
                     }
                 }
             }
         }
 
-    if (blockTarget != null) {
-        AlertDialog(
-            onDismissRequest = { blockTarget = null },
-            title = { Text(stringResource(R.string.block_domain_title)) },
-            text = {
-                Text(stringResource(R.string.block_domain_text, blockTarget ?: ""))
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val host = blockTarget ?: return@TextButton
-                    blockTarget = null
-                    if (!validateBlockedDomain(host)) return@TextButton
-                    scope.launch {
-                        ProxyController.updateSettings {
-                            updateBlockedDomains((settings.blockedDomains + host).distinct())
-                        }
+    if (ruleTarget != null) {
+        RuleForHostDialog(
+            host = ruleTarget ?: "",
+            onDismiss = { ruleTarget = null },
+            onAdd = { pattern, action ->
+                ruleTarget = null
+                // Hot: the rules job pushes the new rule to the
+                // engine at once, no restart needed.
+                scope.launch {
+                    ProxyController.updateSettings {
+                        updateRules(settings.rules.upsertRule(RuleEntry(pattern, action)))
                     }
-                    if (running) ProxyController.markRestartNeeded()
-                }) {
-                    Text(stringResource(R.string.blocked_domains_add))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { blockTarget = null }) {
-                    Text(stringResource(R.string.cancel))
                 }
             },
         )
     }
+}
+
+/**
+ * Long-press a hostname in History: add a routing rule for it.
+ * "Include subdomains" (on by default) writes `host` (the domain
+ * and all its subdomains); off writes `=host` (that exact host
+ * only). The host comes from a live connection, so it is valid by
+ * construction — no validation round-trip.
+ */
+@Composable
+private fun RuleForHostDialog(
+    host: String,
+    onDismiss: () -> Unit,
+    onAdd: (String, RuleAction) -> Unit,
+) {
+    var action by rememberSaveable { mutableStateOf(RuleAction.BLOCK) }
+    var includeSubdomains by rememberSaveable { mutableStateOf(true) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.rule_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = host,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    RuleAction.entries.forEachIndexed { i, a ->
+                        SegmentedButton(
+                            selected = action == a,
+                            onClick = { action = a },
+                            shape = SegmentedButtonDefaults.itemShape(i, RuleAction.entries.size),
+                        ) {
+                            Text(
+                                stringResource(
+                                    when (a) {
+                                        RuleAction.PROXY -> R.string.rules_action_proxy
+                                        RuleAction.DIRECT -> R.string.rules_action_direct
+                                        RuleAction.BLOCK -> R.string.rules_action_block
+                                    }
+                                ),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = includeSubdomains,
+                        onCheckedChange = { includeSubdomains = it },
+                    )
+                    Text(
+                        text = stringResource(R.string.rule_dialog_subdomains),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onAdd(if (includeSubdomains) host else "=$host", action)
+            }) {
+                Text(stringResource(R.string.rule_dialog_add))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

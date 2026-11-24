@@ -20,7 +20,8 @@ phone's active VPN. No root.
   the "Connect your laptop" page.
 - Routing rules engine: PROXY / DIRECT / BLOCK rules per domain or IP/CIDR
   (hot-reloaded, no restart); DIRECT traffic goes out through the phone's
-  real non-VPN network. The Rules tab UI comes next.
+  real non-VPN network. The Rules tab (search, filters, add/import/export)
+  edits them, and a long-press on a host in Activity > History adds one.
 - Backup: export and import all settings as a JSON file
   (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill

@@ -226,6 +226,9 @@ second parameter.
   field of the snapshot line (`"proxy" | "direct" | "block"`), so old
   parsers keep working; the session-log JSON export carries it as
   `"route"`. The Kotlin parser reads it as `"proxy"` when absent.
+  The Rules tab (0.6.7) is Kotlin-only: it stores the rules in
+  DataStore and pushes them with `nativeSetRules` on start and on
+  every change while running.
 
 ## Authentication (0.0.9)
 

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
@@ -32,12 +33,13 @@ import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.ui.screens.ActivityScreen
 import io.github.elli0t0.proxyshare.ui.screens.ConnectScreen
 import io.github.elli0t0.proxyshare.ui.screens.HomeScreen
+import io.github.elli0t0.proxyshare.ui.screens.RulesScreen
 import io.github.elli0t0.proxyshare.ui.screens.SettingsPage
 import io.github.elli0t0.proxyshare.ui.screens.SettingsScreen
 
 /**
  * The navigation shell: a Scaffold with a bottom NavigationBar —
- * Home, Activity, Settings. Plain state (rememberSaveable), no
+ * Home, Activity, Rules, Settings. Plain state (rememberSaveable), no
  * navigation library.
  */
 @Composable
@@ -74,6 +76,12 @@ fun AppRoot() {
                         NavigationBarItem(
                             selected = tab == 2,
                             onClick = { tab = 2 },
+                            icon = { Icon(Icons.Filled.Build, contentDescription = null) },
+                            label = { Text(stringResource(R.string.nav_rules)) },
+                        )
+                        NavigationBarItem(
+                            selected = tab == 3,
+                            onClick = { tab = 3 },
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                             label = { Text(stringResource(R.string.nav_settings)) },
                         )
@@ -86,17 +94,21 @@ fun AppRoot() {
                         onOpenConnect = { showConnect = true },
                         onOpenSecuritySettings = {
                             openSettingsPage = SettingsPage.SECURITY
-                            tab = 2
+                            tab = 3
                         },
                     )
                     1 -> ActivityScreen(
                         modifier = Modifier.padding(padding),
                         onGoHome = { tab = 0 },
                     )
+                    2 -> RulesScreen(
+                        modifier = Modifier.padding(padding),
+                    )
                     else -> SettingsScreen(
                         modifier = Modifier.padding(padding),
                         requestedPage = openSettingsPage,
                         onRequestedPageShown = { openSettingsPage = null },
+                        onOpenRules = { tab = 2 },
                     )
                 }
             }

@@ -30,6 +30,15 @@ data class AppSettings(
     val allowedClients: List<String> = emptyList(),
     /** Domains refused before any outbound connect ("ads.example.com" or "*.example.com"). Sent to the engine. */
     val blockedDomains: List<String> = emptyList(),
+    /**
+     * Routing rules (0.6.7): PROXY / DIRECT / BLOCK per domain or
+     * IP/CIDR, pushed to the engine with nativeSetRules (see
+     * data/Rules.kt). Stored as engine text, one
+     * `ACTION<TAB>pattern` line per rule. The old blockedDomains are
+     * migrated into BLOCK rules once (migrateBlockedDomainsOnce) and
+     * then left empty, so the engine never gets the same domain twice.
+     */
+    val rules: List<RuleEntry> = emptyList(),
     val privateOnly: Boolean = true,
     /** Refuse targets that resolve only to private addresses (the phone's own network). Sent to the engine. */
     val blockPrivate: Boolean = false,
@@ -149,6 +158,7 @@ class SettingsRepository(context: Context) {
                 ?.map { it.trim() }
                 ?.filter { it.isNotEmpty() }
                 ?: emptyList(),
+            rules = rulesFromEngineText(prefs[Keys.RULES] ?: ""),
             privateOnly = prefs[Keys.PRIVATE_ONLY] ?: defaults.privateOnly,
             blockPrivate = prefs[Keys.BLOCK_PRIVATE] ?: defaults.blockPrivate,
             maxConnections = prefs[Keys.MAX_CONNECTIONS] ?: defaults.maxConnections,
@@ -232,6 +242,34 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.BLOCKED_DOMAINS] = value.joinToString(",") }
     }
 
+    suspend fun updateRules(value: List<RuleEntry>) {
+        dataStore.edit { it[Keys.RULES] = value.toEngineText() }
+    }
+
+    /**
+     * One-time migration (0.6.7): every blocked domain becomes a
+     * BLOCK rule and blockedDomains is cleared, so the engine never
+     * receives the same domain twice. Idempotent: once the list is
+     * empty this is a no-op. Runs at app start (ProxyController.init)
+     * and inside [replaceAll], so a backup from 0.6.6 is migrated on
+     * import too.
+     */
+    suspend fun migrateBlockedDomainsOnce() {
+        dataStore.edit { prefs ->
+            val blocked = prefs[Keys.BLOCKED_DOMAINS]
+                ?.split(",")
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?: emptyList()
+            if (blocked.isEmpty()) return@edit
+            val (rules, _) = migrateRules(
+                rulesFromEngineText(prefs[Keys.RULES] ?: ""), blocked
+            )
+            prefs[Keys.RULES] = rules.toEngineText()
+            prefs[Keys.BLOCKED_DOMAINS] = ""
+        }
+    }
+
     suspend fun updatePrivateOnly(value: Boolean) {
         dataStore.edit { it[Keys.PRIVATE_ONLY] = value }
     }
@@ -311,6 +349,9 @@ class SettingsRepository(context: Context) {
      * current values, because a backup file never contains them.
      */
     suspend fun replaceAll(s: AppSettings) {
+        // A backup from 0.6.6 carries blockedDomains but no rules:
+        // migrate them here so the import never sends a domain twice.
+        val (rules, blockedDomains) = migrateRules(s.rules, s.blockedDomains)
         dataStore.edit { prefs ->
             prefs[Keys.BIND_ADDR] = s.bindAddr
             prefs[Keys.PORT] = s.port
@@ -322,7 +363,8 @@ class SettingsRepository(context: Context) {
             prefs[Keys.PROTOCOLS] = s.protocols
             prefs[Keys.AUTH_ENABLED] = s.authEnabled
             prefs[Keys.ALLOWED_CLIENTS] = s.allowedClients.joinToString(",")
-            prefs[Keys.BLOCKED_DOMAINS] = s.blockedDomains.joinToString(",")
+            prefs[Keys.BLOCKED_DOMAINS] = blockedDomains.joinToString(",")
+            prefs[Keys.RULES] = rules.toEngineText()
             prefs[Keys.PRIVATE_ONLY] = s.privateOnly
             prefs[Keys.BLOCK_PRIVATE] = s.blockPrivate
             prefs[Keys.MAX_CONNECTIONS] = s.maxConnections
@@ -357,6 +399,7 @@ class SettingsRepository(context: Context) {
         val AUTH_PASS = stringPreferencesKey("auth_pass")
         val ALLOWED_CLIENTS = stringPreferencesKey("allowed_clients")
         val BLOCKED_DOMAINS = stringPreferencesKey("blocked_domains")
+        val RULES = stringPreferencesKey("rules")
         val PRIVATE_ONLY = booleanPreferencesKey("private_only")
         val BLOCK_PRIVATE = booleanPreferencesKey("block_private")
         val MAX_CONNECTIONS = intPreferencesKey("max_connections")
