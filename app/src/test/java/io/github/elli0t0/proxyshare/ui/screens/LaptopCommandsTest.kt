@@ -96,6 +96,32 @@ class LaptopCommandsTest {
     }
 
     @Test
+    fun commandTitlesAreUnique() {
+        // LazyColumn keys are the titles: every laptopCommands variant
+        // must produce distinct titles.
+        val all = laptopCommands("192.168.1.5", 8080, 1080, "proxy", "s3cret")
+        assertEquals(all.size, all.map { it.title }.toSet().size)
+        val httpOnly = laptopCommands("192.168.1.5", 8080, null, null, null)
+        assertEquals(httpOnly.size, httpOnly.map { it.title }.toSet().size)
+        val socksOnly = laptopCommands("192.168.1.5", null, 1080, null, null)
+        assertEquals(socksOnly.size, socksOnly.map { it.title }.toSet().size)
+    }
+
+    @Test
+    fun commandsForTabSplitsQuickTestAndSetup() {
+        val cmds = laptopCommands("192.168.1.5", 8080, 1080, "proxy", "s3cret")
+        assertEquals(
+            listOf("curl (HTTP)", "curl (SOCKS5)"),
+            commandsForTab(cmds, 0).map { it.title },
+        )
+        assertEquals(
+            listOf("Linux / macOS terminal", "Firefox", "Chromium / Chrome", "GNOME proxy settings"),
+            commandsForTab(cmds, 1).map { it.title },
+        )
+        assertEquals(emptyList<Cmd>(), commandsForTab(cmds, 2))
+    }
+
+    @Test
     fun sheetHostPrefersSelectionThenFirst() {
         val ranked = listOf(
             NetIf("wlan0", "192.168.1.5", IfKind.WIFI),

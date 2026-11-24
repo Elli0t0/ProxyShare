@@ -1,8 +1,6 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -85,7 +83,7 @@ import io.github.elli0t0.proxyshare.ui.components.toPowerState
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
@@ -96,7 +94,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
     var exitIpOk by rememberSaveable { mutableStateOf(false) }
     var exitIpChecking by rememberSaveable { mutableStateOf(false) }
-    var showLaptopSheet by rememberSaveable { mutableStateOf(false) }
 
     // Keep the screen on while the proxy runs, when the setting is on.
     val view = LocalView.current
@@ -311,11 +308,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 socks5On = "socks5" in settings.protocols,
             )
 
-            // Credentials card, only when auth is on.
-            if (settings.authEnabled) {
-                CredentialsCard(user = settings.authUser, password = settings.authPass)
-            }
-
             // One chip joining protocol, password state and private-only.
             // It fills the width so long text wraps instead of shrinking.
             val statusParts = buildList {
@@ -375,16 +367,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 },
             )
 
-            // Connect your laptop sheet.
+            // Connect your laptop page.
             FilledTonalButton(
-                onClick = { showLaptopSheet = true },
+                onClick = onOpenConnect,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.laptop_button))
-            }
-
-            if (showLaptopSheet) {
-                LaptopSheet(onDismiss = { showLaptopSheet = false })
             }
         }
     }
@@ -395,11 +383,6 @@ private fun startProxy(context: Context) {
         context,
         Intent(context, ProxyService::class.java),
     )
-}
-
-private fun copyText(context: Context, text: String) {
-    val cm = context.getSystemService(ClipboardManager::class.java)
-    cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
 }
 
 @Composable
@@ -601,51 +584,6 @@ private fun kindLabel(kind: IfKind): String = stringResource(
         IfKind.OTHER -> R.string.if_other
     }
 )
-
-@Composable
-private fun CredentialsCard(user: String, password: String) {
-    val context = LocalContext.current
-    var passwordVisible by rememberSaveable { mutableStateOf(false) }
-    SectionCard(title = stringResource(R.string.credentials_title)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = "${stringResource(R.string.user_label)}: $user",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { copyText(context, user) }) {
-                    Text(stringResource(R.string.copy))
-                }
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                TextButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Text(
-                        text = "${stringResource(R.string.password_label)}: " +
-                            if (passwordVisible) password.ifEmpty { "—" } else "••••••",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-                TextButton(onClick = { copyText(context, password) }) {
-                    Text(stringResource(R.string.copy))
-                }
-            }
-            Text(
-                text = stringResource(R.string.password_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-    }
-}
 
 @Composable
 private fun OutboundCard(

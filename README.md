@@ -13,8 +13,9 @@ phone's active VPN. No root.
   domains, limits, theme (System/Light/Dark).
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill
   switch, and an exit-IP check.
-- "Connect your laptop" sheet with copyable curl/terminal commands and
-  plain-text Windows and Firefox setup steps; Linux/macOS adds a
+- "Connect your laptop" page with address picker, endpoint rows, credentials
+  and copyable curl/terminal commands under Quick test / Linux/macOS / Windows
+  tabs; plain-text Windows and Firefox setup steps; Linux/macOS adds a
   SOCKS5 quick test, Chromium/Chrome `--proxy-server`, and GNOME
   gsettings.
 - Quick Settings tile to start/stop the proxy from the shade; session

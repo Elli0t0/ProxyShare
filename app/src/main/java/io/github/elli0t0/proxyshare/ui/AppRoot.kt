@@ -23,12 +23,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import io.github.elli0t0.proxyshare.R
+import io.github.elli0t0.proxyshare.ui.screens.ConnectScreen
 import io.github.elli0t0.proxyshare.ui.screens.ConnectionsScreen
 import io.github.elli0t0.proxyshare.ui.screens.HomeScreen
 import io.github.elli0t0.proxyshare.ui.screens.LogsScreen
@@ -42,50 +44,59 @@ import io.github.elli0t0.proxyshare.ui.screens.SettingsScreen
 @Composable
 fun AppRoot() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var showConnect by rememberSaveable { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
-        Scaffold(
-            // No system insets from the Scaffold: the NavigationBar pads
-            // the nav-bar inset itself, and each screen adds exactly one
-            // status-bar inset. (Otherwise the status bar is counted twice.)
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = tab == 0,
-                        onClick = { tab = 0 },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_home)) },
-                    )
-                    NavigationBarItem(
-                        selected = tab == 1,
-                        onClick = { tab = 1 },
-                        icon = { Icon(Icons.Filled.List, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_connections)) },
-                    )
-                    NavigationBarItem(
-                        selected = tab == 2,
-                        onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.Menu, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_logs)) },
-                    )
-                    NavigationBarItem(
-                        selected = tab == 3,
-                        onClick = { tab = 3 },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                        label = { Text(stringResource(R.string.nav_settings)) },
-                    )
+        if (showConnect) {
+            // Full-screen Connect page instead of the Scaffold: no bottom bar.
+            ConnectScreen(onBack = { showConnect = false })
+        } else {
+            Scaffold(
+                // No system insets from the Scaffold: the NavigationBar pads
+                // the nav-bar inset itself, and each screen adds exactly one
+                // status-bar inset. (Otherwise the status bar is counted twice.)
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                bottomBar = {
+                    NavigationBar {
+                        NavigationBarItem(
+                            selected = tab == 0,
+                            onClick = { tab = 0 },
+                            icon = { Icon(Icons.Filled.Home, contentDescription = null) },
+                            label = { Text(stringResource(R.string.nav_home)) },
+                        )
+                        NavigationBarItem(
+                            selected = tab == 1,
+                            onClick = { tab = 1 },
+                            icon = { Icon(Icons.Filled.List, contentDescription = null) },
+                            label = { Text(stringResource(R.string.nav_connections)) },
+                        )
+                        NavigationBarItem(
+                            selected = tab == 2,
+                            onClick = { tab = 2 },
+                            icon = { Icon(Icons.Filled.Menu, contentDescription = null) },
+                            label = { Text(stringResource(R.string.nav_logs)) },
+                        )
+                        NavigationBarItem(
+                            selected = tab == 3,
+                            onClick = { tab = 3 },
+                            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                            label = { Text(stringResource(R.string.nav_settings)) },
+                        )
+                    }
                 }
-            }
-        ) { padding ->
-            when (tab) {
-                0 -> HomeScreen(modifier = Modifier.padding(padding))
-                1 -> ConnectionsScreen(
-                    modifier = Modifier.padding(padding),
-                    onGoHome = { tab = 0 },
-                    onGoLogs = { tab = 2 },
-                )
-                2 -> LogsScreen(modifier = Modifier.padding(padding))
-                else -> SettingsScreen(modifier = Modifier.padding(padding))
+            ) { padding ->
+                when (tab) {
+                    0 -> HomeScreen(
+                        modifier = Modifier.padding(padding),
+                        onOpenConnect = { showConnect = true },
+                    )
+                    1 -> ConnectionsScreen(
+                        modifier = Modifier.padding(padding),
+                        onGoHome = { tab = 0 },
+                        onGoLogs = { tab = 2 },
+                    )
+                    2 -> LogsScreen(modifier = Modifier.padding(padding))
+                    else -> SettingsScreen(modifier = Modifier.padding(padding))
+                }
             }
         }
         // Solid cover over the status-bar area: content scrolls under

@@ -42,10 +42,8 @@
     <string name="addresses_title">Addresses</string>
     <string name="addresses_none">No network interfaces found</string>
     <string name="outbound_only">VPN interfaces are outbound only</string>
-    <string name="credentials_title">Credentials</string>
     <string name="user_label">User</string>
     <string name="password_label">Password</string>
-    <string name="password_hint">Tap the password to reveal it.</string>
     <string name="copy">Copy</string>
     <string name="back">Back</string>
     <string name="cancel">Cancel</string>
@@ -212,6 +210,10 @@
     <string name="laptop_mobile_hint">Turn on the hotspot or join the same Wi-Fi as your laptop</string>
     <string name="laptop_windows_title">Windows</string>
     <string name="laptop_windows_steps">Settings → Network → Proxy → Manual proxy setup. Enter the host and port shown above.</string>
+    <string name="connect_tab_quick">Quick test</string>
+    <string name="connect_tab_linux">Linux/macOS</string>
+    <string name="connect_show">Show</string>
+    <string name="connect_hide">Hide</string>
     <string name="laptop_firefox_title">Firefox</string>
     <string name="laptop_firefox_steps">Settings → Network Settings → Manual proxy. Choose SOCKS v5, enter the host and port, and tick "Proxy DNS when using SOCKS v5".</string>
     <string name="auth_no_password">No password</string>

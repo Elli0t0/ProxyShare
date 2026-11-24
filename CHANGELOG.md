@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.5.8 — Connect page replaces the laptop sheet
+
+- The laggy "Connect your laptop" ModalBottomSheet is gone: it started
+  half-open, rebuilt its own network flow every 15 s, and a recomposition
+  mid-drag cancelled the gesture. It is replaced by a full-screen Connect
+  page (ConnectScreen.kt, renamed from LaptopSheet.kt) with a normal
+  LazyColumn fed by the shared NetworkWatcher.interfaces flow, everything
+  remember()ed, and no per-second collection.
+- Connect page, top to bottom: status line ("Proxy running" / "Start the
+  proxy first, then run these on your laptop."), address chips (FlowRow of
+  FilterChip, "ip (name)"; one address is plain text; mobile-only shows the
+  hotspot hint + "Open hotspot settings"), endpoint rows "HTTP ip:8080" /
+  "SOCKS5 ip:1080" with Copy buttons, credentials rows when auth is on
+  (user + Copy, password with Show/Hide + Copy — this replaces the
+  Credentials card on Home), and a Quick test | Linux/macOS | Windows
+  segmented row. Commands render per tab (key = title); Windows shows the
+  plain-text steps. Back arrow + system Back close the page; AppRoot shows
+  it instead of the Scaffold (no bottom bar).
+- Home: the button now opens the page via onOpenConnect from AppRoot; no
+  sheet state left in HomeScreen. CredentialsCard, its private copyText and
+  the now-unused credentials_title / password_hint strings are deleted.
+  (user_label stays — the Connect page uses it.) PowerButton untouched.
+- Deviations from the prompt: the endpoint rows use a "Copy" TextButton,
+  not a Copy icon — Icons.Filled.ContentCopy is extended-only and not in
+  the pinned core set (same pattern as CommandCard). FlowRow needs
+  @OptIn(ExperimentalLayoutApi::class) in the pinned Compose 1.7.
+- Tests: laptopCommands/resolveSheetHost tests unchanged; new tests prove
+  every Cmd title is unique across the http/socks variants and that
+  commandsForTab splits Quick test (both curl commands) / Linux-macOS
+  setup / Windows (none). Tests: Kotlin 137 → 139, Rust 170.
+- Note: the rename took two commits — push_files cannot delete, so the old
+  LaptopSheet.kt was removed in a separate delete commit right before this
+  push; the version is one CI run (the delete's run was cancelled by it).
+
 ## 0.5.7 — fix Logs crash on duplicate LazyColumn keys
 
 - Bug: scrolling Logs → History (and the Engine tab) crashed with
