@@ -289,18 +289,18 @@ mod tests {
     #[test]
     fn invalid_lines_report_the_right_line_number() {
         assert_eq!(
-            RuleSet::from_text("direct\ta.com\nbogus\tb.com\n"),
-            Err((
+            RuleSet::from_text("direct\ta.com\nbogus\tb.com\n").unwrap_err(),
+            (
                 2,
                 "unknown action 'bogus' (expected proxy, direct or block)".to_string()
-            ))
+            )
         );
         assert_eq!(
-            RuleSet::from_text("direct a.com\n"),
-            Err((
+            RuleSet::from_text("direct a.com\n").unwrap_err(),
+            (
                 1,
                 "expected 'ACTION<TAB>pattern', got 'direct a.com'".to_string()
-            ))
+            )
         );
         assert!(matches!(
             RuleSet::from_text("direct\tbad domain!\n"),
