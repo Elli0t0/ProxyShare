@@ -1116,5 +1116,3 @@ private fun CidrAddRow(onAdd: (String) -> Unit) {
         }
     }
 }
-
-@Composable
