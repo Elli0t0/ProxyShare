@@ -21,9 +21,9 @@ phone's active VPN. No root.
 - Quick Settings tile to start/stop the proxy from the shade; session
   log (last 500 closed connections, metadata only) with JSON export;
   optional "Start on boot".
-- In-app session log screen (Logs tab): search, "Blocked only"
+- In-app session log screen (Activity tab > History): search, "Blocked only"
   filter, tap a host to copy it, long-press a hostname to block it.
-- Engine diagnostics log (Logs tab > Engine): last 1000 lines,
+- Engine diagnostics log (Activity tab > Engine): last 1000 lines,
   level filters, search, Follow toggle, repeat counts (×N),
   refreshed once a second only while visible, shareable with
   credentials redacted; optional idle auto-stop (15 min / 30 min /
@@ -35,7 +35,7 @@ phone's active VPN. No root.
   drops while clients are connected; optional "Block traffic when
   VPN is down" (Default mode) refuses new connections until the VPN
   is back. Client names (Connections card menu > Rename) and per-day
-  usage history (Logs tab > Usage: today, last 7 days, this month).
+  usage history (Activity tab > Usage: today, last 7 days, this month).
 - Outbound DNS runs on the selected network (API 29+), addresses are
   tried IPv4 first with each attempt capped at 5 s.
 

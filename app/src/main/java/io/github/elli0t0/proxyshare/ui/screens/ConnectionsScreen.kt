@@ -87,6 +87,7 @@ import io.github.elli0t0.proxyshare.ui.components.TrafficChart
 @Composable
 fun ConnectionsScreen(
     modifier: Modifier = Modifier,
+    topInset: Boolean = true,
     onGoHome: () -> Unit = {},
     onGoLogs: () -> Unit = {},
 ) {
@@ -129,7 +130,7 @@ fun ConnectionsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .then(if (topInset) Modifier.statusBarsPadding() else Modifier)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

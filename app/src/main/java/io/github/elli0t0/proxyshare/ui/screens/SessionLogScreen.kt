@@ -49,12 +49,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Session log content for the Logs tab: the last 500 closed
- * connections, newest first. Search filters host/client, "Blocked
- * only" shows refused connections. Tap a row's host to copy it;
- * long-press a hostname to block it (IP literals cannot be blocked:
- * the engine never matches them). Reads ProxyController.sessionLog:
- * no polling. The title and the ⋮ menu live in LogsScreen.
+ * Session log content for the Activity tab's History segment: the
+ * last 500 closed connections, newest first. Search filters
+ * host/client, "Blocked only" shows refused connections. Tap a
+ * row's host to copy it; long-press a hostname to block it (IP
+ * literals cannot be blocked: the engine never matches them).
+ * Reads ProxyController.sessionLog: no polling. The ⋮ menu lives
+ * in ActivityScreen.
  */
 @Composable
 fun SessionLogContent(modifier: Modifier = Modifier) {

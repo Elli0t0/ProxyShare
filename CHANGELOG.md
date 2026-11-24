@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.1 — One Activity tab instead of Connections + Logs
+
+- Bottom bar is now 3 tabs: Home, Activity, Settings. Activity merges
+  the old Connections and Logs tabs into one segmented row:
+  Live | History | Engine | Usage (Live is the old Connections
+  screen; the rest are the old Logs tabs).
+- The selected segment is remembered across rotations. The "Session
+  log" action in the Live menu now switches Activity to History.
+- The status bar is still counted once: ActivityScreen adds
+  statusBarsPadding and the old screens get topInset = false.
+- The old Logs ⋮ menu (share/clear log) moved beside the segments,
+  shown on History and Engine only; Live keeps its own menu, Usage
+  keeps its Reset button. No behaviour changed: search, "Blocked
+  only" filter, long-press to block, Follow toggle, and the 1 s
+  refresh loops, which stop when their segment is not visible.
+- Removed the now-unused LogsScreen wrapper and the nav_logs /
+  logs_history / logs_engine / logs_usage strings.
+
 ## 0.6.0 — Settings as a short list + sub-pages
 
 - Settings is now a short list of 5 rows (icon, title, one-line live

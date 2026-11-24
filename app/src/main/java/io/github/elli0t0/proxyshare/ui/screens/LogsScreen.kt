@@ -6,24 +6,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -67,7 +59,6 @@ import io.github.elli0t0.proxyshare.engine.DiagLine
 import io.github.elli0t0.proxyshare.engine.parseDiagLog
 import io.github.elli0t0.proxyshare.engine.redactLog
 import io.github.elli0t0.proxyshare.service.ProxyController
-import io.github.elli0t0.proxyshare.ui.components.OptionRow
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
@@ -95,7 +86,7 @@ fun filterDiagLines(lines: List<DiagLine>, query: String, minLevel: Int): List<D
     }
 }
 
-private fun shareDiagLog(context: Context, text: String) {
+fun shareDiagLog(context: Context, text: String) {
     val redacted = redactLog(text)
     if (redacted.isBlank()) return
     ShareCompat.IntentBuilder(context)
@@ -106,97 +97,12 @@ private fun shareDiagLog(context: Context, text: String) {
 }
 
 /**
- * Logs tab: the session log, the engine diagnostics log and usage
- * history, switched with an OptionRow. The ⋮ menu shares or clears
- * whichever of the first two tabs is shown; Usage has its own Reset
- * button instead (nothing to share there).
- */
-@Composable
-fun LogsScreen(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    var showMenu by remember { mutableStateOf(false) }
-    val sessionLog by ProxyController.sessionLog.collectAsStateWithLifecycle()
-    val diagText by ProxyController.diagLogText.collectAsStateWithLifecycle()
-    // Usage has no shareable content (its Reset lives in the tab itself).
-    val canShare = when (tab) {
-        0 -> sessionLog.isNotEmpty()
-        1 -> diagText.isNotBlank()
-        else -> false
-    }
-
-    Surface(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stringResource(R.string.nav_logs),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = stringResource(R.string.connections_menu),
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.diag_share)) },
-                        onClick = {
-                            showMenu = false
-                            if (tab == 0) {
-                                exportSessionLog(context, sessionLog)
-                            } else {
-                                shareDiagLog(context, diagText)
-                            }
-                        },
-                        enabled = canShare,
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.clear_log)) },
-                        onClick = {
-                            showMenu = false
-                            if (tab == 0) ProxyController.clearSessionLog()
-                            else ProxyController.clearDiagLog()
-                        },
-                        enabled = canShare,
-                    )
-                }
-            }
-            OptionRow(
-                options = listOf(
-                    0 to stringResource(R.string.logs_history),
-                    1 to stringResource(R.string.logs_engine),
-                    2 to stringResource(R.string.logs_usage),
-                ),
-                selected = tab,
-                onSelect = { tab = it },
-            )
-            when (tab) {
-                0 -> SessionLogContent(modifier = Modifier.weight(1f))
-                1 -> EngineLogContent(modifier = Modifier.weight(1f))
-                else -> UsageContent(modifier = Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-/**
  * Engine diagnostics: one row per line, newest at the bottom.
  * Refreshes once a second while visible; "Follow" keeps the view
  * pinned to the newest line.
  */
 @Composable
-private fun EngineLogContent(modifier: Modifier = Modifier) {
+fun EngineLogContent(modifier: Modifier = Modifier) {
     val diagText by ProxyController.diagLogText.collectAsStateWithLifecycle()
     val lines = remember(diagText) { parseDiagLog(diagText) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -349,7 +255,7 @@ private fun LevelBadge(level: String) {
  * ProxyController.usageHistory: no polling.
  */
 @Composable
-private fun UsageContent(modifier: Modifier = Modifier) {
+fun UsageContent(modifier: Modifier = Modifier) {
     val history by ProxyController.usageHistory.collectAsStateWithLifecycle()
     var showReset by remember { mutableStateOf(false) }
     val today = todayKey()

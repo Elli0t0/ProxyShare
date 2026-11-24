@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,15 +29,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import io.github.elli0t0.proxyshare.R
+import io.github.elli0t0.proxyshare.ui.screens.ActivityScreen
 import io.github.elli0t0.proxyshare.ui.screens.ConnectScreen
-import io.github.elli0t0.proxyshare.ui.screens.ConnectionsScreen
 import io.github.elli0t0.proxyshare.ui.screens.HomeScreen
-import io.github.elli0t0.proxyshare.ui.screens.LogsScreen
 import io.github.elli0t0.proxyshare.ui.screens.SettingsScreen
 
 /**
  * The navigation shell: a Scaffold with a bottom NavigationBar —
- * Home, Connections, Logs, Settings. Plain state (rememberSaveable), no
+ * Home, Activity, Settings. Plain state (rememberSaveable), no
  * navigation library.
  */
 @Composable
@@ -67,17 +65,11 @@ fun AppRoot() {
                             selected = tab == 1,
                             onClick = { tab = 1 },
                             icon = { Icon(Icons.Filled.List, contentDescription = null) },
-                            label = { Text(stringResource(R.string.nav_connections)) },
+                            label = { Text(stringResource(R.string.nav_activity)) },
                         )
                         NavigationBarItem(
                             selected = tab == 2,
                             onClick = { tab = 2 },
-                            icon = { Icon(Icons.Filled.Menu, contentDescription = null) },
-                            label = { Text(stringResource(R.string.nav_logs)) },
-                        )
-                        NavigationBarItem(
-                            selected = tab == 3,
-                            onClick = { tab = 3 },
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                             label = { Text(stringResource(R.string.nav_settings)) },
                         )
@@ -89,12 +81,10 @@ fun AppRoot() {
                         modifier = Modifier.padding(padding),
                         onOpenConnect = { showConnect = true },
                     )
-                    1 -> ConnectionsScreen(
+                    1 -> ActivityScreen(
                         modifier = Modifier.padding(padding),
                         onGoHome = { tab = 0 },
-                        onGoLogs = { tab = 2 },
                     )
-                    2 -> LogsScreen(modifier = Modifier.padding(padding))
                     else -> SettingsScreen(modifier = Modifier.padding(padding))
                 }
             }
