@@ -67,6 +67,10 @@ async fn send_reply(client: &mut TcpStream, rep: u8) -> io::Result<()> {
 /// parsed, and the relay counts live into its up/down counters. The
 /// client stream is consumed: on any outcome the connection is closed
 /// when this returns.
+// 8 args: the handler takes the connection context as separate params
+// so the three protocol handlers stay symmetric; grouping them into a
+// struct would touch every handler and call site for no benefit.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle(
     mut client: TcpStream,
     outbound: &Connector,

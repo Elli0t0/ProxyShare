@@ -175,6 +175,10 @@ async fn send_407(client: &mut TcpStream) -> io::Result<()> {
 /// rewritten head is not counted; body bytes already read are counted
 /// as `up`. The client stream is consumed: on any outcome the
 /// connection is closed when this returns.
+// 8 args: the handler takes the connection context as separate params
+// so the three protocol handlers stay symmetric; grouping them into a
+// struct would touch every handler and call site for no benefit.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle(
     mut client: TcpStream,
     outbound: &Connector,
