@@ -64,6 +64,9 @@ pub struct ConnRecord {
     pub down: AtomicU64,
     /// True when the connection was refused for a blocked domain.
     pub blocked: AtomicBool,
+    /// True when the refusal came from a rule set (0.6.8), not a
+    /// manual rule: counted in the snapshot's `blocked_by_set`.
+    pub blocked_by_set: AtomicBool,
     /// How this connection is routed (0.6.6): 0 = proxy, 1 = direct,
     /// 2 = block (see [`crate::rules::Action`]).
     pub route: AtomicU8,
@@ -83,6 +86,13 @@ impl ConnRecord {
     /// Mark this connection as refused for a blocked domain.
     pub fn mark_blocked(&self) {
         self.blocked.store(true, Ordering::Relaxed);
+    }
+
+    /// Mark that the refusal came from a rule set (0.6.8): the
+    /// engine counts it in the snapshot's `blocked_by_set` when the
+    /// connection closes.
+    pub fn mark_blocked_by_set(&self) {
+        self.blocked_by_set.store(true, Ordering::Relaxed);
     }
 
     /// Record how this connection is routed (set by the handler from
@@ -199,6 +209,16 @@ pub struct Engine {
     /// The Arc inside is swapped whole, so a connection clones it
     /// once and matches against a stable set while a reload lands.
     rules: std::sync::Arc<std::sync::RwLock<std::sync::Arc<crate::rules::RuleSet>>>,
+    /// Named rule sets (0.6.8), hot-reloaded through
+    /// nativeSetRuleSet. Same swap-whole pattern as `rules`: a
+    /// connection clones the list once and matches against a stable
+    /// list while a reload lands.
+    rule_sets: std::sync::Arc<
+        std::sync::RwLock<std::sync::Arc<Vec<crate::rules::RuleSetEntry>>>,
+    >,
+    /// Connections refused by a rule-set Block (0.6.8),
+    /// process-lifetime. Exposed in the snapshot as `blocked_by_set`.
+    blocked_by_set: std::sync::Arc<AtomicU64>,
     /// Failed-auth throttle: 5 failures in 60 s block an IP for 5 min.
     auth_guard: crate::auth::AuthGuard,
 }
@@ -347,6 +367,10 @@ impl Engine {
             rules: std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::new(
                 crate::rules::RuleSet::default(),
             ))),
+            rule_sets: std::sync::Arc::new(std::sync::RwLock::new(
+                std::sync::Arc::new(Vec::new()),
+            )),
+            blocked_by_set: std::sync::Arc::new(AtomicU64::new(0)),
             auth_guard: crate::auth::AuthGuard::default(),
         }
     }
@@ -375,6 +399,53 @@ impl Engine {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// The current rule sets, for one connection to match against.
+    /// The read lock is held only long enough to clone the Arc.
+    pub fn rule_sets(&self) -> std::sync::Arc<Vec<crate::rules::RuleSetEntry>> {
+        self.rule_sets
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Replace (or clear) one named rule set from list text (one
+    /// domain per line). Returns "ok <count>" (unique domains parsed)
+    /// or "error line N: msg" with nothing applied. An empty text
+    /// clears the set but keeps its position, so re-enabling it later
+    /// restores the push order. A set replaced by id keeps its
+    /// position; a new id is appended. Applies without restarting and
+    /// never closes existing connections.
+    pub fn set_rule_set(
+        &self,
+        id: &str,
+        action: crate::rules::Action,
+        text: &str,
+    ) -> String {
+        match crate::rules::DomainSet::from_text(text) {
+            Ok((set, count)) => {
+                let mut guard = self
+                    .rule_sets
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner());
+                let mut list = (**guard).clone();
+                match list.iter_mut().find(|e| e.id == id) {
+                    Some(entry) => {
+                        entry.action = action;
+                        entry.set = set;
+                    }
+                    None => list.push(crate::rules::RuleSetEntry {
+                        id: id.to_string(),
+                        action,
+                        set,
+                    }),
+                }
+                *guard = std::sync::Arc::new(list);
+                format!("ok {count}")
+            }
+            Err((line, msg)) => format!("error line {line}: {msg}"),
+        }
     }
 
     /// Replace the rule set from hot-reload text (one
@@ -687,7 +758,7 @@ impl Engine {
 
     /// The snapshot text (see docs/ENGINE_API.md).
     pub fn snapshot(&self) -> String {
-        let (state, total_up, total_down, rejected, live, devices, speed, pac_ok, mut conns);
+        let (state, total_up, total_down, rejected, live, devices, speed, pac_ok, blocked_by_set, mut conns);
         {
             let inner = lock_inner(&self.inner);
             state = inner.state.clone();
@@ -704,6 +775,7 @@ impl Engine {
             );
             devices = inner.devices.len();
             pac_ok = inner.pac_ok;
+            blocked_by_set = self.blocked_by_set.load(Ordering::Relaxed);
             let latest = inner.history.latest();
             speed = (latest.up_bps, latest.down_bps);
             conns = inner
@@ -722,6 +794,7 @@ impl Engine {
             devices,
             speed,
             pac_ok,
+            blocked_by_set,
         )
     }
 
@@ -1034,6 +1107,7 @@ impl Engine {
             up: AtomicU64::new(0),
             down: AtomicU64::new(0),
             blocked: AtomicBool::new(false),
+            blocked_by_set: AtomicBool::new(false),
             route: AtomicU8::new(0),
             live_up: std::sync::Arc::clone(&self.live_up),
             live_down: std::sync::Arc::clone(&self.live_down),
@@ -1059,6 +1133,9 @@ impl Engine {
             if let Some(record) = inner.connections.remove(&id) {
                 inner.total_up += record.up.load(Ordering::Relaxed);
                 inner.total_down += record.down.load(Ordering::Relaxed);
+                if record.blocked_by_set.load(Ordering::Relaxed) {
+                    self.blocked_by_set.fetch_add(1, Ordering::Relaxed);
+                }
                 let info = record.to_conn_info();
                 inner.session_log.push(info);
                 if let Some(count) = inner.devices.get_mut(&record.client_ip) {
@@ -1301,6 +1378,8 @@ async fn handle_connection(
     // snapshot, so a hot reload mid-connection cannot change the
     // route of a request already being handled.
     let rules = engine.rules();
+    // Same for the named rule sets (0.6.8).
+    let rule_sets = engine.rule_sets();
     if !allowed.contains(&protocol) {
         consume_one(&mut stream).await;
         return; // sniffed protocol is not served on this listener: close, no event
@@ -1314,6 +1393,7 @@ async fn handle_connection(
                 &engine.outbound,
                 &config,
                 &rules,
+                &rule_sets,
                 &record,
                 vpn_down,
                 up_limiter.as_ref(),
@@ -1333,6 +1413,7 @@ async fn handle_connection(
                 &engine.outbound,
                 &config,
                 &rules,
+                &rule_sets,
                 &record,
                 vpn_down,
                 up_limiter.as_ref(),
@@ -1350,6 +1431,7 @@ async fn handle_connection(
                 &engine.outbound,
                 &config,
                 &rules,
+                &rule_sets,
                 &record,
                 vpn_down,
                 up_limiter.as_ref(),
@@ -1486,6 +1568,87 @@ mod tests {
         assert!(engine.snapshot().starts_with("running\t0\t0\t0"));
         engine.stop();
         assert!(engine.snapshot().starts_with("stopped\t0\t0\t0"));
+    }
+
+    #[test]
+    fn rule_set_hot_swap_keeps_old_clones_usable() {
+        use crate::rules::Action;
+        let engine = std::sync::Arc::new(Engine::new());
+        assert_eq!(
+            engine.set_rule_set("ads", Action::Block, "a.com\nb.com\n"),
+            "ok 2"
+        );
+        let first = engine.rule_sets();
+        assert_eq!(
+            crate::rules::lookup_route(&crate::rules::RuleSet::default(), &first, "sub.a.com"),
+            Some((Action::Block, true))
+        );
+        // Replace the set: the old clone still answers the old list.
+        assert_eq!(
+            engine.set_rule_set("ads", Action::Direct, "c.com\n"),
+            "ok 1"
+        );
+        let second = engine.rule_sets();
+        assert_eq!(
+            crate::rules::lookup_route(&crate::rules::RuleSet::default(), &first, "sub.a.com"),
+            Some((Action::Block, true))
+        );
+        assert_eq!(
+            crate::rules::lookup_route(&crate::rules::RuleSet::default(), &second, "c.com"),
+            Some((Action::Direct, true))
+        );
+        assert_eq!(
+            crate::rules::lookup_route(&crate::rules::RuleSet::default(), &second, "a.com"),
+            None
+        );
+        // Clearing keeps the entry (position preserved) but matches nothing.
+        assert_eq!(engine.set_rule_set("ads", Action::Block, ""), "ok 0");
+        let third = engine.rule_sets();
+        assert_eq!(third.len(), 1);
+        assert_eq!(
+            crate::rules::lookup_route(&crate::rules::RuleSet::default(), &third, "c.com"),
+            None
+        );
+        // A bad list is rejected atomically: the cleared set stays.
+        assert!(engine
+            .set_rule_set("ads", Action::Block, "bad domain!\n")
+            .starts_with("error line 1:"));
+        assert_eq!(engine.rule_sets().len(), 1);
+    }
+
+    #[test]
+    fn blocked_by_set_counts_set_refusals_in_snapshot() {
+        let engine = std::sync::Arc::new(Engine::new());
+        let record = engine.register(
+            1,
+            IpAddr::from(Ipv4Addr::new(192, 168, 1, 5)),
+            Protocol::Http,
+        );
+        record.mark_blocked();
+        record.mark_blocked_by_set();
+        engine.unregister(1);
+        let head = engine
+            .snapshot()
+            .lines()
+            .next()
+            .expect("snapshot has a header")
+            .to_string();
+        assert_eq!(head.split('\t').nth(13), Some("1"));
+        // A plain (non-set) refusal does not move the counter.
+        let record = engine.register(
+            2,
+            IpAddr::from(Ipv4Addr::new(192, 168, 1, 5)),
+            Protocol::Http,
+        );
+        record.mark_blocked();
+        engine.unregister(2);
+        let head = engine
+            .snapshot()
+            .lines()
+            .next()
+            .expect("snapshot has a header")
+            .to_string();
+        assert_eq!(head.split('\t').nth(13), Some("1"));
     }
 
     #[tokio::test]

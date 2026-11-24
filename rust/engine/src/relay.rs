@@ -239,6 +239,7 @@ mod tests {
             up: AtomicU64::new(0),
             down: AtomicU64::new(0),
             blocked: std::sync::atomic::AtomicBool::new(false),
+            blocked_by_set: std::sync::atomic::AtomicBool::new(false),
             route: std::sync::atomic::AtomicU8::new(0),
             live_up: std::sync::Arc::new(AtomicU64::new(0)),
             live_down: std::sync::Arc::new(AtomicU64::new(0)),

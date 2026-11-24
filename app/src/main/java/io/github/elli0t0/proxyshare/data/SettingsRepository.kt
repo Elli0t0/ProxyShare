@@ -39,6 +39,14 @@ data class AppSettings(
      * then left empty, so the engine never gets the same domain twice.
      */
     val rules: List<RuleEntry> = emptyList(),
+    /**
+     * Named rule sets (0.6.8): the built-in Ads & trackers list plus
+     * user-made lists (see data/RuleSets.kt). Stored as one JSON
+     * array; the built-in entry is always first (see
+     * ensureBuiltinRuleSet). Kotlin-only: the content is pushed to
+     * the engine with nativeSetRuleSet, never sent as config.
+     */
+    val ruleSets: List<RuleSetMeta> = listOf(BUILTIN_RULE_SET_META),
     val privateOnly: Boolean = true,
     /** Refuse targets that resolve only to private addresses (the phone's own network). Sent to the engine. */
     val blockPrivate: Boolean = false,
@@ -159,6 +167,9 @@ class SettingsRepository(context: Context) {
                 ?.filter { it.isNotEmpty() }
                 ?: emptyList(),
             rules = rulesFromEngineText(prefs[Keys.RULES] ?: ""),
+            ruleSets = ensureBuiltinRuleSet(
+                ruleSetsFromJson(prefs[Keys.RULESETS] ?: ""),
+            ),
             privateOnly = prefs[Keys.PRIVATE_ONLY] ?: defaults.privateOnly,
             blockPrivate = prefs[Keys.BLOCK_PRIVATE] ?: defaults.blockPrivate,
             maxConnections = prefs[Keys.MAX_CONNECTIONS] ?: defaults.maxConnections,
@@ -244,6 +255,10 @@ class SettingsRepository(context: Context) {
 
     suspend fun updateRules(value: List<RuleEntry>) {
         dataStore.edit { it[Keys.RULES] = value.toEngineText() }
+    }
+
+    suspend fun updateRuleSets(value: List<RuleSetMeta>) {
+        dataStore.edit { it[Keys.RULESETS] = value.toRuleSetsJson() }
     }
 
     /**
@@ -400,6 +415,7 @@ class SettingsRepository(context: Context) {
         val ALLOWED_CLIENTS = stringPreferencesKey("allowed_clients")
         val BLOCKED_DOMAINS = stringPreferencesKey("blocked_domains")
         val RULES = stringPreferencesKey("rules")
+        val RULESETS = stringPreferencesKey("rulesets")
         val PRIVATE_ONLY = booleanPreferencesKey("private_only")
         val BLOCK_PRIVATE = booleanPreferencesKey("block_private")
         val MAX_CONNECTIONS = intPreferencesKey("max_connections")

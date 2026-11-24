@@ -48,6 +48,7 @@ second parameter.
 | `nativeSetOutboundNetwork(h: Long, network: Long)` | `Engine::set_outbound_network` | Sets the Android Network handle (net_handle_t) for outbound TCP connections; 0 means the default network. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeSetVpnActive(h: Long, active: Boolean)` | `Engine::set_vpn_active` | Tells the engine whether a VPN network is active right now. Only consulted when the config sets `require_vpn` (see "VPN watchdog"). Safe on a stopped or unknown handle (no-op). |
 | `nativeSetRules(h: Long, text: String): String` | `Engine::set_rules` | Replaces the routing rules from hot-reload text (see "Routing rules"). Returns `"ok <count>"` or `"error line N: msg"`. Safe on an unknown handle (returns an error text). |
+| `nativeSetRuleSet(h: Long, id: String, action: String, text: String): String` | `Engine::set_rule_set` | Replaces (or clears) one named rule set from list text (see "Rule sets"). Returns `"ok <count>"` or `"error line N: msg"`. Safe on an unknown handle (returns an error text). |
 | `nativeSetDirectNetwork(h: Long, network: Long)` | `Engine::set_direct_network` | Sets the Android Network handle (net_handle_t) for DIRECT connections; 0 means none is set. Applies to connections opened after the call. Safe on a stopped or unknown handle (no-op). |
 | `nativeDestroy(h: Long)` | stops the engine and removes it from the handle table | Unknown handles are a no-op. |
 | `nativeSnapshot(h: Long): String` | `Engine::snapshot` | The snapshot text (below), or `""` for an unknown handle. |
@@ -229,6 +230,44 @@ second parameter.
   The Rules tab (0.6.7) is Kotlin-only: it stores the rules in
   DataStore and pushes them with `nativeSetRules` on start and on
   every change while running.
+
+## Rule sets (0.6.8)
+
+- A second layer under the manual rules: named sets of plain domains,
+  one action each (Direct or Block). `DomainSet` in
+  `rust/engine/src/rules.rs` is a `HashSet<String>`, suffix-matched
+  by walking the host's parents (an entry `a.com` matches `a.com`
+  and every subdomain, any depth). One domain per line, `#` comments
+  and blank lines skipped, case-insensitive, trailing dot ignored;
+  60k domains load in < 500 ms and stay under 8 MB.
+- Lookup order per request (after auth, after `blocked_domains`,
+  before connect): manual `RuleSet` -> rule sets in push order
+  (first hit wins) -> default Proxy. A set Block refuses like a
+  manual Block rule (HTTP 403, SOCKS5 0x02, SOCKS4 0x5B, record
+  marked blocked, `"(rule set)"` in the diagnostics log) and is
+  counted in the snapshot's `blocked_by_set`. A set Direct routes
+  through the direct network like a manual Direct rule (DNS on that
+  route's network). Sets have no IP/CIDR forms, so the post-DNS
+  IP re-check is manual rules only.
+- Hot reload: `nativeSetRuleSet(h: Long, id: String, action: String, text: String): String`
+  replaces (or clears) one set. Returns `"ok <count>"` (unique
+  domains parsed) or `"error line N: msg"`; loading is atomic, so
+  the first invalid line rejects that set's text and the previous
+  set stays in force. An empty text clears the set but keeps its
+  position, so re-enabling it later restores the push order; a new
+  id is appended. Applies without restarting and never closes
+  existing connections. A connection clones the set list once, so a
+  reload mid-connection cannot change the route of a request already
+  being handled.
+- Kotlin: the built-in set is "Ads & trackers (OISD small)", loaded
+  from the bundled asset `app/src/main/assets/rules/ads-oisd-small.txt`
+  (61,063 domains, CC BY-NC-SA 4.0 — see README Credits); custom
+  sets live in `filesDir/rulesets/<id>.txt` with their metadata in
+  DataStore as one JSON array (`rulesets` key). The Rules tab's
+  Rule sets page (search, create/import/edit/delete/disable per set)
+  pushes through `ProxyController.pushRuleSets` on start and on every
+  metadata change while running. Home shows "Blocked: N" under the
+  address card from `blocked_by_set` when it is > 0.
 
 ## Authentication (0.0.9)
 
@@ -458,7 +497,7 @@ Parsing rules:
 text. First line:
 
 ```
-state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down<TAB>pac_ok
+state<TAB>total_up<TAB>total_down<TAB>active<TAB>rejected_limit<TAB>rejected_denied<TAB>rejected_not_allowed<TAB>live_up<TAB>live_down<TAB>devices<TAB>speed_up<TAB>speed_down<TAB>pac_ok<TAB>blocked_by_set
 ```
 
 Then one line per connection:
@@ -485,7 +524,9 @@ id<TAB>client<TAB>host<TAB>port<TAB>proto<TAB>started_ms<TAB>up<TAB>down<TAB>blo
   are optional in the Kotlin parser (older snapshots lack them: 0).
   `pac_ok` is "1" when the PAC server is off or up, "0" when its
   bind failed (see "PAC server"); absent in older snapshots, where
-  the Kotlin parser reads it as true.
+  the Kotlin parser reads it as true. `blocked_by_set` (0.6.8) is the
+  process-lifetime count of connections refused by a rule-set Block;
+  absent in older snapshots, where the Kotlin parser reads it as 0.
 - `client` is the client IP, `host` the target host, `proto` one of `http`,
   `socks4`, `socks5`, `started_ms` the unix time the connection opened in
   milliseconds, `up` / `down` the connection's byte counts, `blocked`

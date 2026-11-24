@@ -987,6 +987,10 @@ private fun AboutSettings(
             title = stringResource(R.string.about_repo),
             subtitle = "github.com/$GITHUB_REPO",
         )
+        SettingRow(
+            title = stringResource(R.string.about_credits),
+            subtitle = stringResource(R.string.about_credits_text),
+        )
         // Manual update check: one tap, no background polling.
         Row(
             modifier = Modifier.fillMaxWidth(),

@@ -48,6 +48,16 @@
     <string name="rules_add_hint">a.com · *.a.com · =a.com · 1.2.3.4 · 10.0.0.0/8</string>
     <string name="rules_import_title">Import rules as</string>
     <string name="rules_delete">Delete</string>
+    <string name="rules_tab_manual">Manual</string>
+    <string name="rules_tab_sets">Rule sets</string>
+    <string name="rulesets_my_title">My rule sets</string>
+    <string name="rulesets_create">Create rule set</string>
+    <string name="rulesets_empty">No custom rule sets yet</string>
+    <string name="rulesets_edit">Edit</string>
+    <string name="rulesets_edit_title">Edit rule set</string>
+    <string name="rulesets_name">Name</string>
+    <string name="rulesets_domains">%1$d domains</string>
+    <string name="rulesets_blocked">Blocked: %1$d</string>
     <string name="rules_moved_note">Blocked domains moved to the Rules tab.</string>
     <string name="rules_open">Open Rules</string>
     <string name="rule_dialog_title">Add rule</string>
@@ -181,6 +191,8 @@
     <string name="protocol_socks4_subtitle">Older SOCKS protocol</string>
     <string name="protocol_socks5_subtitle">SOCKS with UDP support</string>
     <string name="about_title">About</string>
+    <string name="about_credits">Credits</string>
+    <string name="about_credits_text">Ads &amp; trackers list: OISD small (oisd.nl), CC BY-NC-SA 4.0</string>
     <string name="settings_diagnostics">Diagnostics</string>
     <string name="diag_engine_log">Engine log</string>
     <string name="diag_refresh">Refresh</string>

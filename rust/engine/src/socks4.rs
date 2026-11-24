@@ -67,7 +67,7 @@ async fn send_reply(client: &mut TcpStream, rep: u8) -> io::Result<()> {
 /// parsed, and the relay counts live into its up/down counters. The
 /// client stream is consumed: on any outcome the connection is closed
 /// when this returns.
-// 8 args: the handler takes the connection context as separate params
+// 9 args: the handler takes the connection context as separate params
 // so the three protocol handlers stay symmetric; grouping them into a
 // struct would touch every handler and call site for no benefit.
 #[allow(clippy::too_many_arguments)]
@@ -76,6 +76,7 @@ pub async fn handle(
     outbound: &Connector,
     config: &Config,
     rules: &crate::rules::RuleSet,
+    sets: &[crate::rules::RuleSetEntry],
     record: &std::sync::Arc<ConnRecord>,
     vpn_down: bool,
     up_limiter: Option<&Arc<RateLimiter>>,
@@ -123,17 +124,25 @@ pub async fn handle(
         let _ = send_reply(&mut client, REP_FAILURE).await;
         return Ok(());
     }
-    // Routing rules (0.6.6), checked after blocked_domains and
-    // before connect: a Block rule refuses like a blocked domain.
-    // The route is recorded now (from the domain rule) and corrected
-    // after connect when the resolved address decided it.
-    let action = rules.lookup(&host);
+    // Routing rules (0.6.6) and rule sets (0.6.8), checked after
+    // blocked_domains and before connect: a Block refuses like a
+    // blocked domain. The manual RuleSet wins over every set.
+    // The route is recorded now (from the domain rule) and
+    // corrected after connect when the resolved address decided it.
+    let (action, from_set) = match crate::rules::lookup_route(rules, sets, &host) {
+        Some((a, s)) => (Some(a), s),
+        None => (None, false),
+    };
     if action == Some(crate::rules::Action::Block) {
         record.mark_blocked();
         record.set_route(crate::rules::Action::Block);
+        if from_set {
+            record.mark_blocked_by_set();
+        }
         crate::diag::log_info(format!(
-            "blocked {host} from {} (rule)",
-            record.client_ip
+            "blocked {host} from {} ({})",
+            record.client_ip,
+            if from_set { "rule set" } else { "rule" }
         ));
         let _ = send_reply(&mut client, REP_FAILURE).await;
         return Ok(());

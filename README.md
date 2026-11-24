@@ -22,6 +22,9 @@ phone's active VPN. No root.
   (hot-reloaded, no restart); DIRECT traffic goes out through the phone's
   real non-VPN network. The Rules tab (search, filters, add/import/export)
   edits them, and a long-press on a host in Activity > History adds one.
+  Rule sets (Rules > Rule sets): a built-in Ads & trackers list (OISD
+  small, 61,063 domains, off by default) and user-made named lists
+  (Direct or Block); manual rules always win, sets apply in order.
 - Backup: export and import all settings as a JSON file
   (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill
@@ -91,6 +94,13 @@ and release APKs (release with R8) and uploads both as artifacts; the release
 APK size is printed in the job summary. Signing is persistent via
 `PROXYSHARE_*` repo secrets (see the workflow) so every update installs over
 the previous one.
+
+## Credits
+
+- Ads & trackers list (Rules > Rule sets, bundled as
+  `app/src/main/assets/rules/ads-oisd-small.txt`): OISD small
+  (oisd.nl), CC BY-NC-SA 4.0.
+- Rule sets are modelled on hxmy proxy's Rules page.
 
 ## Benchmark
 

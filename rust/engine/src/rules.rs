@@ -209,6 +209,103 @@ fn validate_host(h: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// One named rule set (0.6.8): a flat set of plain domains,
+/// suffix-matched — an entry `a.com` matches `a.com` and every
+/// subdomain, any depth. Unlike RuleSet there are no `*` / `=` /
+/// IP / CIDR forms: one domain per line, `#` comments and blank
+/// lines skipped. Built for the 61k-domain OISD ads list, so the
+/// whole set must stay under ~8 MB (see `approx_bytes`).
+#[derive(Clone, Default, Debug)]
+pub struct DomainSet {
+    domains: HashSet<String>,
+}
+
+impl DomainSet {
+    /// Parse list text. Returns the set and the number of unique
+    /// domains. The first invalid line fails the whole text with its
+    /// (1-based) line number, like [`RuleSet::from_text`], so the
+    /// caller keeps the previous set.
+    pub fn from_text(text: &str) -> Result<(DomainSet, usize), (usize, String)> {
+        let mut set = DomainSet::default();
+        for (i, line) in text.lines().enumerate() {
+            let line_no = i + 1;
+            let l = line.split('#').next().unwrap_or("").trim().to_ascii_lowercase();
+            if l.is_empty() {
+                continue;
+            }
+            validate_host(&l).map_err(|e| (line_no, e))?;
+            set.domains.insert(l.trim_end_matches('.').to_string());
+        }
+        let count = set.domains.len();
+        Ok((set, count))
+    }
+
+    /// True when the host itself or any of its parents is in the set.
+    pub fn contains(&self, host: &str) -> bool {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        let mut cur: &str = &host;
+        loop {
+            if self.domains.contains(cur) {
+                return true;
+            }
+            match cur.split_once('.') {
+                Some((_, rest)) => cur = rest,
+                None => return false,
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.domains.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.domains.is_empty()
+    }
+
+    /// Rough memory footprint in bytes (the strings plus the table),
+    /// for the load test's sanity bound.
+    pub fn approx_bytes(&self) -> usize {
+        let strings: usize = self
+            .domains
+            .iter()
+            .map(|d| std::mem::size_of::<String>() + d.capacity())
+            .sum();
+        strings + self.domains.capacity() * (std::mem::size_of::<String>() + 1)
+    }
+}
+
+/// One named rule set as the engine holds it: an id, the action its
+/// hits take, and the domain set. Entries stay in push order; a set
+/// replaced by id keeps its position (see [`crate::Engine::set_rule_set`]).
+#[derive(Clone, Debug)]
+pub struct RuleSetEntry {
+    pub id: String,
+    pub action: Action,
+    pub set: DomainSet,
+}
+
+/// Look up the route for a host: the manual [`RuleSet`] first, then
+/// the rule sets in order (first hit wins). Returns the action and
+/// whether it came from a rule set (a set Block is counted in the
+/// snapshot's `blocked_by_set`). No rule at all returns None, which
+/// the caller reads as the default Proxy.
+pub fn lookup_route(
+    rules: &RuleSet,
+    sets: &[RuleSetEntry],
+    host: &str,
+) -> Option<(Action, bool)> {
+    if let Some(a) = rules.lookup(host) {
+        return Some((a, false));
+    }
+    for entry in sets {
+        if entry.set.contains(host) {
+            return Some((entry.action, true));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +456,116 @@ mod tests {
         assert!(
             per_lookup < std::time::Duration::from_micros(5),
             "lookups must average < 5 us, took {per_lookup:?}"
+        );
+    }
+
+    fn domain_set(text: &str) -> DomainSet {
+        DomainSet::from_text(text).expect("test set is valid").0
+    }
+
+    fn entry(id: &str, action: Action, text: &str) -> RuleSetEntry {
+        RuleSetEntry {
+            id: id.to_string(),
+            action,
+            set: domain_set(text),
+        }
+    }
+
+    #[test]
+    fn set_suffix_matches_host_and_every_subdomain() {
+        let s = domain_set("a.com\n");
+        assert!(s.contains("a.com"));
+        assert!(s.contains("sub.a.com"));
+        assert!(s.contains("x.y.a.com"));
+        assert!(s.contains("A.COM."));
+        assert!(!s.contains("b.com"));
+        assert!(!s.contains("not-a.com"));
+        assert!(!s.contains("a.com.evil.com"));
+    }
+
+    #[test]
+    fn set_from_text_skips_comments_blanks_and_dupes() {
+        let (s, count) = DomainSet::from_text(
+            "# ads\n\na.com # trailing\na.com\nB.COM\n",
+        )
+        .expect("comments and dupes are skipped");
+        // Duplicates count once: the set holds 2 unique domains.
+        assert_eq!(count, 2);
+        assert_eq!(s.len(), 2);
+        assert!(s.contains("sub.b.com"));
+    }
+
+    #[test]
+    fn set_from_text_reports_the_bad_line() {
+        assert!(matches!(
+            DomainSet::from_text("a.com\nbad domain!\n"),
+            Err((2, _))
+        ));
+        assert!(matches!(
+            DomainSet::from_text("*.a.com\n"),
+            Err((1, _))
+        ));
+        assert!(matches!(DomainSet::from_text(""), Ok((_, 0))));
+    }
+
+    #[test]
+    fn manual_rule_overrides_set() {
+        let manual = set("direct\ta.com\n");
+        let sets = [entry("ads", Action::Block, "a.com\nb.com\n")];
+        // The manual rule wins, and the hit is not from a set.
+        assert_eq!(
+            lookup_route(&manual, &sets, "a.com"),
+            Some((Action::Direct, false))
+        );
+        // No manual rule: the set answers, flagged as a set hit.
+        assert_eq!(
+            lookup_route(&manual, &sets, "b.com"),
+            Some((Action::Block, true))
+        );
+        assert_eq!(lookup_route(&manual, &sets, "c.com"), None);
+    }
+
+    #[test]
+    fn first_set_wins() {
+        let manual = RuleSet::default();
+        let sets = [
+            entry("one", Action::Direct, "a.com\n"),
+            entry("two", Action::Block, "a.com\n"),
+        ];
+        assert_eq!(
+            lookup_route(&manual, &sets, "a.com"),
+            Some((Action::Direct, true))
+        );
+    }
+
+    #[test]
+    fn sixty_thousand_domains_load_fast_and_stay_small() {
+        let mut text = String::new();
+        for i in 0..60_000 {
+            text.push_str(&format!("host{i}.example.com\n"));
+        }
+        let start = std::time::Instant::now();
+        let (s, count) = DomainSet::from_text(&text).expect("60k lines are valid");
+        assert_eq!(count, 60_000);
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(500),
+            "60k domains must load in < 500 ms, took {:?}",
+            start.elapsed()
+        );
+        assert!(
+            s.approx_bytes() < 8 * 1024 * 1024,
+            "60k domains must stay under 8 MB, estimated {} bytes",
+            s.approx_bytes()
+        );
+        let start = std::time::Instant::now();
+        let n = 10_000u32;
+        for i in 0..n {
+            assert!(s.contains(&format!("sub.host{i}.example.com")));
+        }
+        let per_lookup = start.elapsed() / n;
+        assert!(
+            per_lookup < std::time::Duration::from_micros(5),
+            "set lookups must average < 5 us, took {per_lookup:?}"
         );
     }
 }

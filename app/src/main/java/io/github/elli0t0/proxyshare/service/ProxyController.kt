@@ -4,8 +4,14 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import io.github.elli0t0.proxyshare.data.AppSettings
+import io.github.elli0t0.proxyshare.data.BUILTIN_RULE_SET_ID
+import io.github.elli0t0.proxyshare.data.RuleAction
 import io.github.elli0t0.proxyshare.data.RuleEntry
+import io.github.elli0t0.proxyshare.data.RuleSetMeta
 import io.github.elli0t0.proxyshare.data.SettingsRepository
+import io.github.elli0t0.proxyshare.data.loadRuleSetFileText
+import io.github.elli0t0.proxyshare.data.pushRuleSets
+import io.github.elli0t0.proxyshare.data.readBuiltinRuleSetText
 import io.github.elli0t0.proxyshare.data.UsageHistoryStore
 import io.github.elli0t0.proxyshare.data.VpnWatcher
 import io.github.elli0t0.proxyshare.data.networkChanges
@@ -91,6 +97,8 @@ object ProxyController {
     private var repository: SettingsRepository? = null
     private var selector: NetworkSelector? = null
     private var appContext: Context? = null
+    /** The built-in rule-set asset, read once and cached (1.1 MB). */
+    private var builtinRuleSetText: String? = null
     private var started = false
     private var networkJob: Job? = null
     private var directNetworkJob: Job? = null
@@ -183,6 +191,46 @@ object ProxyController {
             RulesStatus.Applied(result.removePrefix("ok ").trim().toIntOrNull() ?: rules.size)
         } else {
             RulesStatus.Error(result)
+        }
+    }
+
+    /**
+     * Push the named rule sets to the engine (hot, no restart).
+     * No-op while stopped: the start path pushes the current sets
+     * after engine.start, and the rule-sets job pushes on every
+     * change while running. The built-in list is read from the asset
+     * once and cached (1.1 MB); a custom set is read from its file.
+     * A bad list rejects only that set in the engine; the error is
+     * not shown anywhere (the importer only sends parsed entries),
+     * so a failure here is unexpected.
+     */
+    fun pushRuleSets(sets: List<RuleSetMeta> = _settings.value.ruleSets) {
+        if (!started) return
+        scope.launch {
+            pushRuleSets(sets, ::loadRuleSetText) { id, action, text ->
+                engine.setRuleSet(id, action, text)
+            }
+        }
+    }
+
+    /**
+     * Clear one set in the engine (used when a set is deleted: the
+     * rule-sets job only pushes sets still in the metadata, so a
+     * deleted set would otherwise stay live). No-op while stopped:
+     * a fresh start only pushes the sets still listed.
+     */
+    fun clearRuleSet(id: String, action: RuleAction) {
+        if (!started) return
+        engine.setRuleSet(id, action.wire, "")
+    }
+
+    /** A set's content by id: the asset (built-in, cached) or its file. Runs on Dispatchers.IO via pushRuleSets. */
+    private fun loadRuleSetText(id: String): String {
+        val ctx = appContext ?: return ""
+        return if (id == BUILTIN_RULE_SET_ID) {
+            builtinRuleSetText ?: ctx.readBuiltinRuleSetText().also { builtinRuleSetText = it }
+        } else {
+            ctx.loadRuleSetFileText(id)
         }
     }
 
@@ -322,6 +370,15 @@ object ProxyController {
                 if (started) pushRules(it)
             }
         }
+        // Same for the named rule sets (0.6.8): pushed on every
+        // metadata change while running (enable/disable, import,
+        // create, edit). The content is read from the asset/file
+        // inside pushRuleSets, on Dispatchers.IO.
+        scope.launch {
+            repo.settings.map { it.ruleSets }.distinctUntilChanged().collect {
+                if (started) pushRuleSets(it)
+            }
+        }
     }
 
     /** Read the settings, generate a password on first run, start the engine. */
@@ -416,6 +473,8 @@ object ProxyController {
                 // Rules (0.6.7): pushed on start, then on every
                 // change while running (see the rules job in init).
                 pushRules(settings.rules)
+                // Rule sets (0.6.8): same, via the rule-sets job.
+                pushRuleSets(settings.ruleSets)
             }
         } catch (_: Exception) {
             started = false

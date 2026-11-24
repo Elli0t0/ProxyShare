@@ -40,6 +40,15 @@ object NativeEngine {
     @JvmStatic
     external fun nativeSetRules(handle: Long, text: String): String
 
+    /**
+     * Replace (or clear) one named rule set from list text (see
+     * docs/ENGINE_API.md): one domain per line. Returns "ok <count>"
+     * (unique domains parsed) or "error line N: msg" with nothing
+     * applied. An empty text clears the set but keeps its position.
+     */
+    @JvmStatic
+    external fun nativeSetRuleSet(handle: Long, id: String, action: String, text: String): String
+
     /** Set the Android Network handle for DIRECT connections (0 = none set). */
     @JvmStatic
     external fun nativeSetDirectNetwork(handle: Long, network: Long)

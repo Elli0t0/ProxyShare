@@ -54,7 +54,7 @@ use crate::engine::{create_engine, destroy_engine, with_engine};
 use crate::listener::JniListener;
 
 /// The engine version string, e.g. "engine 0.5.2".
-pub const ENGINE_VERSION: &str = "engine 0.6.6";
+pub const ENGINE_VERSION: &str = "engine 0.6.8";
 
 /// Convert a Rust &str to a Java string (null on failure).
 fn to_jstring(env: &JNIEnv, text: &str) -> jstring {
@@ -247,6 +247,55 @@ pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nat
             Err(e) => return to_jstring(&env, &e),
         };
         let out = with_engine(handle, |engine| engine.set_rules(&text))
+            .unwrap_or_else(|| "error: unknown engine handle".to_string());
+        to_jstring(&env, &out)
+    }));
+    match result {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.exception_clear();
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Replace (or clear) one named rule set from list text (see
+/// docs/ENGINE_API.md): one domain per line. Returns "ok <count>"
+/// (unique domains parsed) or "error line N: msg" with nothing
+/// applied. An empty text clears the set but keeps its position.
+/// Safe on an unknown handle (returns an error text).
+#[no_mangle]
+pub extern "system" fn Java_io_github_elli0t0_proxyshare_engine_NativeEngine_nativeSetRuleSet<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    id: JString<'local>,
+    action: JString<'local>,
+    text: JString<'local>,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let id = match from_jstring(&mut env, &id) {
+            Ok(id) => id,
+            Err(e) => return to_jstring(&env, &e),
+        };
+        let action_name = match from_jstring(&mut env, &action) {
+            Ok(action) => action,
+            Err(e) => return to_jstring(&env, &e),
+        };
+        let text = match from_jstring(&mut env, &text) {
+            Ok(text) => text,
+            Err(e) => return to_jstring(&env, &e),
+        };
+        let action = match crate::rules::Action::from_name(&action_name) {
+            Some(action) => action,
+            None => {
+                return to_jstring(
+                    &env,
+                    &format!("error: unknown action '{action_name}'"),
+                )
+            }
+        };
+        let out = with_engine(handle, |engine| engine.set_rule_set(&id, action, &text))
             .unwrap_or_else(|| "error: unknown engine handle".to_string());
         to_jstring(&env, &out)
     }));

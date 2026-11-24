@@ -92,6 +92,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
+    val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     val vpnActive by VpnWatcher.active.collectAsStateWithLifecycle()
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
@@ -357,6 +358,15 @@ fun HomeScreen(
                 onConnect = onOpenConnect,
                 onCopy = { clipboard.setText(AnnotatedString(it)) },
             )
+
+            // Rule-set blocks this session (0.6.8): only when > 0.
+            if (snapshot.blockedBySet > 0) {
+                Text(
+                    text = stringResource(R.string.rulesets_blocked, snapshot.blockedBySet),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             // Outbound mode + exit-IP check.
             OutboundCard(

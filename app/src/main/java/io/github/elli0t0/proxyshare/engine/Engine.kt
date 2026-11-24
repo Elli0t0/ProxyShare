@@ -60,6 +60,8 @@ data class Snapshot(
     val speedDown: Long = 0,
     /** False when the PAC server failed to bind (0.6.5); true when it is off or up. */
     val pacOk: Boolean = true,
+    /** Connections refused by a rule-set Block since the process started (0.6.8). */
+    val blockedBySet: Long = 0,
 )
 
 /**
@@ -132,6 +134,7 @@ fun parseSnapshot(text: String): Snapshot? {
         speedUp = head.getOrNull(10)?.toLongOrNull() ?: 0L,
         speedDown = head.getOrNull(11)?.toLongOrNull() ?: 0L,
         pacOk = head.getOrNull(12)?.toIntOrNull() != 0,
+        blockedBySet = head.getOrNull(13)?.toLongOrNull() ?: 0L,
     )
 }
 
@@ -294,6 +297,18 @@ class Engine(
     fun setRules(text: String): String {
         if (closed) return "error: engine closed"
         return NativeEngine.nativeSetRules(handle, text)
+    }
+
+    /**
+     * Replace (or clear) one named rule set from list text (see
+     * docs/ENGINE_API.md): one domain per line. Returns "ok <count>"
+     * (unique domains parsed) or "error line N: msg" with nothing
+     * applied; an empty text clears the set. No-op after close
+     * (returns "error: engine closed").
+     */
+    fun setRuleSet(id: String, action: String, text: String): String {
+        if (closed) return "error: engine closed"
+        return NativeEngine.nativeSetRuleSet(handle, id, action, text)
     }
 
     /** Set the Android Network handle for DIRECT connections (0 = none set). No-op after close. */

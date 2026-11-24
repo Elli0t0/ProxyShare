@@ -66,26 +66,72 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Rules tab (0.6.7): the manual routing rules, modelled on hxmy
- * proxy's Rules page but simpler. Search + All/Proxy/Direct/Block
- * chips, Add (dialog), Import file (one action for the whole file),
- * Export (engine text). Tap a row to change its action or delete
- * it. Rules are stored in DataStore and pushed to the engine hot
- * (ProxyController.pushRules) — no restart. The one-line status
- * under the buttons is the push result: "Applied N rules" or the
- * engine's error line (a bad rule rejects the whole set, so the
+ * Rules tab (0.6.7, 0.6.8): two pages under one segmented control.
+ * Manual (0.6.7) is the manual routing rules: search + All/Proxy/
+ * Direct/Block chips, Add (dialog), Import file (one action for the
+ * whole file), Export (engine text). Tap a row to change its action
+ * or delete it. Rules are stored in DataStore and pushed to the
+ * engine hot (ProxyController.pushRules) — no restart. The one-line
+ * status under the buttons is the push result: "Applied N rules" or
+ * the engine's error line (a bad rule rejects the whole set, so the
  * previous rules stay live until it is fixed or deleted).
+ * Rule sets (0.6.8) is the built-in Ads & trackers list plus
+ * user-made named lists (see RuleSetsScreen.kt).
  */
+private enum class RulesPage { MANUAL, SETS }
+
 @Composable
 fun RulesScreen(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val rulesStatus by ProxyController.rulesStatus.collectAsStateWithLifecycle()
     val diagText by ProxyController.diagLogText.collectAsStateWithLifecycle()
     val rules = settings.rules
     val running = state is EngineState.Running
+    var page by rememberSaveable { mutableStateOf(RulesPage.MANUAL) }
+
+    Column(
+        modifier = modifier.fillMaxSize().statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            RulesPage.entries.forEachIndexed { i, p ->
+                SegmentedButton(
+                    selected = page == p,
+                    onClick = { page = p },
+                    shape = SegmentedButtonDefaults.itemShape(i, RulesPage.entries.size),
+                ) {
+                    Text(
+                        stringResource(
+                            when (p) {
+                                RulesPage.MANUAL -> R.string.rules_tab_manual
+                                RulesPage.SETS -> R.string.rules_tab_sets
+                            }
+                        ),
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            when (page) {
+                RulesPage.MANUAL -> ManualRulesPage(rules, running, rulesStatus, diagText)
+                RulesPage.SETS -> RuleSetsPage(settings)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManualRulesPage(
+    rules: List<RuleEntry>,
+    running: Boolean,
+    rulesStatus: RulesStatus,
+    diagText: String,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var search by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(RuleFilter.ALL) }
@@ -134,8 +180,7 @@ fun RulesScreen(modifier: Modifier = Modifier) {
     }
 
     Column(
-        modifier = modifier.fillMaxSize().statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         OutlinedTextField(
@@ -351,8 +396,9 @@ private fun RuleRow(
     }
 }
 
+/** The colored action tag on a rule row; RuleSetsScreen reuses it for set cards. */
 @Composable
-private fun ActionTag(action: RuleAction) {
+fun ActionTag(action: RuleAction) {
     val (container, content) = when (action) {
         RuleAction.PROXY -> MaterialTheme.colorScheme.primaryContainer to
             MaterialTheme.colorScheme.onPrimaryContainer

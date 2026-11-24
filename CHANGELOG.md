@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.8 — Ad-block rule set + custom rule sets (from the 0.6.8 prompt)
+
+- Rules tab now has two pages under a Manual | Rule sets segmented
+  control. Rule sets (modelled on hxmy proxy's Rule sets): a built-in
+  "Ads & trackers (OISD small)" card with a switch, domain count and
+  a fixed Block action, loaded from the bundled asset
+  `app/src/main/assets/rules/ads-oisd-small.txt` (61,063 domains,
+  CC BY-NC-SA 4.0, credited in Settings > About and in README), plus
+  "My rule sets": create a named set (name + Direct or Block), import
+  a file into it (same importer as 0.6.7), edit/delete/disable per
+  set. Content lives in filesDir/rulesets/<id>.txt, metadata in
+  DataStore as JSON. Manual rules always win over every set; the sets
+  apply in list order, first hit wins.
+- Engine (Rust): a second layer `rule_sets: Vec<(id, Action,
+  DomainSet)>` where DomainSet is a HashSet of plain domains,
+  suffix-matched (walk the host's parents like RuleSet::lookup);
+  60k domains load in < 500 ms and stay under 8 MB. JNI
+  `nativeSetRuleSet(handle, id, action, text): String` replaces or
+  clears one set ("ok <count>", empty text clears but keeps its
+  position; a bad line rejects that set atomically). Lookup order:
+  manual RuleSet -> rule sets in order -> default Proxy. Rule-set
+  Block hits are counted: `blocked_by_set` in the snapshot (14th
+  header field), so Home shows "Blocked: N" under the address card
+  when > 0.
+
 ## 0.6.7 — Rules tab (manual rules)
 
 - Bottom bar is now Home, Activity, Rules, Settings. The Rules tab

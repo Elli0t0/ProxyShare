@@ -204,8 +204,9 @@ impl Event {
 /// connections' bytes itself). devices is the distinct-client count.
 /// speed_up/speed_down are the latest 1 s samples (EMA, bytes/s).
 /// pac_ok is false when the PAC server failed to bind (0.6.5); true
-/// when it is off or up. See docs/ENGINE_API.md.
-// The 8 parameters are the snapshot's 8 parts; grouping them into a
+/// when it is off or up. blocked_by_set is the process-lifetime count
+/// of connections refused by a rule-set Block (0.6.8). See docs/ENGINE_API.md.
+// The 9 parameters are the snapshot's 9 parts; grouping them into a
 // struct would churn the engine and test call sites for no benefit.
 #[allow(clippy::too_many_arguments)]
 pub fn snapshot_text(
@@ -217,9 +218,10 @@ pub fn snapshot_text(
     devices: usize,
     speed: (u64, u64),
     pac_ok: bool,
+    blocked_by_set: u64,
 ) -> String {
     let mut text = format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         state.as_str(),
         totals.0,
         totals.1,
@@ -233,6 +235,7 @@ pub fn snapshot_text(
         speed.0,
         speed.1,
         if pac_ok { 1 } else { 0 },
+        blocked_by_set,
     );
     for conn in conns {
         text.push('\n');
@@ -304,8 +307,8 @@ mod tests {
     #[test]
     fn snapshot_text_shape() {
         assert_eq!(
-            snapshot_text(&EngineState::Stopped, (0, 0), &[], (0, 0, 0), (0, 0), 0, (0, 0), true),
-            "stopped\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t1"
+            snapshot_text(&EngineState::Stopped, (0, 0), &[], (0, 0, 0), (0, 0), 0, (0, 0), true, 0),
+            "stopped\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t1\t0"
         );
         let conn = sample_conn();
         assert_eq!(
@@ -317,9 +320,10 @@ mod tests {
                 (4096, 8192),
                 2,
                 (500, 600),
-                false
+                false,
+                5
             ),
-            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\t0\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0\tproxy"
+            "running\t1024\t2048\t1\t3\t1\t2\t4096\t8192\t2\t500\t600\t0\t5\n1\t192.168.1.5\texample.com\t443\thttp\t1794500000000\t1024\t2048\t0\tproxy"
         );
     }
 
