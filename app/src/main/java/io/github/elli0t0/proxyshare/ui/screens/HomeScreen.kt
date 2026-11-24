@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -22,11 +23,17 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -43,15 +50,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.NetworkWatcher
@@ -72,7 +83,11 @@ import io.github.elli0t0.proxyshare.ui.components.toPowerState
 import kotlinx.coroutines.launch
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    onOpenConnect: () -> Unit,
+    onOpenSecuritySettings: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
@@ -147,6 +162,37 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
         otherAddresses(ranked, httpPort, socksPort)
     }
     val clipboard = LocalClipboardManager.current
+
+    // Health: the two Android facts only change outside the app
+    // (the user leaves to change a setting), so re-read them on
+    // resume, not every second. Engine, settings, VPN and address
+    // changes recompute the list reactively through the keys.
+    var notifOk by remember { mutableStateOf(notificationsAllowed(context)) }
+    var batteryOk by remember { mutableStateOf(batteryUnrestricted(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notifOk = notificationsAllowed(context)
+        batteryOk = batteryUnrestricted(context)
+    }
+    var healthExpanded by rememberSaveable { mutableStateOf(false) }
+    val health = remember(notifOk, batteryOk, vpnActive, ranked, state, settings) {
+        computeHealth(
+            HealthInputs(
+                notificationsOk = notifOk,
+                batteryUnrestricted = batteryOk,
+                vpnActive = vpnActive,
+                hasShareableAddress = hasShareableAddress(ranked),
+                engineState = state,
+                authEnabled = settings.authEnabled,
+                authPass = settings.authPass,
+            ),
+        )
+    }
+    val healthIssues = health.count { it.status != HealthStatus.OK }
+    val healthWorst = when {
+        health.any { it.status == HealthStatus.FAIL } -> HealthStatus.FAIL
+        health.any { it.status == HealthStatus.WARN } -> HealthStatus.WARN
+        else -> HealthStatus.OK
+    }
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -244,6 +290,60 @@ fun HomeScreen(modifier: Modifier = Modifier, onOpenConnect: () -> Unit) {
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+
+            // Health: one row summarising the checks; tapping
+            // expands the list in place.
+            SectionCard(title = stringResource(R.string.health_title)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp)
+                        .clickable { healthExpanded = !healthExpanded },
+                ) {
+                    Icon(
+                        imageVector = if (healthWorst == HealthStatus.OK) {
+                            Icons.Filled.CheckCircle
+                        } else {
+                            Icons.Filled.Warning
+                        },
+                        contentDescription = null,
+                        tint = healthTint(healthWorst),
+                    )
+                    Text(
+                        text = if (healthIssues == 0) {
+                            stringResource(R.string.health_ok)
+                        } else {
+                            pluralStringResource(
+                                R.plurals.health_issues, healthIssues, healthIssues,
+                            )
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f).padding(start = 12.dp),
+                    )
+                    Icon(
+                        imageVector = if (healthExpanded) {
+                            Icons.Filled.KeyboardArrowUp
+                        } else {
+                            Icons.Filled.KeyboardArrowDown
+                        },
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                AnimatedVisibility(visible = healthExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        health.forEach { item ->
+                            HealthItemRow(
+                                item = item,
+                                onFix = {
+                                    fixHealthItem(context, item.fix, onOpenSecuritySettings)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -481,5 +581,73 @@ private fun modeLabel(mode: OutboundMode): Int = when (mode) {
     OutboundMode.VPN_ONLY -> R.string.mode_vpn_only
     OutboundMode.WIFI -> R.string.mode_wifi
     OutboundMode.MOBILE -> R.string.mode_mobile
+}
+
+/** Status icon tint: primary for OK, amber for WARN, error for FAIL. */
+@Composable
+private fun healthTint(status: HealthStatus): Color = when (status) {
+    HealthStatus.OK -> MaterialTheme.colorScheme.primary
+    HealthStatus.WARN -> Color(0xFFFFB300)
+    HealthStatus.FAIL -> MaterialTheme.colorScheme.error
+}
+
+/** One health check row: status icon, label + detail, Fix button when it has one. */
+@Composable
+private fun HealthItemRow(item: HealthItem, onFix: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = if (item.status == HealthStatus.OK) {
+                Icons.Filled.CheckCircle
+            } else {
+                Icons.Filled.Warning
+            },
+            contentDescription = null,
+            tint = healthTint(item.status),
+        )
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(
+                text = stringResource(item.label),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            val detailText = item.message
+                ?: item.detail?.let { stringResource(it) }
+            if (detailText != null) {
+                Text(
+                    text = detailText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (item.fix != HealthFix.NONE) {
+            TextButton(onClick = onFix) {
+                Text(stringResource(R.string.health_fix))
+            }
+        }
+    }
+}
+
+/** Open the settings page that fixes one health item. */
+private fun fixHealthItem(
+    context: Context,
+    fix: HealthFix,
+    onOpenSecuritySettings: () -> Unit,
+) {
+    when (fix) {
+        HealthFix.NOTIFICATIONS -> {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(intent) }
+        }
+        HealthFix.BATTERY -> {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(intent) }
+        }
+        HealthFix.HOTSPOT -> openHotspotSettings(context)
+        HealthFix.SETTINGS_SECURITY -> onOpenSecuritySettings()
+        HealthFix.NONE -> {}
+    }
 }
 

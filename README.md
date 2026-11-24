@@ -9,6 +9,10 @@ phone's active VPN. No root.
 - HTTP, SOCKS4 and SOCKS5 proxy on one port, with optional authentication
   (SOCKS5 RFC 1929, HTTP Basic) and a failed-auth throttle.
 - Live Connections monitor: per-client traffic, speeds, durations.
+- Health card on Home: one row says whether sharing looks fine,
+  tapping it lists the checks (notifications, battery, VPN, shareable
+  address, port listening, password) with a Fix button for each
+  failing item.
 - Settings: port, bind address, protocols, auth, allowed clients, blocked
   domains, limits, theme (System/Light/Dark).
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill

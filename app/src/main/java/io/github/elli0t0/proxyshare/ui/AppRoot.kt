@@ -32,6 +32,7 @@ import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.ui.screens.ActivityScreen
 import io.github.elli0t0.proxyshare.ui.screens.ConnectScreen
 import io.github.elli0t0.proxyshare.ui.screens.HomeScreen
+import io.github.elli0t0.proxyshare.ui.screens.SettingsPage
 import io.github.elli0t0.proxyshare.ui.screens.SettingsScreen
 
 /**
@@ -43,6 +44,9 @@ import io.github.elli0t0.proxyshare.ui.screens.SettingsScreen
 fun AppRoot() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showConnect by rememberSaveable { mutableStateOf(false) }
+    // A Health "Fix" can ask for a Settings sub-page (Security):
+    // the request is consumed by SettingsScreen once shown.
+    var openSettingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     Box(Modifier.fillMaxSize()) {
         if (showConnect) {
             // Full-screen Connect page instead of the Scaffold: no bottom bar.
@@ -80,12 +84,20 @@ fun AppRoot() {
                     0 -> HomeScreen(
                         modifier = Modifier.padding(padding),
                         onOpenConnect = { showConnect = true },
+                        onOpenSecuritySettings = {
+                            openSettingsPage = SettingsPage.SECURITY
+                            tab = 2
+                        },
                     )
                     1 -> ActivityScreen(
                         modifier = Modifier.padding(padding),
                         onGoHome = { tab = 0 },
                     )
-                    else -> SettingsScreen(modifier = Modifier.padding(padding))
+                    else -> SettingsScreen(
+                        modifier = Modifier.padding(padding),
+                        requestedPage = openSettingsPage,
+                        onRequestedPageShown = { openSettingsPage = null },
+                    )
                 }
             }
         }

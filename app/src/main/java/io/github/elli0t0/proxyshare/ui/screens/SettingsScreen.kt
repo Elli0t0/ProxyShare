@@ -42,6 +42,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,7 +85,11 @@ import kotlinx.coroutines.launch
  * selector (needs appcompat; revisit later).
  */
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    modifier: Modifier = Modifier,
+    requestedPage: SettingsPage? = null,
+    onRequestedPageShown: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
@@ -129,6 +134,15 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     BackHandler(enabled = page != null) { page = null }
+
+    // A Health "Fix" can ask for a sub-page: open it once, then
+    // clear the request so Back still returns to the list.
+    LaunchedEffect(requestedPage) {
+        if (requestedPage != null) {
+            page = requestedPage
+            onRequestedPageShown()
+        }
+    }
 
     fun onRestart() {
         scope.launch { ProxyController.restart() }

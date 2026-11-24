@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.2 — Health checks on Home
+
+- New Health card on Home: one row says "Everything looks fine"
+  or "N issues"; tapping it expands the six checks in place
+  (notifications, battery, VPN, shareable address, port listening,
+  password), each with a Fix button when it fails.
+- The checks are a pure function, computeHealth(HealthInputs),
+  unit-tested: all-good, each single failure, stable order.
+  The engine error item carries the real error message (a new
+  `message` field on HealthItem), and a stopped proxy is a warning,
+  not a failure.
+- Fixes open the right place: notification settings, battery
+  optimization settings, hotspot settings, or Settings > Security
+  for an empty password (AppRoot passes the requested sub-page to
+  SettingsScreen). A missing VPN is a warning with no fix.
+- The two Android facts (notifications, battery) are re-read on
+  resume only (LifecycleEventEffect), never polled; engine,
+  settings, VPN and address changes refresh the list reactively.
+
 ## 0.6.1 — One Activity tab instead of Connections + Logs
 
 - Bottom bar is now 3 tabs: Home, Activity, Settings. Activity merges
