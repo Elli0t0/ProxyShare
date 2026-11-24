@@ -151,11 +151,15 @@ jobs:
           PATCH=$(grep '^VERSION_PATCH=' gradle.properties | cut -d= -f2)
           echo "version=$MAJOR.$MINOR.$PATCH" >> "$GITHUB_OUTPUT"
 
-      - name: Publish release
+            - name: Extract changelog
+        run: awk '/^## /{if (seen) exit; seen=1} seen' CHANGELOG.md > release-notes.md
+        
+            - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: ProxyShare ${{ steps.version.outputs.version }}
+                  body_path: release-notes.md
           prerelease: false
           make_latest: true
           files: app/build/outputs/apk/release/*.apk
