@@ -63,6 +63,7 @@ import io.github.elli0t0.proxyshare.data.GITHUB_REPO
 import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.data.IfKind
 import io.github.elli0t0.proxyshare.data.LatestRelease
+import io.github.elli0t0.proxyshare.data.NetIf
 import io.github.elli0t0.proxyshare.data.SettingsRepository
 import io.github.elli0t0.proxyshare.data.fetchLatestRelease
 import io.github.elli0t0.proxyshare.data.isNewer
