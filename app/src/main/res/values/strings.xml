@@ -97,6 +97,12 @@
     <string name="settings_security">Security</string>
     <string name="settings_limits">Limits</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_backup">Backup</string>
+    <string name="backup_text">Export all settings as a JSON file, or import one. Your password is never included.</string>
+    <string name="backup_export">Export settings</string>
+    <string name="backup_import">Import settings</string>
+    <string name="backup_imported">Settings imported</string>
+    <string name="backup_bad_file">Not a ProxyShare settings file</string>
     <string name="port_label">Port</string>
     <string name="port_error">Port must be 1024–65535</string>
     <string name="validation_empty">Enter a value</string>

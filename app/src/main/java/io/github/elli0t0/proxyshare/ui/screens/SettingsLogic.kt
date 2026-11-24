@@ -2,7 +2,10 @@ package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.AppSettings
+import io.github.elli0t0.proxyshare.data.parseClientNames
 import io.github.elli0t0.proxyshare.engine.NativeEngine
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Validation kinds for [validate]: must match rust/engine/src/validate.rs. */
 const val VALIDATE_CIDR = 0
@@ -123,4 +126,117 @@ fun appearanceSummary(s: AppSettings): String = when (s.themeMode) {
     "light" -> "Light theme"
     "dark" -> "Dark theme"
     else -> "System theme"
+}
+
+/** Backup file format version, written by [AppSettings.toBackupJson]. */
+private const val BACKUP_VERSION = 1
+
+private val KNOWN_PROTOCOLS = setOf("http", "socks4", "socks5")
+private val KNOWN_THEMES = setOf("system", "light", "dark")
+private val KNOWN_LANGUAGES = setOf("system", "en", "fa")
+private val KNOWN_OUTBOUND_MODES = setOf("default", "vpn_only", "wifi", "mobile")
+private val KNOWN_IDLE_STOP_MINUTES = setOf(0, 15, 30, 60, 120)
+
+/** Read a JSON array of strings (skips non-strings, trims, drops blanks). */
+private fun jsonStringList(obj: JSONObject, key: String): List<String> {
+    val arr = obj.optJSONArray(key) ?: return emptyList()
+    val out = ArrayList<String>(arr.length())
+    for (i in 0 until arr.length()) {
+        val s = arr.optString(i, "").trim()
+        if (s.isNotEmpty()) out += s
+    }
+    return out
+}
+
+/** Serialize every setting except the auth secrets, for a backup file. */
+fun AppSettings.toBackupJson(): String = JSONObject().apply {
+    put("version", BACKUP_VERSION)
+    put("bindAddr", bindAddr)
+    put("port", port)
+    put("separatePorts", separatePorts)
+    put("httpPort", httpPort)
+    put("socksPort", socksPort)
+    put("protocols", JSONArray(protocols.toList()))
+    put("authEnabled", authEnabled)
+    // authUser and authPass are NEVER exported.
+    put("allowedClients", JSONArray(allowedClients))
+    put("blockedDomains", JSONArray(blockedDomains))
+    put("privateOnly", privateOnly)
+    put("maxConnections", maxConnections)
+    put("idleTimeoutS", idleTimeoutS)
+    put("connectTimeoutS", connectTimeoutS)
+    put("limitDownKbps", limitDownKbps)
+    put("limitUpKbps", limitUpKbps)
+    put("themeMode", themeMode)
+    put("language", language)
+    put("keepScreenOn", keepScreenOn)
+    put("requireVpn", requireVpn)
+    put("clientNames", JSONObject(clientNames))
+    put("batterySaver", batterySaver)
+    put("startOnBoot", startOnBoot)
+    put("idleStopMinutes", idleStopMinutes)
+    put("outboundMode", outboundMode)
+    put("exitIpUrl", exitIpUrl)
+}.toString(2)
+
+/**
+ * Parse a backup file produced by [AppSettings.toBackupJson].
+ * Numbers are clamped to the UI ranges, list entries are dropped
+ * when they fail the existing Rust validation, unknown keys are
+ * ignored, and missing keys keep [base] (the current settings on
+ * import, the defaults in tests). Secrets are never in the file:
+ * authUser/authPass always keep [base]'s values.
+ * The validators are injectable so JVM unit tests can run without
+ * loading the native library (same pattern as [parseBlockedList]).
+ */
+fun settingsFromBackupJson(
+    text: String,
+    base: AppSettings = AppSettings(),
+    isValidCidr: (String) -> Boolean = { validate(VALIDATE_CIDR, it).isEmpty() },
+    isValidDomain: (String) -> Boolean = ::validateBlockedDomain,
+): Result<AppSettings> = runCatching {
+    val o = JSONObject(text)
+    require(o.optInt("version", 0) >= BACKUP_VERSION)
+    val bindAddr = o.optString("bindAddr", base.bindAddr)
+        .takeIf { isValidCidr(it) } ?: base.bindAddr
+    val protocols = jsonStringList(o, "protocols")
+        .filter { it in KNOWN_PROTOCOLS }.toSet()
+        .takeIf { it.isNotEmpty() } ?: base.protocols
+    val themeMode = o.optString("themeMode", base.themeMode)
+        .takeIf { it in KNOWN_THEMES } ?: base.themeMode
+    val language = o.optString("language", base.language)
+        .takeIf { it in KNOWN_LANGUAGES } ?: base.language
+    val outboundMode = o.optString("outboundMode", base.outboundMode)
+        .takeIf { it in KNOWN_OUTBOUND_MODES } ?: base.outboundMode
+    val idleStopMinutes = o.optInt("idleStopMinutes", base.idleStopMinutes)
+        .takeIf { it in KNOWN_IDLE_STOP_MINUTES } ?: base.idleStopMinutes
+    val clientNames = o.optJSONObject("clientNames")
+        ?.let { parseClientNames(it.toString()) } ?: base.clientNames
+    base.copy(
+        bindAddr = bindAddr,
+        port = o.optInt("port", base.port).coerceIn(1, 65535),
+        separatePorts = o.optBoolean("separatePorts", base.separatePorts),
+        httpPort = o.optInt("httpPort", base.httpPort).coerceIn(1, 65535),
+        socksPort = o.optInt("socksPort", base.socksPort).coerceIn(1, 65535),
+        protocols = protocols,
+        authEnabled = o.optBoolean("authEnabled", base.authEnabled),
+        allowedClients = jsonStringList(o, "allowedClients").filter(isValidCidr),
+        blockedDomains = jsonStringList(o, "blockedDomains").filter(isValidDomain),
+        privateOnly = o.optBoolean("privateOnly", base.privateOnly),
+        maxConnections = o.optInt("maxConnections", base.maxConnections).coerceIn(1, 2000),
+        idleTimeoutS = o.optInt("idleTimeoutS", base.idleTimeoutS).coerceIn(30, 3600),
+        connectTimeoutS = o.optInt("connectTimeoutS", base.connectTimeoutS).coerceIn(2, 120),
+        limitDownKbps = o.optInt("limitDownKbps", base.limitDownKbps).coerceIn(0, 1_000_000),
+        limitUpKbps = o.optInt("limitUpKbps", base.limitUpKbps).coerceIn(0, 1_000_000),
+        themeMode = themeMode,
+        language = language,
+        keepScreenOn = o.optBoolean("keepScreenOn", base.keepScreenOn),
+        requireVpn = o.optBoolean("requireVpn", base.requireVpn),
+        clientNames = clientNames,
+        batterySaver = o.optBoolean("batterySaver", base.batterySaver),
+        startOnBoot = o.optBoolean("startOnBoot", base.startOnBoot),
+        idleStopMinutes = idleStopMinutes,
+        outboundMode = outboundMode,
+        exitIpUrl = o.optString("exitIpUrl", base.exitIpUrl).trim(),
+    )
 }

@@ -15,6 +15,8 @@ phone's active VPN. No root.
   failing item.
 - Settings: port, bind address, protocols, auth, allowed clients, blocked
   domains, limits, theme (System/Light/Dark).
+- Backup: export and import all settings as a JSON file
+  (Settings > Backup); the password is never included.
 - Outbound mode (default / VPN only / Wi-Fi / mobile) with a VPN kill
   switch, and an exit-IP check.
 - "Connect your laptop" page with address picker, endpoint rows, credentials

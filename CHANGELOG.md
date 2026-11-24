@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.3 — Backup / restore settings as JSON
+
+- New Settings > Backup page: Export writes every setting to a
+  `proxyshare-settings.json` file (system file picker), Import reads
+  one back. The password and username are never in the file.
+- Import validates each field through the existing Rust validation
+  (bad domains/clients are dropped, ports and limits are clamped to
+  the UI ranges, unknown keys ignored, missing keys keep the current
+  values); a bad file shows "Not a ProxyShare settings file" and
+  changes nothing. On success it shows "Settings imported" and
+  restarts the engine if it is running (saveRestart path).
+- The import applies in one DataStore edit (SettingsRepository
+  replaceAll, which never touches the auth secrets). Pure
+  toBackupJson / settingsFromBackupJson in SettingsLogic, unit-tested:
+  round trip, secrets absent, garbage fails, ports clamped, missing
+  keys keep defaults.
+
 ## 0.6.2 — Health checks on Home
 
 - New Health card on Home: one row says "Everything looks fine"

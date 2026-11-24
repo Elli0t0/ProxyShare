@@ -282,6 +282,41 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.EXIT_IP_URL] = value }
     }
 
+    /**
+     * Replace every stored setting in one edit (backup import).
+     * Never touches the auth secrets: authUser/authPass keep their
+     * current values, because a backup file never contains them.
+     */
+    suspend fun replaceAll(s: AppSettings) {
+        dataStore.edit { prefs ->
+            prefs[Keys.BIND_ADDR] = s.bindAddr
+            prefs[Keys.PORT] = s.port
+            prefs[Keys.SEPARATE_PORTS] = s.separatePorts
+            prefs[Keys.HTTP_PORT] = s.httpPort
+            prefs[Keys.SOCKS_PORT] = s.socksPort
+            prefs[Keys.PROTOCOLS] = s.protocols
+            prefs[Keys.AUTH_ENABLED] = s.authEnabled
+            prefs[Keys.ALLOWED_CLIENTS] = s.allowedClients.joinToString(",")
+            prefs[Keys.BLOCKED_DOMAINS] = s.blockedDomains.joinToString(",")
+            prefs[Keys.PRIVATE_ONLY] = s.privateOnly
+            prefs[Keys.MAX_CONNECTIONS] = s.maxConnections
+            prefs[Keys.IDLE_TIMEOUT_S] = s.idleTimeoutS
+            prefs[Keys.CONNECT_TIMEOUT_S] = s.connectTimeoutS
+            prefs[Keys.LIMIT_DOWN_KBPS] = s.limitDownKbps
+            prefs[Keys.LIMIT_UP_KBPS] = s.limitUpKbps
+            prefs[Keys.THEME_MODE] = s.themeMode
+            prefs[Keys.LANGUAGE] = s.language
+            prefs[Keys.KEEP_SCREEN_ON] = s.keepScreenOn
+            prefs[Keys.REQUIRE_VPN] = s.requireVpn
+            prefs[Keys.CLIENT_NAMES] = clientNamesJson(s.clientNames)
+            prefs[Keys.BATTERY_SAVER] = s.batterySaver
+            prefs[Keys.START_ON_BOOT] = s.startOnBoot
+            prefs[Keys.IDLE_STOP_MINUTES] = s.idleStopMinutes
+            prefs[Keys.OUTBOUND_MODE] = s.outboundMode
+            prefs[Keys.EXIT_IP_URL] = s.exitIpUrl
+        }
+    }
+
     private object Keys {
         val BIND_ADDR = stringPreferencesKey("bind_addr")
         val PORT = intPreferencesKey("port")

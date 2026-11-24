@@ -6,8 +6,11 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +28,7 @@ import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -37,6 +41,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,7 +82,9 @@ import io.github.elli0t0.proxyshare.service.ProxyController
 import io.github.elli0t0.proxyshare.ui.components.OptionRow
 import io.github.elli0t0.proxyshare.ui.components.SectionCard
 import io.github.elli0t0.proxyshare.ui.components.SettingRow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Settings, saved on change. Server, protocols, security and limits
@@ -92,6 +100,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
     val netFlow = remember(context) { networkInterfaces(context) }
@@ -164,7 +173,8 @@ fun SettingsScreen(
         }
     }
 
-    Surface(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize()) {
+        Surface(modifier = Modifier.fillMaxSize()) {
         val current = page
         if (current == null) {
             SettingsList(
@@ -193,9 +203,17 @@ fun SettingsScreen(
                 saveLive = ::saveLive,
                 onShowIdleDialog = { showIdleDialog = true },
                 onShowPasteList = { showPasteList = true },
+                onShowSnackbar = { message ->
+                    scope.launch { snackbarHostState.showSnackbar(message) }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 
     if (showIdleDialog) {
@@ -243,8 +261,8 @@ fun SettingsScreen(
     }
 }
 
-/** Which sub-page of Settings is open, if any. Backup and Rules will add rows here. */
-enum class SettingsPage { SERVER, SECURITY, LIMITS, BATTERY, APPEARANCE }
+/** Which sub-page of Settings is open, if any. Rules will add a row here (0.6.7). */
+enum class SettingsPage { SERVER, SECURITY, LIMITS, BATTERY, APPEARANCE, BACKUP }
 
 @Composable
 private fun SettingsList(
@@ -309,6 +327,7 @@ private fun SettingsDetail(
     saveLive: (suspend SettingsRepository.() -> Unit) -> Unit,
     onShowIdleDialog: () -> Unit,
     onShowPasteList: () -> Unit,
+    onShowSnackbar: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -361,6 +380,78 @@ private fun SettingsDetail(
                 settings = settings,
                 saveLive = saveLive,
             )
+            SettingsPage.BACKUP -> BackupSettings(
+                settings = settings,
+                saveRestart = saveRestart,
+                onShowSnackbar = onShowSnackbar,
+            )
+        }
+    }
+}
+
+/** Backup sub-page: export settings as a JSON file, or import one. */
+@Composable
+private fun BackupSettings(
+    settings: AppSettings,
+    saveRestart: (suspend SettingsRepository.() -> Unit) -> Unit,
+    onShowSnackbar: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val importedMessage = stringResource(R.string.backup_imported)
+    val badFileMessage = stringResource(R.string.backup_bad_file)
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(settings.toBackupJson().toByteArray(Charsets.UTF_8))
+                    }
+                }
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)
+                        ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                }
+            }.getOrNull()
+            val imported = text?.let {
+                settingsFromBackupJson(it, base = settings).getOrNull()
+            }
+            if (imported == null) {
+                onShowSnackbar(badFileMessage)
+            } else {
+                saveRestart { replaceAll(imported) }
+                onShowSnackbar(importedMessage)
+            }
+        }
+    }
+    SectionCard(title = stringResource(R.string.settings_backup)) {
+        Text(
+            text = stringResource(R.string.backup_text),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Button(
+            onClick = { exportLauncher.launch("proxyshare-settings.json") },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.backup_export))
+        }
+        OutlinedButton(
+            onClick = { importLauncher.launch(arrayOf("application/json")) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.backup_import))
         }
     }
 }
@@ -455,6 +546,7 @@ private fun pageIcon(page: SettingsPage): ImageVector = when (page) {
     SettingsPage.LIMITS -> Icons.Filled.List
     SettingsPage.BATTERY -> Icons.Filled.PlayArrow
     SettingsPage.APPEARANCE -> Icons.Filled.Face
+    SettingsPage.BACKUP -> Icons.Filled.Share
 }
 
 private fun pageTitle(page: SettingsPage): Int = when (page) {
@@ -463,6 +555,7 @@ private fun pageTitle(page: SettingsPage): Int = when (page) {
     SettingsPage.LIMITS -> R.string.settings_limits
     SettingsPage.BATTERY -> R.string.settings_battery_startup
     SettingsPage.APPEARANCE -> R.string.settings_appearance
+    SettingsPage.BACKUP -> R.string.settings_backup
 }
 
 private fun pageSummary(page: SettingsPage, settings: AppSettings): String = when (page) {
@@ -471,6 +564,7 @@ private fun pageSummary(page: SettingsPage, settings: AppSettings): String = whe
     SettingsPage.LIMITS -> limitsSummary(settings)
     SettingsPage.BATTERY -> batterySummary(settings)
     SettingsPage.APPEARANCE -> appearanceSummary(settings)
+    SettingsPage.BACKUP -> "Export / import as JSON"
 }
 
 @Composable
