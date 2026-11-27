@@ -15,17 +15,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -189,228 +193,296 @@ fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
-    Column(modifier.fillMaxSize().statusBarsPadding()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-            }
-            Text(
-                stringResource(R.string.laptop_button),
-                style = MaterialTheme.typography.titleLarge,
-            )
-        }
-        LazyColumn(
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.navigationBarsPadding(),
-        ) {
-            item(key = "status") {
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                }
                 Text(
-                    text = stringResource(
-                        if (state is EngineState.Running) R.string.proxy_running
-                        else R.string.laptop_start_first
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    stringResource(R.string.laptop_button),
+                    style = MaterialTheme.typography.titleLarge,
                 )
             }
-            item(key = "address") {
-                if (ranked.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.addresses_none),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (mobileOnly) {
-                    // The carrier address is not reachable from the laptop:
-                    // point at the hotspot instead of offering it.
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.laptop_mobile_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        FilledTonalButton(onClick = { openHotspotSettings(context) }) {
-                            Text(stringResource(R.string.open_hotspot_settings))
-                        }
-                    }
-                } else if (ranked.size == 1) {
-                    // One address: no chips, just show it.
-                    Text(
-                        text = "${ranked[0].ip} (${ranked[0].name})",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.laptop_pick_address),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+            LazyColumn(
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.navigationBarsPadding(),
+            ) {
+                item(key = "status") {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            for (nif in ranked) {
-                                FilterChip(
-                                    selected = host == nif.ip,
-                                    onClick = { selectedIp = nif.ip },
-                                    label = { Text("${nif.ip} (${nif.name})") },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            item(key = "endpoint") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (cmdHost != null) {
-                        if (httpPort != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "HTTP  $cmdHost:$httpPort",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = { copyToClipboard(context, "$cmdHost:$httpPort") }) {
-                                    Text(stringResource(R.string.copy))
-                                }
-                            }
-                        }
-                        if (socksPort != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "SOCKS5  $cmdHost:$socksPort",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = { copyToClipboard(context, "$cmdHost:$socksPort") }) {
-                                    Text(stringResource(R.string.copy))
-                                }
-                            }
-                        }
-                    }
-                    // Credentials live here now, not in a card on Home.
-                    if (settings.authEnabled) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "${stringResource(R.string.user_label)}: ${settings.authUser}",
+                                text = stringResource(
+                                    if (state is EngineState.Running) R.string.proxy_running
+                                    else R.string.laptop_start_first
+                                ),
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            TextButton(onClick = { copyToClipboard(context, settings.authUser) }) {
-                                Text(stringResource(R.string.copy))
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "${stringResource(R.string.password_label)}: " +
-                                    if (passwordVisible) settings.authPass.ifEmpty { "—" } else "••••••",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.weight(1f),
-                            )
-                            TextButton(onClick = { passwordVisible = !passwordVisible }) {
+                            if (ranked.isEmpty()) {
                                 Text(
-                                    stringResource(
-                                        if (passwordVisible) R.string.connect_hide
-                                        else R.string.connect_show
+                                    text = stringResource(R.string.addresses_none),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else if (mobileOnly) {
+                                // The carrier address is not reachable from the laptop:
+                                // point at the hotspot instead of offering it.
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.laptop_mobile_hint),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    FilledTonalButton(
+                                        onClick = { openHotspotSettings(context) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(stringResource(R.string.open_hotspot_settings))
+                                    }
+                                }
+                            } else if (ranked.size == 1) {
+                                // One address: no chips, just show it.
+                                Text(
+                                    text = "${ranked[0].ip} (${ranked[0].name})",
+                                    style = MaterialTheme.typography.bodyMedium,
                                 )
-                            }
-                            TextButton(onClick = { copyToClipboard(context, settings.authPass) }) {
-                                Text(stringResource(R.string.copy))
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.laptop_pick_address),
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        for (nif in ranked) {
+                                            FilterChip(
+                                                selected = host == nif.ip,
+                                                onClick = { selectedIp = nif.ip },
+                                                label = { Text("${nif.ip} (${nif.name})") },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-            item(key = "qr") {
-                // No QR for the carrier address: it is not reachable
-                // from the laptop, so the page shows the hotspot hint
-                // instead (see the address item above).
-                if (cmdHost != null && !mobileOnly) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.connect_scan_title),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        if (settings.pacEnabled) {
-                            val setupUrl = "http://$cmdHost:${settings.pacPort}/"
-                            if (state is EngineState.Running && !pacOk) {
-                                Text(
-                                    text = stringResource(R.string.connect_pac_bind_failed),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                            QrImage(setupUrl)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = setupUrl,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TextButton(onClick = { copyToClipboard(context, setupUrl) }) {
-                                    Text(stringResource(R.string.copy))
+                val showEndpoints = cmdHost != null && (httpPort != null || socksPort != null)
+                val showCredentials = settings.authEnabled
+                if (showEndpoints || showCredentials) {
+                    item(key = "endpoint") {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                if (cmdHost != null) {
+                                    if (httpPort != null) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "HTTP  $cmdHost:$httpPort",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            TextButton(onClick = { copyToClipboard(context, "$cmdHost:$httpPort") }) {
+                                                Text(stringResource(R.string.copy))
+                                            }
+                                        }
+                                    }
+                                    if (socksPort != null) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "SOCKS5  $cmdHost:$socksPort",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            TextButton(onClick = { copyToClipboard(context, "$cmdHost:$socksPort") }) {
+                                                Text(stringResource(R.string.copy))
+                                            }
+                                        }
+                                    }
                                 }
-                            }
-                        } else {
-                            FilledTonalButton(onClick = {
-                                scope.launch {
-                                    ProxyController.updateSettings { updatePacEnabled(true) }
-                                    // Restart now, so the PAC port is
-                                    // bound before the QR below is
-                                    // shown: enabling it only sets a
-                                    // flag, it does not start the PAC
-                                    // server.
-                                    if (state is EngineState.Running) ProxyController.restart()
+                                if (showEndpoints && showCredentials) {
+                                    HorizontalDivider()
                                 }
-                            }) {
-                                Text(stringResource(R.string.connect_scan_enable))
+                                // Credentials live here now, not in a card on Home.
+                                if (settings.authEnabled) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${stringResource(R.string.user_label)}: ${settings.authUser}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        TextButton(onClick = { copyToClipboard(context, settings.authUser) }) {
+                                            Text(stringResource(R.string.copy))
+                                        }
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${stringResource(R.string.password_label)}: " +
+                                                if (passwordVisible) settings.authPass.ifEmpty { "—" } else "••••••",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        TextButton(onClick = { passwordVisible = !passwordVisible }) {
+                                            Text(
+                                                stringResource(
+                                                    if (passwordVisible) R.string.connect_hide
+                                                    else R.string.connect_show
+                                                )
+                                            )
+                                        }
+                                        TextButton(onClick = { copyToClipboard(context, settings.authPass) }) {
+                                            Text(stringResource(R.string.copy))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-            item(key = "os") {
-                val tabLabels = listOf(
-                    R.string.connect_tab_quick,
-                    R.string.connect_tab_linux,
-                    R.string.laptop_windows_title,
-                )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    tabLabels.forEachIndexed { i, label ->
-                        SegmentedButton(
-                            selected = tab == i,
-                            onClick = { tab = i },
-                            shape = SegmentedButtonDefaults.itemShape(i, tabLabels.size),
-                        ) { Text(stringResource(label), maxLines = 1) }
+                item(key = "qr") {
+                    // No QR for the carrier address: it is not reachable
+                    // from the laptop, so the page shows the hotspot hint
+                    // instead (see the address item above).
+                    if (cmdHost != null && !mobileOnly) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.connect_scan_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                if (settings.pacEnabled) {
+                                    val setupUrl = "http://$cmdHost:${settings.pacPort}/"
+                                    if (state is EngineState.Running && !pacOk) {
+                                        Text(
+                                            text = stringResource(R.string.connect_pac_bind_failed),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                    QrImage(
+                                        setupUrl,
+                                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = setupUrl,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        TextButton(onClick = { copyToClipboard(context, setupUrl) }) {
+                                            Text(stringResource(R.string.copy))
+                                        }
+                                    }
+                                } else {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            scope.launch {
+                                                ProxyController.updateSettings { updatePacEnabled(true) }
+                                                // Restart now, so the PAC port is
+                                                // bound before the QR below is
+                                                // shown: enabling it only sets a
+                                                // flag, it does not start the PAC
+                                                // server.
+                                                if (state is EngineState.Running) ProxyController.restart()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(stringResource(R.string.connect_scan_enable))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            if (tab == 2) {
-                item(key = "windows") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.laptop_windows_title),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            text = stringResource(R.string.laptop_windows_steps),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                item(key = "os") {
+                    val tabLabels = listOf(
+                        R.string.connect_tab_quick,
+                        R.string.connect_tab_linux,
+                        R.string.laptop_windows_title,
+                    )
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        tabLabels.forEachIndexed { i, label ->
+                            SegmentedButton(
+                                selected = tab == i,
+                                onClick = { tab = i },
+                                shape = SegmentedButtonDefaults.itemShape(i, tabLabels.size),
+                                colors = SegmentedButtonDefaults.colors(
+                                    inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                ),
+                            ) { Text(stringResource(label), maxLines = 1) }
+                        }
                     }
                 }
-            } else {
-                items(commands, key = { it.title }) { cmd ->
-                    CommandCard(cmd)
+                if (tab == 2) {
+                    item(key = "windows") {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.laptop_windows_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    text = stringResource(R.string.laptop_windows_steps),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(commands, key = { it.title }) { cmd ->
+                        CommandCard(cmd)
+                    }
                 }
             }
         }
@@ -420,7 +492,13 @@ fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 private fun CommandCard(cmd: Cmd) {
     val context = LocalContext.current
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

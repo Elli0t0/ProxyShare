@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.3 — Connect page dark-mode fix
+
+- Connect page: wrapped in Surface to fix dark-mode white
+  background/contrast and matched Home's 20dp tonal card styling
+  (status + address, endpoints + credentials with a divider, QR,
+  Windows steps, and command cards all use surfaceContainer cards;
+  unselected OS segments match the cards; QR centered; "Turn on
+  PAC" and the hotspot button full-width).
+
 ## 0.7.2 — Reliability, rule-set fixes, and battery/UI optimizations
 
 - Service lifecycle: restarting from Settings no longer kills the
