@@ -1,7 +1,5 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -52,7 +50,10 @@ import io.github.elli0t0.proxyshare.data.enabledPorts
 import io.github.elli0t0.proxyshare.data.rankInterfaces
 import io.github.elli0t0.proxyshare.engine.EngineState
 import io.github.elli0t0.proxyshare.service.ProxyController
+import io.github.elli0t0.proxyshare.ui.components.copyToClipboard
 import java.net.URLEncoder
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /** One copyable command shown on the Connect page. */
@@ -167,6 +168,11 @@ fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
+    // Only the PAC bind flag: the whole snapshot would recompose this
+    // screen every second.
+    val pacOk by remember {
+        ProxyController.snapshot.map { it.pacOk }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = true)
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     val ranked = remember(interfaces) { rankInterfaces(interfaces) }
     var selectedIp by rememberSaveable { mutableStateOf<String?>(null) }
@@ -336,6 +342,13 @@ fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                         )
                         if (settings.pacEnabled) {
                             val setupUrl = "http://$cmdHost:${settings.pacPort}/"
+                            if (state is EngineState.Running && !pacOk) {
+                                Text(
+                                    text = stringResource(R.string.connect_pac_bind_failed),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                             QrImage(setupUrl)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
@@ -352,7 +365,12 @@ fun ConnectScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                             FilledTonalButton(onClick = {
                                 scope.launch {
                                     ProxyController.updateSettings { updatePacEnabled(true) }
-                                    if (state is EngineState.Running) ProxyController.markRestartNeeded()
+                                    // Restart now, so the PAC port is
+                                    // bound before the QR below is
+                                    // shown: enabling it only sets a
+                                    // flag, it does not start the PAC
+                                    // server.
+                                    if (state is EngineState.Running) ProxyController.restart()
                                 }
                             }) {
                                 Text(stringResource(R.string.connect_scan_enable))
@@ -424,9 +442,4 @@ private fun CommandCard(cmd: Cmd) {
             )
         }
     }
-}
-
-private fun copyToClipboard(context: Context, text: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText(null, text))
 }

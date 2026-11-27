@@ -38,6 +38,9 @@ data class HealthInputs(
     val engineState: EngineState,
     val authEnabled: Boolean,
     val authPass: String,
+    /** PAC is on but its port did not bind: the setup page is down. */
+    val pacEnabled: Boolean = false,
+    val pacOk: Boolean = true,
 )
 
 /**
@@ -80,8 +83,8 @@ fun computeHealth(i: HealthInputs): List<HealthItem> {
             is EngineState.Running -> HealthItem(
                 id = "engine",
                 label = R.string.health_engine,
-                status = HealthStatus.OK,
-                detail = null,
+                status = if (i.pacEnabled && !i.pacOk) HealthStatus.WARN else HealthStatus.OK,
+                detail = if (i.pacEnabled && !i.pacOk) R.string.health_pac_failed else null,
                 fix = HealthFix.NONE,
             )
             is EngineState.Error -> HealthItem(

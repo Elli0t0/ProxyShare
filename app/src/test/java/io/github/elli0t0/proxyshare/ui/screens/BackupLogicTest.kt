@@ -1,6 +1,9 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
 import io.github.elli0t0.proxyshare.data.AppSettings
+import io.github.elli0t0.proxyshare.data.BUILTIN_RULE_SET_META
+import io.github.elli0t0.proxyshare.data.RuleAction
+import io.github.elli0t0.proxyshare.data.RuleSetMeta
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -73,12 +76,45 @@ class BackupLogicTest {
     @Test
     fun outOfRangePortIsClamped() {
         val restored = settingsFromBackupJson(
-            "{\"version\": 1, \"port\": 99999, \"httpPort\": 0, \"maxConnections\": 99999}",
+            "{\"version\": 1, \"port\": 99999, \"httpPort\": 0, \"pacPort\": 80, \"maxConnections\": 99999}",
             isValidCidr = acceptAll,
         ).getOrThrow()
         assertEquals(65535, restored.port)
-        assertEquals(1, restored.httpPort)
+        // Ports clamp to 1024..65535 (0.7.2): below 1024 is a privileged port.
+        assertEquals(1024, restored.httpPort)
+        assertEquals(1024, restored.pacPort)
         assertEquals(2000, restored.maxConnections)
+    }
+
+    @Test
+    fun equalSplitPortsFallBackToCurrent() {
+        val base = AppSettings(separatePorts = true, httpPort = 8081, socksPort = 1081)
+        val restored = settingsFromBackupJson(
+            "{\"version\": 1, \"separatePorts\": true, \"httpPort\": 8080, \"socksPort\": 8080}",
+            base = base,
+            isValidCidr = acceptAll,
+        ).getOrThrow()
+        assertEquals(8081, restored.httpPort)
+        assertEquals(1081, restored.socksPort)
+    }
+
+    @Test
+    fun ruleSetsMetadataRoundTrips() {
+        val original = fullSettings().copy(
+            ruleSets = listOf(
+                BUILTIN_RULE_SET_META.copy(enabled = true, count = 61063),
+                RuleSetMeta("c1", "Work", RuleAction.DIRECT, true, false, 5),
+                RuleSetMeta(
+                    "s1", "Ads", RuleAction.BLOCK, true, false, 10,
+                    "https://example.com/list.txt", 1_700_000_000_000L, "",
+                ),
+            ),
+        )
+        val restored = settingsFromBackupJson(
+            original.toBackupJson(),
+            isValidCidr = acceptAll,
+        ).getOrThrow()
+        assertEquals(original.copy(authUser = "proxy", authPass = ""), restored)
     }
 
     @Test

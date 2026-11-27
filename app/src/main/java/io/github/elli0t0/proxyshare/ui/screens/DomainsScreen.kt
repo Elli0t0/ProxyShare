@@ -1,6 +1,6 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
-import android.util.Patterns
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,9 +42,12 @@ import androidx.lifecycle.repeatOnLifecycle
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.RuleAction
 import io.github.elli0t0.proxyshare.data.RuleEntry
+import io.github.elli0t0.proxyshare.data.isIpLiteral
 import io.github.elli0t0.proxyshare.data.ruleActionFromWire
 import io.github.elli0t0.proxyshare.data.upsertRule
+import io.github.elli0t0.proxyshare.engine.EngineState
 import io.github.elli0t0.proxyshare.service.ProxyController
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -77,12 +82,21 @@ fun DomainsContent(modifier: Modifier = Modifier) {
         )
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(lifecycle) {
+    val state by ProxyController.state.collectAsStateWithLifecycle()
+    val running = state is EngineState.Running
+
+    // Pull once when the segment opens, then once a second only while
+    // the proxy is running (a stopped engine has no new records).
+    LaunchedEffect(lifecycle, running) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                ProxyController.pullSessionLog()
+            ProxyController.pullSessionLog()
+            while (running) {
                 delay(1000)
+                ProxyController.pullSessionLog()
             }
+            // Stopped: wait for the effect to restart (running
+            // changed) instead of returning from repeatOnLifecycle.
+            awaitCancellation()
         }
     }
 
@@ -193,7 +207,7 @@ fun DomainsContent(modifier: Modifier = Modifier) {
     val targetHost = ruleTargetHost
     if (targetHost != null) {
         val currentRule = ruleForHost(targetHost, settings.rules)
-        val isIp = Patterns.IP_ADDRESS.matcher(targetHost).matches()
+        val isIp = isIpLiteral(targetHost)
         RuleForHostDialog(
             host = targetHost,
             onDismiss = { ruleTargetHost = null },
@@ -252,13 +266,29 @@ private fun DomainRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    text = row.host,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // A live connection: a small primary dot next to the
+                // host, so active domains read at a glance.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (row.active) {
+                        Box(
+                            modifier = Modifier.size(8.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.primary,
+                                    CircleShape,
+                                ),
+                        )
+                    }
+                    Text(
+                        text = row.host,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
                     text = stringResource(
                         R.string.domains_requests,
@@ -274,7 +304,22 @@ private fun DomainRow(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 ActionTag(ruleActionFromWire(row.route) ?: RuleAction.PROXY)
-                if (rule != null) ActionTag(rule.action)
+                // Only a second badge when the manual rule actually
+                // differs from the current route, and labeled as a
+                // rule — two identical tags stacked meant nothing.
+                if (rule != null && rule.action.wire != row.route) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.domains_rule_label),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        ActionTag(rule.action)
+                    }
+                }
             }
         }
     }

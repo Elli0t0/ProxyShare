@@ -50,7 +50,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -72,14 +72,15 @@ import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.data.IfKind
 import io.github.elli0t0.proxyshare.data.LatestRelease
 import io.github.elli0t0.proxyshare.data.NetIf
+import io.github.elli0t0.proxyshare.data.NetworkWatcher
 import io.github.elli0t0.proxyshare.data.SettingsRepository
 import io.github.elli0t0.proxyshare.data.fetchLatestRelease
 import io.github.elli0t0.proxyshare.data.isNewer
-import io.github.elli0t0.proxyshare.data.networkInterfaces
 import io.github.elli0t0.proxyshare.data.randomPassword
 import io.github.elli0t0.proxyshare.engine.EngineState
 import io.github.elli0t0.proxyshare.engine.NativeEngine
 import io.github.elli0t0.proxyshare.service.ProxyController
+import io.github.elli0t0.proxyshare.ui.components.LocalTextField
 import io.github.elli0t0.proxyshare.ui.components.OptionRow
 import io.github.elli0t0.proxyshare.ui.components.SectionCard
 import io.github.elli0t0.proxyshare.ui.components.SettingRow
@@ -104,8 +105,10 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
-    val netFlow = remember(context) { networkInterfaces(context) }
-    val interfaces by netFlow.collectAsState(initial = emptyList())
+    // One shared interface flow (Home and Connections use it too):
+    // a local networkInterfaces() collection here would leak a
+    // second NetworkCallback and 15 s timer.
+    val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     // The restart flag lives in ProxyController so other screens (e.g.
     // the Rules page) can read it too.
     val restartNeeded by ProxyController.restartNeeded.collectAsStateWithLifecycle()
@@ -227,7 +230,7 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    saveLive { updateIdleStopMinutes(minutes) }
+                                    saveRestart { updateIdleStopMinutes(minutes) }
                                     showIdleDialog = false
                                 },
                         ) {
@@ -424,18 +427,21 @@ private fun BackupSettings(
     val scope = rememberCoroutineScope()
     val importedMessage = stringResource(R.string.backup_imported)
     val badFileMessage = stringResource(R.string.backup_bad_file)
+    val exportOkMessage = stringResource(R.string.backup_exported)
+    val exportFailMessage = stringResource(R.string.backup_export_failed)
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            runCatching {
+            val ok = runCatching {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri)?.use { out ->
                         out.write(settings.toBackupJson().toByteArray(Charsets.UTF_8))
-                    }
+                    } ?: throw IllegalStateException("no output stream")
                 }
-            }
+            }.isSuccess
+            onShowSnackbar(if (ok) exportOkMessage else exportFailMessage)
         }
     }
     val importLauncher = rememberLauncherForActivityResult(
@@ -759,20 +765,18 @@ private fun SecuritySettings(
             )
         }
         if (settings.authEnabled) {
-            OutlinedTextField(
+            // Local state, so typing never jumps the cursor when the
+            // DataStore emission lands mid-keystroke (0.7.2).
+            LocalTextField(
                 value = settings.authUser,
                 onValueChange = { saveRestart { updateAuthUser(it) } },
-                label = { Text(stringResource(R.string.username_label)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                label = stringResource(R.string.username_label),
             )
-            OutlinedTextField(
+            LocalTextField(
                 value = settings.authPass,
                 onValueChange = { saveRestart { updateAuthPass(it) } },
-                label = { Text(stringResource(R.string.password_label)) },
+                label = stringResource(R.string.password_label),
                 visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
             )
             TextButton(onClick = {
                 saveRestart { updateAuthPass(randomPassword()) }
@@ -824,7 +828,10 @@ private fun SecuritySettings(
                 }
             }
         }
-        CidrAddRow(onAdd = { saveRestart { updateAllowedClients(settings.allowedClients + it) } })
+        CidrAddRow(
+            existing = settings.allowedClients,
+            onAdd = { saveRestart { updateAllowedClients(settings.allowedClients + it) } },
+        )
     }
 }
 
@@ -1061,20 +1068,37 @@ private fun NumberField(
     validate: (String) -> Int?,
     onValid: (Int) -> Unit,
 ) {
-    var text by remember(value) { mutableStateOf(value.toString()) }
+    var text by rememberSaveable { mutableStateOf(value.toString()) }
+    // The last value this field committed: an async DataStore
+    // emission arriving while the user is typing must never
+    // overwrite the in-progress edit (the old remember(value) reset
+    // the text on every emission). The stored value is adopted only
+    // while the field is not focused, e.g. after an import.
+    var focused by remember { mutableStateOf(false) }
+    var lastCommitted by remember { mutableStateOf(value) }
+    LaunchedEffect(value, focused) {
+        if (!focused && value != lastCommitted) {
+            lastCommitted = value
+            text = value.toString()
+        }
+    }
     val valid = validate(text) != null
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             value = text,
             onValueChange = { new ->
                 text = new
-                validate(new)?.let { onValid(it) }
+                validate(new)?.let {
+                    lastCommitted = it
+                    onValid(it)
+                }
             },
             label = { Text(label) },
             isError = !valid,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth()
+                .onFocusChanged { focused = it.isFocused },
         )
         if (!valid) {
             Text(
@@ -1087,7 +1111,7 @@ private fun NumberField(
 }
 
 @Composable
-private fun CidrAddRow(onAdd: (String) -> Unit) {
+private fun CidrAddRow(existing: List<String>, onAdd: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     var errorCode by rememberSaveable { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1104,9 +1128,17 @@ private fun CidrAddRow(onAdd: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Button(onClick = {
-                val code = validate(VALIDATE_CIDR, text.trim())
+                val trimmed = text.trim()
+                // Already listed (case-insensitive): a quiet no-op,
+                // not a second row.
+                if (existing.any { it.trim().equals(trimmed, ignoreCase = true) }) {
+                    text = ""
+                    errorCode = null
+                    return@Button
+                }
+                val code = validate(VALIDATE_CIDR, trimmed)
                 if (code.isEmpty()) {
-                    onAdd(text.trim())
+                    onAdd(trimmed)
                     text = ""
                     errorCode = null
                 } else {

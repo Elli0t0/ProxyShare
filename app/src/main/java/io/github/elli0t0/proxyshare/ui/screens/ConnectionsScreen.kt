@@ -1,7 +1,5 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
@@ -76,6 +74,7 @@ import io.github.elli0t0.proxyshare.service.ProxyController
 import io.github.elli0t0.proxyshare.ui.components.InfoChip
 import io.github.elli0t0.proxyshare.ui.components.StatTile
 import io.github.elli0t0.proxyshare.ui.components.TrafficChart
+import io.github.elli0t0.proxyshare.ui.components.copyToClipboard
 
 /**
  * Live monitor: header with session totals, traffic chart, then one
@@ -301,7 +300,7 @@ fun ConnectionsScreen(
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            OutlinedButton(onClick = { copyText(context, advertise) }) {
+                            OutlinedButton(onClick = { copyToClipboard(context, advertise) }) {
                                 Text(stringResource(R.string.copy))
                             }
                         }
@@ -404,11 +403,6 @@ fun exportSessionLog(context: Context, log: List<SessionLogEntry>) {
         .setStream(uri)
         .setChooserTitle(R.string.export_log)
         .startChooser()
-}
-
-private fun copyText(context: Context, text: String) {
-    val cm = context.getSystemService(ClipboardManager::class.java)
-    cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
 }
 
 @Composable

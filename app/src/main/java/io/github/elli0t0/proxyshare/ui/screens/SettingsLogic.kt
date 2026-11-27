@@ -3,8 +3,10 @@ package io.github.elli0t0.proxyshare.ui.screens
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.data.RuleEntry
+import io.github.elli0t0.proxyshare.data.ensureBuiltinRuleSet
 import io.github.elli0t0.proxyshare.data.parseClientNames
 import io.github.elli0t0.proxyshare.data.ruleActionFromWire
+import io.github.elli0t0.proxyshare.data.ruleSetsFromJson
 import io.github.elli0t0.proxyshare.engine.NativeEngine
 import org.json.JSONArray
 import org.json.JSONObject
@@ -156,6 +158,22 @@ fun AppSettings.toBackupJson(): String = JSONObject().apply {
             put("action", rule.action.wire)
         }
     }))
+    // Rule sets (0.7.2): metadata only (enabled flags, built-in
+    // state, custom set metadata and subscription URLs) — NOT the
+    // file contents, which can be megabytes.
+    put("ruleSets", JSONArray(ruleSets.map { meta ->
+        JSONObject().apply {
+            put("id", meta.id)
+            put("name", meta.name)
+            put("action", meta.action.wire)
+            put("enabled", meta.enabled)
+            put("builtin", meta.builtin)
+            put("count", meta.count)
+            put("url", meta.url)
+            put("lastUpdatedMs", meta.lastUpdatedMs)
+            put("lastError", meta.lastError)
+        }
+    }))
     put("privateOnly", privateOnly)
     put("blockPrivate", blockPrivate)
     put("maxConnections", maxConnections)
@@ -223,18 +241,37 @@ fun settingsFromBackupJson(
             }
         }
     } ?: base.rules
+    // Rule sets (0.7.2): metadata only; malformed entries are
+    // skipped by ruleSetsFromJson, and the built-in set is always
+    // kept first. A backup without the key keeps the current sets.
+    val ruleSets = o.optJSONArray("ruleSets")?.let { arr ->
+        ensureBuiltinRuleSet(ruleSetsFromJson(arr.toString()))
+    } ?: base.ruleSets
+    // Ports are clamped to the UI range (1024..65535); in split mode
+    // the two ports must differ, or the backup's values fall back to
+    // the current ones.
+    val separatePorts = o.optBoolean("separatePorts", base.separatePorts)
+    val httpPort = o.optInt("httpPort", base.httpPort).coerceIn(1024, 65535)
+    val socksPort = o.optInt("socksPort", base.socksPort).coerceIn(1024, 65535)
+    val (httpPortFinal, socksPortFinal) =
+        if (separatePorts && httpPort == socksPort) {
+            base.httpPort to base.socksPort
+        } else {
+            httpPort to socksPort
+        }
     base.copy(
         bindAddr = bindAddr,
-        port = o.optInt("port", base.port).coerceIn(1, 65535),
-        separatePorts = o.optBoolean("separatePorts", base.separatePorts),
-        httpPort = o.optInt("httpPort", base.httpPort).coerceIn(1, 65535),
-        socksPort = o.optInt("socksPort", base.socksPort).coerceIn(1, 65535),
+        port = o.optInt("port", base.port).coerceIn(1024, 65535),
+        separatePorts = separatePorts,
+        httpPort = httpPortFinal,
+        socksPort = socksPortFinal,
         pacEnabled = o.optBoolean("pacEnabled", base.pacEnabled),
-        pacPort = o.optInt("pacPort", base.pacPort).coerceIn(1, 65535),
+        pacPort = o.optInt("pacPort", base.pacPort).coerceIn(1024, 65535),
         protocols = protocols,
         authEnabled = o.optBoolean("authEnabled", base.authEnabled),
         allowedClients = jsonStringList(o, "allowedClients").filter(isValidCidr),
         rules = rules,
+        ruleSets = ruleSets,
         privateOnly = o.optBoolean("privateOnly", base.privateOnly),
         blockPrivate = o.optBoolean("blockPrivate", base.blockPrivate),
         maxConnections = o.optInt("maxConnections", base.maxConnections).coerceIn(1, 2000),

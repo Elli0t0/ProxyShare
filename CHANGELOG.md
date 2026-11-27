@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.7.2 — Reliability, rule-set fixes, and battery/UI optimizations
+
+- Service lifecycle: restarting from Settings no longer kills the
+  foreground service (restart and the VPN-only kill switch suppress
+  the service's stopSelf on the transient Stopped state), the Stop
+  action and the idle auto-stop now await the engine stop and the
+  usage flush before stopping, the wake-lock observer cannot be
+  registered twice, and BootReceiver no longer crashes on restricted
+  Android 12+ devices when starting the service is not allowed.
+- Backgrounded UI: the VPN-drop notification and the device count in
+  the notification now use the engine's Busy/Idle edges and the
+  DevicesChanged edge instead of the stale snapshot, with one poll
+  when a single device connects so its name still shows.
+- Rule sets are plain domains (one per line) everywhere now, matching
+  the engine's DomainSet and the OISD asset: imports, subscriptions
+  and the file format no longer store ACTION<TAB> lines (old files
+  are read with the prefix stripped). The engine's setRuleSet errors
+  are shown on the set's card instead of being swallowed. Only sets
+  whose enabled state, action, or content changed are re-pushed, so
+  editing a name or storing a subscription error no longer re-pushes
+  the 1.1 MB OISD list, and the asset is no longer cached in the
+  heap. Subscription refreshes update one set atomically, so
+  "Update all" can no longer drop updates. Subscriptions show an
+  "Updating…" state, and deleting a custom set asks first.
+- Settings: the idle auto-stop now correctly asks for a restart, the
+  port shown for each protocol respects disabled protocols in
+  single-port mode, turning PAC on while running restarts the proxy
+  at once (the QR no longer points at an unbound port) and a failed
+  PAC bind is shown on the Connect page and as a Health warning,
+  Settings reuses the shared NetworkWatcher flow, number fields and
+  the username/password/exit-URL fields no longer lose keystrokes or
+  jump the cursor, duplicate CIDRs cannot be added, and backups now
+  include rule-set metadata, clamp ports to 1024..65535, fall back
+  when the split ports are equal, and report export success/failure.
+- UI: Home only recomposes on the two snapshot fields it shows,
+  History and Domains pull once on entry and only every second while
+  running, long-pressing any history row offers a rule (IP literals
+  take a plain rule, no JNI call during composition), Domains shows
+  a live dot for active hosts and labels the manual-rule badge, the
+  app theme follows the lifecycle, and copying shows a toast below
+  Android 13 from one shared helper.
+- Cleanup: Persian locale filter removed (Persian was removed in
+  0.4.1), the duplicate text-file reader is gone, the Rust crate is
+  now 0.7.2 with ENGINE_VERSION "engine 0.7.2", and the README and
+  TESTING.md stale sections are updated.
+
 ## 0.7.1 — Rules move into Settings
 
 - The Rules bottom tab is gone: routing rules live in Settings

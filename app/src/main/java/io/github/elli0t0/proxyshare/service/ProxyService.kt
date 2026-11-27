@@ -51,17 +51,24 @@ class ProxyService : Service() {
     private var observing = false
     private var idleObserving = false
     private var vpnDropObserving = false
+    private var wakeObserving = false
     /** True while a client is connected (from the engine's Busy/Idle edge events). */
     private var busy = false
+    /** Live device count, from DevicesChanged edges (e.a) — the snapshot is stale while the UI is backgrounded, so the notification reads this, not the snapshot. */
+    private var deviceCount = 0
     private var wakeGraceJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            ProxyController.stop()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // Await the engine stop (and the usage flush) before
+            // stopping the service, or the flush loses the tail.
+            serviceScope.launch {
+                ProxyController.stopNow()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
         createChannel()
@@ -104,9 +111,12 @@ class ProxyService : Service() {
      * missed.
      */
     private fun observeWakeLock() {
+        if (wakeObserving) return
+        wakeObserving = true
         serviceScope.launch {
             ProxyController.pollNow()
             busy = ProxyController.snapshot.value.active > 0
+            deviceCount = ProxyController.snapshot.value.devices
             updateWakeLock()
             ProxyController.events.collect { e ->
                 when (e.type) {
@@ -153,8 +163,12 @@ class ProxyService : Service() {
         serviceScope.launch {
             ProxyController.events.collect { e ->
                 if (e.type == 13) {
-                    ProxyController.stop()
+                    // Await the engine stop (and the usage flush)
+                    // before stopping the service, or the flush loses
+                    // the tail.
+                    ProxyController.stopNow()
                     showIdleStopped()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
             }
@@ -177,7 +191,7 @@ class ProxyService : Service() {
                 if (!active && wasActive &&
                     (mode == OutboundMode.DEFAULT || mode == OutboundMode.VPN_ONLY) &&
                     ProxyController.state.value is EngineState.Running &&
-                    ProxyController.snapshot.value.active > 0
+                    busy
                 ) {
                     showVpnDropped()
                 }
@@ -235,7 +249,11 @@ class ProxyService : Service() {
         serviceScope.launch {
             ProxyController.state.drop(1).collect { state ->
                 when (state) {
-                    is EngineState.Stopped -> stopSelf()
+                    // A restart or the VPN kill switch stops the engine
+                    // transiently (or right before posting the error):
+                    // stopping the service then would drop the
+                    // notification and locks while the engine runs on.
+                    is EngineState.Stopped -> if (!ProxyController.suppressServiceStop) stopSelf()
                     is EngineState.Error -> {
                         val errorText =
                             state.message.ifBlank { getString(R.string.proxy_error) }
@@ -264,18 +282,25 @@ class ProxyService : Service() {
             }
         }
         // Live device count in the notification, on DevicesChanged
-        // edges only (no timer, no polling).
+        // edges only (no timer, no polling). The count comes from the
+        // edge itself (e.a): the snapshot does not update while the UI
+        // is backgrounded. With exactly one device, one poll refreshes
+        // the connection list so the device name is shown.
         serviceScope.launch {
             ProxyController.events.collect { e ->
                 if (e.type == 12 && ProxyController.state.value is EngineState.Running) {
+                    e.a.toIntOrNull()?.let { deviceCount = it }
+                    val settings = ProxyController.settings.value
+                    val name = if (deviceCount == 1) {
+                        ProxyController.pollNow()
+                        singleDeviceName(settings)
+                    } else {
+                        null
+                    }
                     getSystemService(NotificationManager::class.java)?.notify(
                         NOTIF_ID,
                         buildNotification(
-                            notificationText(
-                                ProxyController.settings.value,
-                                ProxyController.snapshot.value.devices,
-                                singleDeviceName(ProxyController.settings.value),
-                            ),
+                            notificationText(settings, deviceCount, name),
                         ),
                     )
                 }

@@ -11,8 +11,9 @@ import io.github.elli0t0.proxyshare.data.RuleSetMeta
 import io.github.elli0t0.proxyshare.data.SettingsRepository
 import io.github.elli0t0.proxyshare.data.fetchList
 import io.github.elli0t0.proxyshare.data.isSubscriptionStale
+import io.github.elli0t0.proxyshare.data.PushedRuleSet
 import io.github.elli0t0.proxyshare.data.loadRuleSetFileText
-import io.github.elli0t0.proxyshare.data.pushRuleSets
+import io.github.elli0t0.proxyshare.data.pushRuleSetsDiffed
 import io.github.elli0t0.proxyshare.data.readBuiltinRuleSetText
 import io.github.elli0t0.proxyshare.data.saveRuleSetFileText
 import io.github.elli0t0.proxyshare.data.SubscriptionUpdate
@@ -102,8 +103,18 @@ object ProxyController {
     private var repository: SettingsRepository? = null
     private var selector: NetworkSelector? = null
     private var appContext: Context? = null
-    /** The built-in rule-set asset, read once and cached (1.1 MB). */
-    private var builtinRuleSetText: String? = null
+    /** Last pushed state per rule set (0.7.2): only changed sets are re-pushed, so a metadata edit never re-pushes the 1.1 MB OISD asset. Cleared on start: a fresh engine holds no sets. */
+    private val pushedRuleSets = mutableMapOf<String, PushedRuleSet>()
+    /**
+     * While true, the service must not stopSelf() on a Stopped state:
+     * restart() and the VPN-only kill switch stop the engine
+     * transiently (or right before posting the error), and the
+     * service stopping then would drop the notification and locks
+     * while the engine keeps running. Set inside try/finally, so it
+     * is always cleared again.
+     */
+    @Volatile
+    var suppressServiceStop = false
     private var started = false
     private var networkJob: Job? = null
     private var directNetworkJob: Job? = null
@@ -181,6 +192,14 @@ object ProxyController {
     /** Result of the last [pushRules]: "Applied N rules" or the engine's error line. */
     val rulesStatus: StateFlow<RulesStatus> = _rulesStatus.asStateFlow()
 
+    private val _ruleSetErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Engine rejections from the last rule-set push, per set id (0.7.2). A set's card shows its error; a successful push or a delete clears it. */
+    val ruleSetErrors: StateFlow<Map<String, String>> = _ruleSetErrors.asStateFlow()
+
+    private val _updatingSubscriptions = MutableStateFlow<Set<String>>(emptySet())
+    /** Ids of the subscriptions whose refresh is in flight (0.7.2). Their cards show an "Updating…" state until it lands. */
+    val updatingSubscriptions: StateFlow<Set<String>> = _updatingSubscriptions.asStateFlow()
+
     /**
      * Push [rules] to the engine (hot, no restart). No-op while
      * stopped: the start path pushes the current rules after
@@ -203,18 +222,25 @@ object ProxyController {
      * Push the named rule sets to the engine (hot, no restart).
      * No-op while stopped: the start path pushes the current sets
      * after engine.start, and the rule-sets job pushes on every
-     * change while running. The built-in list is read from the asset
-     * once and cached (1.1 MB); a custom set is read from its file.
-     * A bad list rejects only that set in the engine; the error is
-     * not shown anywhere (the importer only sends parsed entries),
-     * so a failure here is unexpected.
+     * change while running. Only sets whose enabled state, action,
+     * or content changed since the last push are sent (0.7.2), so a
+     * metadata edit never re-pushes the 1.1 MB OISD asset; the asset
+     * is read from disk only when it actually needs pushing, never
+     * cached in the heap. A set the engine rejects keeps its
+     * previous content live, and its error is kept in
+     * [ruleSetErrors] for the set's card.
      */
     fun pushRuleSets(sets: List<RuleSetMeta> = _settings.value.ruleSets) {
         if (!started) return
         scope.launch {
-            pushRuleSets(sets, ::loadRuleSetText) { id, action, text ->
+            val (pushed, errors) = pushRuleSetsDiffed(
+                sets, pushedRuleSets, ::loadRuleSetText,
+            ) { id, action, text ->
                 engine.setRuleSet(id, action, text)
             }
+            pushedRuleSets.clear()
+            pushedRuleSets.putAll(pushed)
+            _ruleSetErrors.value = errors
         }
     }
 
@@ -225,6 +251,8 @@ object ProxyController {
      * a fresh start only pushes the sets still listed.
      */
     fun clearRuleSet(id: String, action: RuleAction) {
+        pushedRuleSets.remove(id)
+        _ruleSetErrors.update { it - id }
         if (!started) return
         engine.setRuleSet(id, action.wire, "")
     }
@@ -242,25 +270,28 @@ object ProxyController {
             val ctx = appContext ?: return@launch
             val meta = _settings.value.ruleSets
                 .firstOrNull { it.id == id && it.url.isNotBlank() } ?: return@launch
-            val update = updateSubscriptionContent(fetchList(meta.url), meta.action)
-            if (update is SubscriptionUpdate.Updated) {
-                withContext(Dispatchers.IO) {
-                    ctx.saveRuleSetFileText(id, update.text)
-                }
-            }
-            val now = System.currentTimeMillis()
-            val updated = when (update) {
-                is SubscriptionUpdate.Updated ->
-                    meta.copy(count = update.count, lastUpdatedMs = now, lastError = "")
-                is SubscriptionUpdate.KeptOld ->
-                    meta.copy(lastError = update.reason)
-            }
-            updateSettings {
-                updateRuleSets(
-                    _settings.value.ruleSets.map {
-                        if (it.id == id) updated else it
+            _updatingSubscriptions.update { it + id }
+            try {
+                val update = updateSubscriptionContent(fetchList(meta.url))
+                if (update is SubscriptionUpdate.Updated) {
+                    withContext(Dispatchers.IO) {
+                        ctx.saveRuleSetFileText(id, update.text)
                     }
-                )
+                }
+                val now = System.currentTimeMillis()
+                // One atomic DataStore edit for this set only, so
+                // concurrent "Update all" refreshes never drop each
+                // other's updates.
+                repository?.updateRuleSet(id) { current ->
+                    when (update) {
+                        is SubscriptionUpdate.Updated ->
+                            current.copy(count = update.count, lastUpdatedMs = now, lastError = "")
+                        is SubscriptionUpdate.KeptOld ->
+                            current.copy(lastError = update.reason)
+                    }
+                }
+            } finally {
+                _updatingSubscriptions.update { it - id }
             }
         }
     }
@@ -282,11 +313,11 @@ object ProxyController {
         }
     }
 
-    /** A set's content by id: the asset (built-in, cached) or its file. Runs on Dispatchers.IO via pushRuleSets. */
+    /** A set's content by id: the asset (built-in) or its file. Read fresh on every push (0.7.2): the 1.1 MB asset is no longer cached in the heap. Runs on Dispatchers.IO via pushRuleSets. */
     private fun loadRuleSetText(id: String): String {
         val ctx = appContext ?: return ""
         return if (id == BUILTIN_RULE_SET_ID) {
-            builtinRuleSetText ?: ctx.readBuiltinRuleSetText().also { builtinRuleSetText = it }
+            ctx.readBuiltinRuleSetText()
         } else {
             ctx.loadRuleSetFileText(id)
         }
@@ -445,16 +476,21 @@ object ProxyController {
     /** Stop the engine and start it again with the current settings. No-op when stopped. */
     fun restart() {
         scope.launch {
-            startMutex.withLock {
-                if (!started) return@withLock
-                runCatching { engine.stop() }
-                flushUsage()
-                networkJob?.cancel()
-                networkJob = null
-                stopVpnJob()
-                stopDirectNetworkJob()
-                started = false
-                startLocked()
+            suppressServiceStop = true
+            try {
+                startMutex.withLock {
+                    if (!started) return@withLock
+                    runCatching { engine.stop() }
+                    flushUsage()
+                    networkJob?.cancel()
+                    networkJob = null
+                    stopVpnJob()
+                    stopDirectNetworkJob()
+                    started = false
+                    startLocked()
+                }
+            } finally {
+                suppressServiceStop = false
             }
         }
     }
@@ -487,12 +523,23 @@ object ProxyController {
                     if (!started) return@collect
                     if (mode == OutboundMode.VPN_ONLY && net == null) {
                         // Kill switch: never fall back to the default network.
-                        started = false
-                        runCatching { engine.stop() }
-                        flushUsage()
-                        stopVpnJob()
-                        stopDirectNetworkJob()
-                        engine.setError("VPN lost — proxy stopped")
+                        // Runs under startMutex so it cannot race a
+                        // start/stop, and suppresses the service's
+                        // stopSelf until the error is posted: engine.stop()
+                        // emits Stopped before setError runs.
+                        suppressServiceStop = true
+                        try {
+                            startMutex.withLock {
+                                started = false
+                                runCatching { engine.stop() }
+                                flushUsage()
+                                stopVpnJob()
+                                stopDirectNetworkJob()
+                                engine.setError("VPN lost — proxy stopped")
+                            }
+                        } finally {
+                            suppressServiceStop = false
+                        }
                         networkJob?.cancel()
                         return@collect
                     }
@@ -528,6 +575,9 @@ object ProxyController {
                 // change while running (see the rules job in init).
                 pushRules(settings.rules)
                 // Rule sets (0.6.8): same, via the rule-sets job.
+                // A fresh engine holds no sets, so the diffed push
+                // starts from an empty last-pushed state.
+                pushedRuleSets.clear()
                 pushRuleSets(settings.ruleSets)
                 // Subscriptions (0.6.9): refresh once on start when
                 // the last update is older than 24 h. No background
@@ -546,22 +596,30 @@ object ProxyController {
 
     /** Stop the engine. Also resets an Error state back to Stopped. */
     fun stop() {
-        scope.launch {
-            startMutex.withLock {
-                networkJob?.cancel()
-                networkJob = null
-                stopVpnJob()
-                stopDirectNetworkJob()
-                deniedClientsState.clear()
-                _deniedClients.value = emptySet()
-                selector?.select(OutboundMode.DEFAULT)
-                if (started) {
-                    started = false
-                    runCatching { engine.stop() }
-                    flushUsage()
-                } else if (engine.state.value is EngineState.Error) {
-                    runCatching { engine.stop() }
-                }
+        scope.launch { stopNow() }
+    }
+
+    /**
+     * The mutex-guarded stop, awaitable: the same teardown as [stop]
+     * but as a suspend fun, so the service can await the engine stop
+     * (and the usage flush) before stopSelf() instead of racing it.
+     * Used by ProxyService's Stop action and the idle auto-stop.
+     */
+    suspend fun stopNow() {
+        startMutex.withLock {
+            networkJob?.cancel()
+            networkJob = null
+            stopVpnJob()
+            stopDirectNetworkJob()
+            deniedClientsState.clear()
+            _deniedClients.value = emptySet()
+            selector?.select(OutboundMode.DEFAULT)
+            if (started) {
+                started = false
+                runCatching { engine.stop() }
+                flushUsage()
+            } else if (engine.state.value is EngineState.Error) {
+                runCatching { engine.stop() }
             }
         }
     }

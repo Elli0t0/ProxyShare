@@ -101,21 +101,26 @@ sealed interface SubscriptionUpdate {
 }
 
 /**
- * Apply a fetched list: parse it with parseImportedRules (comments,
+ * Apply a fetched list: parse it with parseRuleSetDomains (comments,
  * blanks and CRLF line endings are handled there); keep the old
  * content when the download failed or yielded 0 valid lines. A
  * successful fetch replaces the set's content entirely — a
  * subscription's content IS the URL's content.
  */
+/**
+ * Turn a fetched subscription body into the text to store: plain
+ * domains, one per line (0.7.2; the action is the set's metadata,
+ * not part of the file). A failed download, or one with 0 valid
+ * lines, keeps the old content and reports a short reason.
+ */
 fun updateSubscriptionContent(
     fetched: Result<String>,
-    action: RuleAction,
 ): SubscriptionUpdate {
     val body = fetched.getOrElse { return SubscriptionUpdate.KeptOld(fetchErrorLabel(it)) }
-    val (added, _) = parseImportedRules(body, action)
-    return if (added.isEmpty()) {
+    val (domains, _) = parseRuleSetDomains(body)
+    return if (domains.isEmpty()) {
         SubscriptionUpdate.KeptOld("no valid lines")
     } else {
-        SubscriptionUpdate.Updated(added.toEngineText(), added.size)
+        SubscriptionUpdate.Updated(domains.joinToString("\n"), domains.size)
     }
 }

@@ -76,6 +76,24 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun singlePortModeRespectsDisabledProtocols() {
+        // Single-port mode used to report both ports even when one
+        // protocol was disabled (0.7.2).
+        assertEquals(
+            null to 1080,
+            AppSettings(separatePorts = false, protocols = setOf("socks5")).enabledPorts(),
+        )
+        assertEquals(
+            1080 to null,
+            AppSettings(separatePorts = false, protocols = setOf("http")).enabledPorts(),
+        )
+        assertEquals(
+            1080 to 1080,
+            AppSettings(separatePorts = false).enabledPorts(),
+        )
+    }
+
+    @Test
     fun emptyAuthPassOmitsAuthKeys() {
         val config = AppSettings().toEngineConfig()
         assertFalse(config.contains("auth_user"))

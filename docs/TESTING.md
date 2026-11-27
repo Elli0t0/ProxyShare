@@ -8,7 +8,7 @@ the version number, not a silent retry.
 
 - [ ] App opens (no crash on launch).
 - [ ] Home shows Stopped, the address card lists the phone's Wi-Fi and
-      hotspot IPs, and the credentials card shows the generated password
+      hotspot IPs, and the Connect page shows the generated password
       (tap to reveal, copy works).
 - [ ] The proxy starts (Start → Running, notification "Running on port
       <port>" appears) and stops (Stop → Stopped, notification gone).
@@ -30,7 +30,7 @@ the version number, not a silent retry.
 
 ## Live monitor
 
-- [ ] Connections tab with nothing connected shows the empty state.
+- [ ] Activity > Live with nothing connected shows the empty state.
 - [ ] With laptop traffic flowing, the tab lists the client IP, and each
       row shows host:port, protocol, a moving live speed and a counting
       duration. Leaving the tab and coming back still updates.
@@ -53,7 +53,7 @@ the version number, not a silent retry.
 - [ ] "Check exit IP" shows the phone's public IP, with the mode next to it ("1.2.3.4 · VPN only").
 - [ ] On a network that filters DNS, the check still works (it falls through to the 1.1.1.1 endpoint) instead of showing a raw "Failed to connect … 127.0.0.1" error.
 - [ ] With every check service unreachable, the chip shows a friendly message ("DNS looks blocked…", "No answer (timeout)" or "Could not reach any check service"), never raw exception text.
-- [ ] Settings > Server has an "Exit IP check URL" field; empty means the built-in list, a custom URL is tried first.
+- [ ] Home > Outbound > More options has an "Exit IP check URL" field; empty means the built-in list, a custom URL is tried first.
 - [ ] With a client connected, the notification reads "1 client · …"; with two, "2 clients · …". It never buzzes when the count changes.
 - [ ] VPN only: with the VPN on, traffic goes through it; turning the
       VPN off stops the proxy (kill switch) instead of falling back.

@@ -64,7 +64,7 @@ data class AppSettings(
     val batterySaver: Boolean = true,
     /** Start the proxy automatically after boot (default OFF). Kotlin-only: never sent to the engine. */
     val startOnBoot: Boolean = false,
-    /** Stop the proxy after this many idle minutes (0 = never). Kotlin-only: never sent to the engine. */
+    /** Stop the proxy after this many idle minutes (0 = never). Sent to the engine as idle_stop_secs, so changing it while running needs a restart. */
     val idleStopMinutes: Int = 0,
     /** Outbound network mode: "default", "vpn_only", "wifi" or "mobile". Kotlin-only: never sent to the engine. */
     val outboundMode: String = "default",
@@ -102,19 +102,13 @@ fun AppSettings.toEngineConfig(): String = buildString {
 
 /** The port each protocol listens on, or null when it is disabled. */
 fun AppSettings.enabledPorts(): Pair<Int?, Int?> {
-    val httpPort = if (separatePorts && "http" in protocols) {
-        httpPort
-    } else if (!separatePorts) {
-        port
+    val httpPort = if ("http" in protocols) {
+        if (separatePorts) httpPort else port
     } else {
         null
     }
-    val socksPort = if (separatePorts &&
-        ("socks4" in protocols || "socks5" in protocols)
-    ) {
-        socksPort
-    } else if (!separatePorts) {
-        port
+    val socksPort = if ("socks4" in protocols || "socks5" in protocols) {
+        if (separatePorts) socksPort else port
     } else {
         null
     }
@@ -247,6 +241,23 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[Keys.RULESETS] = value.toRuleSetsJson() }
     }
 
+    /**
+     * Atomically update one rule set's metadata (0.7.2): the whole
+     * list is read and written in one DataStore edit, so concurrent
+     * subscription refreshes ("Update all") never drop each other's
+     * updates the way read-then-write from the settings flow does.
+     */
+    suspend fun updateRuleSet(id: String, transform: (RuleSetMeta) -> RuleSetMeta) {
+        dataStore.edit { prefs ->
+            val current = ensureBuiltinRuleSet(
+                ruleSetsFromJson(prefs[Keys.RULESETS] ?: ""),
+            )
+            prefs[Keys.RULESETS] = current.map {
+                if (it.id == id) transform(it) else it
+            }.toRuleSetsJson()
+        }
+    }
+
     suspend fun updatePrivateOnly(value: Boolean) {
         dataStore.edit { it[Keys.PRIVATE_ONLY] = value }
     }
@@ -338,6 +349,10 @@ class SettingsRepository(context: Context) {
             prefs[Keys.AUTH_ENABLED] = s.authEnabled
             prefs[Keys.ALLOWED_CLIENTS] = s.allowedClients.joinToString(",")
             prefs[Keys.RULES] = s.rules.toEngineText()
+            // Rule-set metadata only (0.7.2): the file contents are
+            // not in the backup. A restored subscription re-downloads
+            // on the next start (when stale) or on "Update now".
+            prefs[Keys.RULESETS] = s.ruleSets.toRuleSetsJson()
             prefs[Keys.PRIVATE_ONLY] = s.privateOnly
             prefs[Keys.BLOCK_PRIVATE] = s.blockPrivate
             prefs[Keys.MAX_CONNECTIONS] = s.maxConnections

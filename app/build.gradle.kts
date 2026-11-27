@@ -70,7 +70,7 @@ android {
     }
 
     androidResources {
-        localeFilters += listOf("en", "fa")
+        localeFilters += listOf("en")
     }
 
     packaging {

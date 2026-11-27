@@ -20,10 +20,15 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val enabled = SettingsRepository(context).settings.first().startOnBoot
                 if (enabled) {
-                    ContextCompat.startForegroundService(
-                        context,
-                        Intent(context, ProxyService::class.java),
-                    )
+                    // ForegroundServiceStartNotAllowedException on
+                    // restricted Android 12+ devices: a boot start is
+                    // best-effort, never a crash.
+                    runCatching {
+                        ContextCompat.startForegroundService(
+                            context,
+                            Intent(context, ProxyService::class.java),
+                        )
+                    }
                 }
             } finally {
                 pending.finish()

@@ -1,9 +1,6 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
-import android.util.Patterns
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,8 +46,12 @@ import androidx.lifecycle.repeatOnLifecycle
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.RuleAction
 import io.github.elli0t0.proxyshare.data.RuleEntry
+import io.github.elli0t0.proxyshare.data.isIpLiteral
 import io.github.elli0t0.proxyshare.data.upsertRule
+import io.github.elli0t0.proxyshare.engine.EngineState
 import io.github.elli0t0.proxyshare.service.ProxyController
+import io.github.elli0t0.proxyshare.ui.components.copyToClipboard
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -58,10 +59,9 @@ import kotlinx.coroutines.launch
  * Session log content for the Activity tab's History segment: the
  * last 500 closed connections, newest first. Search filters
  * host/client, "Blocked only" shows refused connections. Tap a
- * row's host to copy it; long-press a hostname to add a routing
- * rule for it (IP literals cannot be blocked: the engine never
- * matches them). Reads ProxyController.sessionLog: no polling. The
- * ⋮ menu lives in ActivityScreen.
+ * row's host to copy it; long-press a row to add a routing rule for
+ * its host (IP literals get a plain rule, no subdomains checkbox).
+ * Reads ProxyController.sessionLog. The ⋮ menu lives in ActivityScreen.
  */
 @Composable
 fun SessionLogContent(modifier: Modifier = Modifier) {
@@ -77,18 +77,24 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
         filterSessionLog(sessionLog, search, blockedOnly).reversed()
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val state by ProxyController.state.collectAsStateWithLifecycle()
+    val running = state is EngineState.Running
 
     // Pull new records from the engine once a second, only while this
-    // screen is visible: repeatOnLifecycle cancels the loop as soon as
-    // we leave STARTED, so nothing polls in the background. The pull
-    // also runs once when the tab opens (the effect starts on
-    // composition).
-    LaunchedEffect(lifecycle) {
+    // screen is visible and the proxy is running: repeatOnLifecycle
+    // cancels the loop as soon as we leave STARTED, and the loop
+    // itself stops when the engine stops (a stopped engine has no
+    // new records). One pull still runs when the tab opens.
+    LaunchedEffect(lifecycle, running) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                ProxyController.pullSessionLog()
+            ProxyController.pullSessionLog()
+            while (running) {
                 delay(1000)
+                ProxyController.pullSessionLog()
             }
+            // Stopped: wait for the effect to restart (running
+            // changed) instead of returning from repeatOnLifecycle.
+            awaitCancellation()
         }
     }
 
@@ -137,7 +143,7 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
                         SessionLogRow(
                             entry = entry,
                             name = settings.clientNames[entry.client],
-                            onCopyHost = { copyText(context, entry.host) },
+                            onCopyHost = { copyToClipboard(context, entry.host) },
                             onBlock = { ruleTarget = entry.host },
                         )
                     }
@@ -159,6 +165,8 @@ fun SessionLogContent(modifier: Modifier = Modifier) {
                     }
                 }
             },
+            // IP literals take a plain rule: no subdomains checkbox.
+            showSubdomainsCheckbox = !isIpLiteral(ruleTarget ?: ""),
         )
     }
 }
@@ -264,10 +272,12 @@ private fun SessionLogRow(
     onCopyHost: () -> Unit,
     onBlock: () -> Unit,
 ) {
-    // IP literals cannot be blocked (the engine never matches them),
-    // so the long-press only offers blocking for hostnames.
-    val canBlock = validateBlockedDomain(entry.host) &&
-        !Patterns.IP_ADDRESS.matcher(entry.host).matches()
+    // Any non-blank host can take a routing rule (0.6.6 rules match
+    // IP literals too); the dialog hides the subdomains checkbox for
+    // them. No JNI call during composition: the old
+    // validateBlockedDomain check ran on the main thread for every
+    // visible row.
+    val canBlock = entry.host.isNotBlank()
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -326,9 +336,4 @@ private fun BlockedBadge() {
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         )
     }
-}
-
-private fun copyText(context: Context, text: String) {
-    val cm = context.getSystemService(ClipboardManager::class.java)
-    cm?.setPrimaryClip(ClipData.newPlainText("ProxyShare", text))
 }

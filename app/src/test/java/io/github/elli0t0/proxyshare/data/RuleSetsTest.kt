@@ -2,6 +2,8 @@ package io.github.elli0t0.proxyshare.data
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RuleSetsTest {
@@ -70,20 +72,18 @@ class RuleSetsTest {
             custom(id = "c2", name = "Off", action = RuleAction.BLOCK, enabled = false),
         )
         val calls = mutableListOf<Triple<String, String, String>>()
-        pushRuleSets(
-            sets = sets,
-            load = { id ->
-                when (id) {
-                    BUILTIN_RULE_SET_ID -> "a.com\nb.com\n"
-                    "c1" -> "x.com\n"
-                    else -> "y.com\n"
-                }
-            },
-            apply = { id, action, text ->
-                calls += Triple(id, action, text)
-                "ok 2"
-            },
-        )
+        val load: (String) -> String = { id ->
+            when (id) {
+                BUILTIN_RULE_SET_ID -> "a.com\nb.com\n"
+                "c1" -> "x.com\n"
+                else -> "y.com\n"
+            }
+        }
+        val apply: (String, String, String) -> String = { id, action, text ->
+            calls += Triple(id, action, text)
+            "ok 2"
+        }
+        val (pushed, errors) = pushRuleSetsDiffed(sets, emptyMap(), load, apply)
         assertEquals(
             listOf(
                 Triple(BUILTIN_RULE_SET_ID, "block", "a.com\nb.com\n"),
@@ -93,5 +93,73 @@ class RuleSetsTest {
             ),
             calls,
         )
+        assertTrue(errors.isEmpty())
+        assertEquals(3, pushed.size)
+        // Second push with the same state: nothing is sent again.
+        calls.clear()
+        val (pushed2, _) = pushRuleSetsDiffed(sets, pushed, load, apply)
+        assertTrue(calls.isEmpty())
+        assertEquals(pushed, pushed2)
+        // A name-only change (same enabled/action/content) also pushes nothing.
+        val renamed = sets.map { if (it.id == "c1") it.copy(name = "Work 2") else it }
+        val (pushed3, _) = pushRuleSetsDiffed(renamed, pushed, load, apply)
+        assertTrue(calls.isEmpty())
+        assertEquals(pushed, pushed3)
+    }
+
+    @Test
+    fun pushErrorIsReportedAndNotRecorded() = runBlocking {
+        val sets = listOf(custom(id = "c1"))
+        val (pushed, errors) = pushRuleSetsDiffed(
+            sets, emptyMap(),
+            load = { "a.com\n" },
+            apply = { _, _, _ -> "error line 1: bad domain: bad!" },
+        )
+        assertEquals(mapOf("c1" to "error line 1: bad domain: bad!"), errors)
+        assertTrue(pushed.isEmpty())
+        // The next push retries the failed set.
+        val (pushed2, errors2) = pushRuleSetsDiffed(
+            sets, pushed,
+            load = { "a.com\n" },
+            apply = { _, _, _ -> "ok 1" },
+        )
+        assertTrue(errors2.isEmpty())
+        assertEquals(1, pushed2.size)
+    }
+
+    @Test
+    fun parseRuleSetDomainsKeepsPlainDomainsOnly() {
+        val (added, skipped) = parseRuleSetDomains(
+            "# a comment\n\nA.COM.\n b.com # trailing\n*.c.com\n=a.com\n" +
+                "1.2.3.4\n2001:db8::1\na.com\nhttp://d.com\ne.com/f\nbad domain\n" +
+                "x".repeat(254) + ".com\n",
+        )
+        assertEquals(listOf("a.com", "b.com"), added)
+        assertEquals(9, skipped)
+    }
+
+    @Test
+    fun parseRuleSetDomainsDedupesAgainstExisting() {
+        val (added, skipped) = parseRuleSetDomains("a.com\nb.com\n", setOf("a.com"))
+        assertEquals(listOf("b.com"), added)
+        assertEquals(1, skipped)
+    }
+
+    @Test
+    fun stripRuleSetActionPrefixesKeepsPlainDomains() {
+        assertEquals(
+            "a.com\nb.com\nc.com",
+            stripRuleSetActionPrefixes("block\ta.com\ndirect\tb.com\nc.com"),
+        )
+    }
+
+    @Test
+    fun isIpLiteralSpotsV4AndV6() {
+        assertTrue(isIpLiteral("1.2.3.4"))
+        assertTrue(isIpLiteral("::1"))
+        assertTrue(isIpLiteral("2001:db8::1"))
+        assertFalse(isIpLiteral("a.com"))
+        assertFalse(isIpLiteral("1.2.3"))
+        assertFalse(isIpLiteral(""))
     }
 }

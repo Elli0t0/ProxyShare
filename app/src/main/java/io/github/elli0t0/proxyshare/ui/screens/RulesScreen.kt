@@ -140,7 +140,7 @@ private fun ManualRulesPage(
     var filter by rememberSaveable { mutableStateOf(RuleFilter.ALL) }
     var showAdd by rememberSaveable { mutableStateOf(false) }
     var showImport by rememberSaveable { mutableStateOf(false) }
-    var importAction by remember { mutableStateOf(RuleAction.BLOCK) }
+    var importAction by rememberSaveable { mutableStateOf(RuleAction.BLOCK) }
     var menuTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var importResult by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -520,13 +520,6 @@ private fun ImportRulesDialog(
         },
     )
 }
-
-private suspend fun readTextFile(context: Context, uri: Uri): String? =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-        }.getOrNull()
-    }
 
 private suspend fun writeTextFile(context: Context, uri: Uri, text: String) {
     withContext(Dispatchers.IO) {

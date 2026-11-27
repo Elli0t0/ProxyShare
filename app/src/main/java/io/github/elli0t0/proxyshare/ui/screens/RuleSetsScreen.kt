@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -34,7 +36,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.AppSettings
 import io.github.elli0t0.proxyshare.data.BUILTIN_RULE_SET_ID
@@ -53,11 +55,9 @@ import io.github.elli0t0.proxyshare.data.isSubscription
 import io.github.elli0t0.proxyshare.data.countRuleSetLines
 import io.github.elli0t0.proxyshare.data.deleteRuleSetFile
 import io.github.elli0t0.proxyshare.data.loadRuleSetFileText
-import io.github.elli0t0.proxyshare.data.parseImportedRules
+import io.github.elli0t0.proxyshare.data.parseRuleSetDomains
 import io.github.elli0t0.proxyshare.data.readBuiltinRuleSetText
-import io.github.elli0t0.proxyshare.data.rulesFromEngineText
 import io.github.elli0t0.proxyshare.data.saveRuleSetFileText
-import io.github.elli0t0.proxyshare.data.toEngineText
 import io.github.elli0t0.proxyshare.service.ProxyController
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -84,12 +84,15 @@ fun RuleSetsPage(settings: AppSettings) {
     val sets = settings.ruleSets
     val builtin = sets.firstOrNull { it.id == BUILTIN_RULE_SET_ID }
     val customs = sets.filter { !it.builtin }
+    val updatingSubscriptions by ProxyController.updatingSubscriptions.collectAsStateWithLifecycle()
+    val ruleSetErrors by ProxyController.ruleSetErrors.collectAsStateWithLifecycle()
 
     var showCreate by rememberSaveable { mutableStateOf(false) }
     var showSubscription by rememberSaveable { mutableStateOf(false) }
     var editTarget by rememberSaveable { mutableStateOf<String?>(null) }
     var menuTarget by rememberSaveable { mutableStateOf<String?>(null) }
-    var importTargetId by remember { mutableStateOf<String?>(null) }
+    var deleteTarget by rememberSaveable { mutableStateOf<String?>(null) }
+    var importTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     var importResult by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Count the built-in list once: the stored count is 0 until the
@@ -121,17 +124,22 @@ fun RuleSetsPage(settings: AppSettings) {
         if (uri == null) return@rememberLauncherForActivityResult
         val targetId = importTargetId ?: return@rememberLauncherForActivityResult
         scope.launch {
-            val text = readRuleSetTextFile(context, uri) ?: return@launch
+            val text = readTextFile(context, uri) ?: return@launch
             // Read the set fresh, not the composed snapshot: the
             // launcher callback keeps the first composition's closure.
-            val meta = ProxyController.settings.value.ruleSets
-                .firstOrNull { it.id == targetId } ?: return@launch
+            // Skip the import when the set was deleted while the
+            // picker was open.
+            if (ProxyController.settings.value.ruleSets.none { it.id == targetId }) {
+                return@launch
+            }
             val existing = withContext(Dispatchers.IO) {
                 context.loadRuleSetFileText(targetId)
-            }.let { rulesFromEngineText(it) }
-            val (added, skipped) = parseImportedRules(text, meta.action, existing)
+            }.let { parseRuleSetDomains(it).first.toSet() }
+            // Files are plain domains (0.7.2): the set's action is
+            // metadata, never part of the file.
+            val (added, skipped) = parseRuleSetDomains(text, existing)
             if (added.isNotEmpty()) {
-                val merged = (existing + added).toEngineText()
+                val merged = (existing + added).joinToString("\n")
                 withContext(Dispatchers.IO) {
                     context.saveRuleSetFileText(targetId, merged)
                 }
@@ -159,6 +167,8 @@ fun RuleSetsPage(settings: AppSettings) {
             item(key = "builtin") {
                 RuleSetCard(
                     meta = builtin,
+                    updating = false,
+                    error = ruleSetErrors[builtin.id],
                     onToggle = { enabled ->
                         saveSets(
                             ProxyController.settings.value.ruleSets.map {
@@ -222,6 +232,8 @@ fun RuleSetsPage(settings: AppSettings) {
         items(customs, key = { it.id }) { meta ->
             RuleSetCard(
                 meta = meta,
+                updating = meta.id in updatingSubscriptions,
+                error = ruleSetErrors[meta.id],
                 onToggle = { enabled ->
                     saveSets(
                         ProxyController.settings.value.ruleSets.map {
@@ -251,21 +263,7 @@ fun RuleSetsPage(settings: AppSettings) {
                 },
                 onDelete = {
                     menuTarget = null
-                    scope.launch {
-                        // Clear the engine first: the rule-sets job
-                        // only pushes sets still listed, so a deleted
-                        // set would otherwise stay live.
-                        ProxyController.clearRuleSet(meta.id, meta.action)
-                        withContext(Dispatchers.IO) {
-                            context.deleteRuleSetFile(meta.id)
-                        }
-                        ProxyController.updateSettings {
-                            updateRuleSets(
-                                ProxyController.settings.value.ruleSets
-                                    .filter { it.id != meta.id }
-                            )
-                        }
-                    }
+                    deleteTarget = meta.id
                 },
             )
         }
@@ -334,20 +332,9 @@ fun RuleSetsPage(settings: AppSettings) {
             onSave = { name, action, url ->
                 editTarget = null
                 scope.launch {
-                    // The file stores ACTION<TAB>pattern lines, so a
-                    // changed action must rewrite the file too, or
-                    // the engine would reject the old action lines.
-                    if (action != editMeta.action) {
-                        withContext(Dispatchers.IO) {
-                            val entries = rulesFromEngineText(
-                                context.loadRuleSetFileText(editMeta.id)
-                            )
-                            context.saveRuleSetFileText(
-                                editMeta.id,
-                                entries.map { it.copy(action = action) }.toEngineText()
-                            )
-                        }
-                    }
+                    // Files are plain domains (0.7.2): the action is
+                    // metadata only, so a changed action needs no
+                    // file rewrite.
                     val urlChanged = url != editMeta.url
                     ProxyController.updateSettings {
                         updateRuleSets(
@@ -373,11 +360,54 @@ fun RuleSetsPage(settings: AppSettings) {
             },
         )
     }
+    val deleteMeta = deleteTarget?.let { id -> customs.firstOrNull { it.id == id } }
+    if (deleteMeta != null) {
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text(stringResource(R.string.rulesets_delete_title)) },
+            text = {
+                Text(
+                    stringResource(R.string.rulesets_delete_confirm, deleteMeta.name),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteTarget = null
+                        scope.launch {
+                            // Clear the engine first: the rule-sets job
+                            // only pushes sets still listed, so a deleted
+                            // set would otherwise stay live.
+                            ProxyController.clearRuleSet(deleteMeta.id, deleteMeta.action)
+                            withContext(Dispatchers.IO) {
+                                context.deleteRuleSetFile(deleteMeta.id)
+                            }
+                            ProxyController.updateSettings {
+                                updateRuleSets(
+                                    ProxyController.settings.value.ruleSets
+                                        .filter { it.id != deleteMeta.id }
+                                )
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.rules_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
 private fun RuleSetCard(
     meta: RuleSetMeta,
+    updating: Boolean,
+    error: String?,
     onToggle: (Boolean) -> Unit,
     onOpenMenu: (() -> Unit)?,
     menuOpen: Boolean,
@@ -449,6 +479,23 @@ private fun RuleSetCard(
                             )
                         }
                     }
+                    if (updating) {
+                        Text(
+                            text = stringResource(R.string.subscriptions_updating),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (error != null) {
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                if (updating) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
                 }
                 ActionTag(meta.action)
                 Switch(checked = meta.enabled, onCheckedChange = onToggle)
@@ -460,6 +507,7 @@ private fun RuleSetCard(
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.subscriptions_update_now)) },
                         onClick = onUpdate,
+                        enabled = !updating,
                     )
                 }
                 DropdownMenuItem(
@@ -658,7 +706,8 @@ private fun EditRuleSetDialog(
     )
 }
 
-private suspend fun readRuleSetTextFile(context: Context, uri: Uri): String? =
+/** Read a whole text file behind a content URI (0.7.2: shared with RulesScreen, which used to keep its own copy). Blocking I/O: call on Dispatchers.IO. */
+suspend fun readTextFile(context: Context, uri: Uri): String? =
     withContext(Dispatchers.IO) {
         runCatching {
             context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }

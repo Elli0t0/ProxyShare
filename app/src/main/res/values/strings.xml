@@ -54,12 +54,15 @@
     <string name="rulesets_empty">No custom rule sets yet</string>
     <string name="rulesets_edit">Edit</string>
     <string name="rulesets_edit_title">Edit rule set</string>
+    <string name="rulesets_delete_title">Delete rule set</string>
+    <string name="rulesets_delete_confirm">Delete “%1$s” and its list? This cannot be undone.</string>
     <string name="rulesets_name">Name</string>
     <string name="rulesets_domains">%1$d domains</string>
     <string name="rulesets_blocked">Blocked: %1$d</string>
     <string name="subscriptions_add">Add subscription</string>
     <string name="subscriptions_update_now">Update now</string>
     <string name="subscriptions_update_all">Update all</string>
+    <string name="subscriptions_updating">Updating…</string>
     <string name="subscriptions_url">URL</string>
     <string name="subscriptions_url_https">Must start with https://</string>
     <string name="subscriptions_updated">Updated %1$s</string>
@@ -90,6 +93,7 @@
     <string name="health_address_none">No Wi-Fi or hotspot address to share</string>
     <string name="health_engine">Port listening</string>
     <string name="health_engine_stopped">Proxy is not running</string>
+    <string name="health_pac_failed">PAC port failed to bind — the setup page is not running</string>
     <string name="health_auth">Password</string>
     <string name="health_auth_empty">Password is on but empty</string>
     <string name="log_search">Search log</string>
@@ -108,6 +112,7 @@
     <string name="copy">Copy</string>
     <string name="back">Back</string>
     <string name="cancel">Cancel</string>
+    <string name="copied">Copied</string>
     <string name="warning_open">Open to everyone on every network the phone is connected to.</string>
     <string name="engine_unavailable">Engine unavailable</string>
     <string name="outbound_title">Outbound network</string>
@@ -142,6 +147,8 @@
     <string name="backup_export">Export settings</string>
     <string name="backup_import">Import settings</string>
     <string name="backup_imported">Settings imported</string>
+    <string name="backup_exported">Settings exported</string>
+    <string name="backup_export_failed">Export failed</string>
     <string name="backup_bad_file">Not a ProxyShare settings file</string>
     <string name="block_private_label">Block private networks</string>
     <string name="block_private_subtitle">Stop clients from reaching devices on your phone\'s local network</string>
@@ -190,6 +197,7 @@
     <string name="domains_route">Route</string>
     <string name="domains_sort">Sort</string>
     <string name="domains_requests">%1$d requests · %2$s</string>
+    <string name="domains_rule_label">Rule</string>
     <string name="domains_remove_rule">Remove rule</string>
     <string name="domains_status_all">All</string>
     <string name="domains_status_active">Active</string>
@@ -280,6 +288,7 @@
     <string name="connect_tab_linux">Linux/macOS</string>
     <string name="connect_scan_title">Scan to set up</string>
     <string name="connect_scan_enable">Turn on PAC / setup page</string>
+    <string name="connect_pac_bind_failed">The PAC server failed to start — the setup page is not running. Check the PAC port in Settings.</string>
     <string name="pac_label">PAC / setup page</string>
     <string name="pac_subtitle">Serve a setup page and proxy auto-config for laptops</string>
     <string name="pac_port_label">PAC port</string>

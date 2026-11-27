@@ -37,24 +37,15 @@ class SubscriptionsTest {
     @Test
     fun fetchedBodyParsesCommentsBlanksAndCrlf() {
         val body = "# a comment\r\n\r\na.com\r\nb.com # trailing\r\n*.c.com\r\n"
-        val update = updateSubscriptionContent(Result.success(body), RuleAction.BLOCK)
-        assertEquals(
-            SubscriptionUpdate.Updated("block\ta.com\nblock\tb.com\nblock\t*.c.com", 3),
-            update,
-        )
+        val update = updateSubscriptionContent(Result.success(body))
+        // Plain domains only (0.7.2): *.c.com is not a plain domain.
+        assertEquals(SubscriptionUpdate.Updated("a.com\nb.com", 2), update)
         // Duplicates collapse; a body with no valid lines keeps the old content.
-        val dupes = updateSubscriptionContent(
-            Result.success("a.com\na.com\n"), RuleAction.DIRECT
-        )
-        assertEquals(
-            SubscriptionUpdate.Updated("direct\ta.com", 1),
-            dupes,
-        )
+        val dupes = updateSubscriptionContent(Result.success("a.com\na.com\n"))
+        assertEquals(SubscriptionUpdate.Updated("a.com", 1), dupes)
         assertEquals(
             SubscriptionUpdate.KeptOld("no valid lines"),
-            updateSubscriptionContent(
-                Result.success("# only comments\n\n"), RuleAction.BLOCK
-            ),
+            updateSubscriptionContent(Result.success("# only comments\n\n")),
         )
     }
 
@@ -62,20 +53,18 @@ class SubscriptionsTest {
     fun failedFetchKeepsOldContentWithAShortLabel() {
         assertEquals(
             SubscriptionUpdate.KeptOld("timeout"),
-            updateSubscriptionContent(
-                Result.failure(SocketTimeoutException()), RuleAction.BLOCK
-            ),
+            updateSubscriptionContent(Result.failure(SocketTimeoutException())),
         )
         assertEquals(
             SubscriptionUpdate.KeptOld("cannot resolve host"),
             updateSubscriptionContent(
-                Result.failure(UnknownHostException("example.com")), RuleAction.BLOCK
+                Result.failure(UnknownHostException("example.com"))
             ),
         )
         assertEquals(
             SubscriptionUpdate.KeptOld("network error"),
             updateSubscriptionContent(
-                Result.failure(java.io.IOException("boom")), RuleAction.BLOCK
+                Result.failure(java.io.IOException("boom"))
             ),
         )
     }

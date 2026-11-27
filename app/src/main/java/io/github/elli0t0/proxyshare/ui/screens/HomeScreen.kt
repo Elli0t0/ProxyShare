@@ -35,7 +35,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -51,9 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -76,10 +73,14 @@ import io.github.elli0t0.proxyshare.service.OutboundMode
 import io.github.elli0t0.proxyshare.service.ProxyController
 import io.github.elli0t0.proxyshare.service.ProxyService
 import io.github.elli0t0.proxyshare.service.toOutboundMode
+import io.github.elli0t0.proxyshare.ui.components.LocalTextField
 import io.github.elli0t0.proxyshare.ui.components.PowerButton
+import io.github.elli0t0.proxyshare.ui.components.copyToClipboard
 import io.github.elli0t0.proxyshare.ui.components.SectionCard
 import io.github.elli0t0.proxyshare.ui.components.SettingRow
 import io.github.elli0t0.proxyshare.ui.components.toPowerState
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @Composable
@@ -92,7 +93,14 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val state by ProxyController.state.collectAsStateWithLifecycle()
     val settings by ProxyController.settings.collectAsStateWithLifecycle()
-    val snapshot by ProxyController.snapshot.collectAsStateWithLifecycle()
+    // Only the two snapshot fields this screen shows: collecting the
+    // whole snapshot would recompose Home every second.
+    val blockedBySet by remember {
+        ProxyController.snapshot.map { it.blockedBySet }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = 0L)
+    val pacOk by remember {
+        ProxyController.snapshot.map { it.pacOk }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = true)
     val interfaces by NetworkWatcher.interfaces.collectAsStateWithLifecycle()
     val vpnActive by VpnWatcher.active.collectAsStateWithLifecycle()
     var exitIpText by rememberSaveable { mutableStateOf<String?>(null) }
@@ -162,7 +170,6 @@ fun HomeScreen(
     val others = remember(ranked, httpPort, socksPort) {
         otherAddresses(ranked, httpPort, socksPort)
     }
-    val clipboard = LocalClipboardManager.current
 
     // Health: the two Android facts only change outside the app
     // (the user leaves to change a setting), so re-read them on
@@ -175,7 +182,7 @@ fun HomeScreen(
         batteryOk = batteryUnrestricted(context)
     }
     var healthExpanded by rememberSaveable { mutableStateOf(false) }
-    val health = remember(notifOk, batteryOk, vpnActive, ranked, state, settings) {
+    val health = remember(notifOk, batteryOk, vpnActive, ranked, state, settings, pacOk) {
         computeHealth(
             HealthInputs(
                 notificationsOk = notifOk,
@@ -185,6 +192,8 @@ fun HomeScreen(
                 engineState = state,
                 authEnabled = settings.authEnabled,
                 authPass = settings.authPass,
+                pacEnabled = settings.pacEnabled,
+                pacOk = pacOk,
             ),
         )
     }
@@ -356,13 +365,13 @@ fun HomeScreen(
                 others = others,
                 mobileOnly = mobileOnly,
                 onConnect = onOpenConnect,
-                onCopy = { clipboard.setText(AnnotatedString(it)) },
+                onCopy = { copyToClipboard(context, it) },
             )
 
             // Rule-set blocks this session (0.6.8): only when > 0.
-            if (snapshot.blockedBySet > 0) {
+            if (blockedBySet > 0) {
                 Text(
-                    text = stringResource(R.string.rulesets_blocked, snapshot.blockedBySet),
+                    text = stringResource(R.string.rulesets_blocked, blockedBySet),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -572,13 +581,13 @@ private fun OutboundCard(
                     )
                 }
                 // Check URL (optional): empty means the built-in list.
-                OutlinedTextField(
+                // Local state, so typing never jumps the cursor when
+                // the DataStore emission lands mid-keystroke (0.7.2).
+                LocalTextField(
                     value = exitIpUrl,
                     onValueChange = onExitIpUrlChange,
-                    label = { Text(stringResource(R.string.check_url_label)) },
+                    label = stringResource(R.string.check_url_label),
                     supportingText = { Text(stringResource(R.string.exit_ip_url_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }

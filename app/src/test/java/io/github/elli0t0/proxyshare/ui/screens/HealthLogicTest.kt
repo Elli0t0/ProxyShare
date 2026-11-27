@@ -1,5 +1,6 @@
 package io.github.elli0t0.proxyshare.ui.screens
 
+import io.github.elli0t0.proxyshare.R
 import io.github.elli0t0.proxyshare.data.IfKind
 import io.github.elli0t0.proxyshare.data.NetIf
 import io.github.elli0t0.proxyshare.engine.EngineState
@@ -112,5 +113,25 @@ class HealthLogicTest {
             ),
         )
         assertTrue(!hasShareableAddress(emptyList()))
+    }
+
+    @Test
+    fun pacBindFailureWarnsOnEngineCheck() {
+        val engine = computeHealth(good().copy(pacEnabled = true, pacOk = false))
+            .first { it.id == "engine" }
+        assertEquals(HealthStatus.WARN, engine.status)
+        assertEquals(R.string.health_pac_failed, engine.detail)
+        // PAC off, or bound: the engine check stays OK.
+        assertEquals(
+            HealthStatus.OK,
+            computeHealth(good()).first { it.id == "engine" }.status,
+        )
+        assertEquals(
+            HealthStatus.OK,
+            computeHealth(good().copy(pacEnabled = true, pacOk = true))
+                .first { it.id == "engine" }.status,
+        )
+        // Still 6 items, in the same order.
+        assertEquals(6, computeHealth(good().copy(pacEnabled = true, pacOk = false)).size)
     }
 }
